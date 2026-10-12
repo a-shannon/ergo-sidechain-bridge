@@ -40,6 +40,13 @@ export interface TwoCycleNodeStateCopyManifestV1 {
   readonly freshRestartValidated: false;
 }
 
+export interface CapturedNodeStateAssertionInputV1 {
+  readonly kind: 'frontier' | 'ergo';
+  readonly primaryRoot: string;
+  readonly witnessRoot: string;
+  readonly capturedManifestSha256Hex: string;
+}
+
 const SUBTREES = Object.freeze({
   frontier: ['chains/bridge_federated_v4_genesis/db/full',
     'chains/bridge_federated_v4_genesis/frontier/db'],
@@ -51,6 +58,43 @@ const MAX_CAPTURE_MANIFEST_BYTES = 16 * 1024 * 1024;
 type Entry = { node: 'primary' | 'witness'; path: string; directory: boolean;
   identity: string; bytes: number; sha256Hex?: string };
 type Bounds = { files: number; total: number; file: number };
+
+/** Rechecks an exclusively controlled capture without creating files or granting
+ * node consistency, restart, shutdown or execution authority. The caller must
+ * separately admit the raw manifest pin and keep every path quiescent. */
+export function assertSubstrateFederatedCapturedNodeStateV1(
+  input: CapturedNodeStateAssertionInputV1,
+): void {
+  const { kind, capturedManifestSha256Hex: pin } = input;
+  if (kind !== 'frontier' && kind !== 'ergo') throw new Error('unsupported node database layout');
+  if (typeof pin !== 'string' || !/^[0-9a-f]{64}$/.test(pin)) {
+    throw new Error('captured manifest pin must be lowercase SHA256');
+  }
+  const roots = { primary: checkedPath(input.primaryRoot, true),
+    witness: checkedPath(input.witnessRoot, true) };
+  if (basename(roots.primary) !== 'primary' || basename(roots.witness) !== 'witness'
+    || dirname(roots.primary) !== dirname(roots.witness)) {
+    throw new Error('captured node roles must share the exact capture root');
+  }
+  const capturedRoot = checkedPath(dirname(roots.primary), true);
+  const identities = [capturedRoot, roots.primary, roots.witness].map(path => identity(lstatSync(path)));
+  const bounds: Bounds = { files: 100_000, total: 64 * 1024 ** 3, file: 16 * 1024 ** 3 };
+  const manifestPath = join(capturedRoot, 'manifest.json');
+  const captured = readCapturedManifest(manifestPath, pin, kind, bounds);
+  const before = inventory(roots, SUBTREES[kind], bounds);
+  assertManifestInventory(captured.manifest, before);
+  assertExactDestination(capturedRoot, before.filter(entry => !entry.directory), true);
+  if (JSON.stringify(inventory(roots, SUBTREES[kind], bounds)) !== JSON.stringify(before)) {
+    throw new Error('captured database tree drifted during verification');
+  }
+  for (const [index, path] of [capturedRoot, roots.primary, roots.witness].entries()) {
+    checkedPath(path, true);
+    if (identity(lstatSync(path)) !== identities[index]) throw new Error('captured root drifted');
+  }
+  if (hashFile(manifestPath, MAX_CAPTURE_MANIFEST_BYTES, undefined, captured.identity).sha256Hex !== pin) {
+    throw new Error('captured manifest changed during verification');
+  }
+}
 
 /** Copies only the fixed database subtrees. No key, wallet, network, config,
  * node-launch or execution-authority route exists. All path parents and roots

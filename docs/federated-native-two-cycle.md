@@ -449,8 +449,35 @@ never published as a completed export.
 The quiescence callback remains a caller obligation, not proof of shutdown.
 Matching manifests and copies establish byte correspondence only. This API
 does not start nodes, reopen databases, recover custody or restore execution
-authority. A fresh non-mining process owner and accumulated-state observations
-remain separate recovery consumers.
+authority.
+
+`withSubstrateFederatedCopiedNonMiningErgoNodePairV1` connects that materializer
+to a fresh pair of owned, non-mining Ergo processes. Its inputs include pinned
+Java/JAR and public launch bindings, the separately admitted captured manifest,
+a quiescence callback and an exact expected devnet snapshot. The full and
+indexed heights must agree, and the expected header ID must be explicit. The
+owner checks both the original capture and completed disposable copy before
+the first launch, creates only two non-mining configurations, and checks owned
+images, listeners, artifacts and the exact paired snapshots.
+
+The callback receives only the expected snapshot and a bounded paired-read
+method. This lease cannot satisfy the existing read-only, checkpoint, tracker
+or execution target guards. Started reads settle before shutdown, ignored read
+failures refuse success, and the lease is revoked when the callback settles.
+Successful return requires the final snapshot checks, both owned terminations
+and unowned ports. An unverified stop retains the owner lifetime. Disposable
+directories are retained for inspection; neither return nor absence of stop
+errors establishes database consistency or custody disposal.
+The returned manifest pin identifies the original admitted capture. The owner
+separately derives and verifies the disposable output manifest pin; it may
+differ when the original admitted JSON uses a different serialization.
+
+This component is tested with genuine synthetic files and simulated process,
+HTTP and metadata boundaries. Actual restart of captured node databases remains
+unexecuted. No existing campaign root can import this new observation owner;
+connecting an operational caller requires a separate recovery admission and
+exact architecture binding. A successful lifecycle capture, its expected
+public tip and an admitted fresh recovery execution are still missing.
 
 ## Observed campaign status
 

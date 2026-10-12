@@ -21,6 +21,10 @@ import {
   resolve,
   sep,
 } from 'node:path';
+import {
+  copySubstrateFederatedTwoCycleNodeStateV1,
+  assertSubstrateFederatedCapturedNodeStateV1,
+} from './substrate-federated-two-cycle-node-state-copy-v1.js';
 import { isIP } from 'node:net';
 import { performance } from 'node:perf_hooks';
 import { types } from 'node:util';
@@ -283,7 +287,7 @@ interface OwnedNode {
   readonly configSha256Hex: string;
 }
 
-interface RuntimeLayout {
+interface NonMiningRuntimeLayout {
   readonly root: string;
   readonly logbackPath: string;
   readonly logbackSha256Hex: string;
@@ -291,15 +295,20 @@ interface RuntimeLayout {
   readonly witnessDataDirectory: string;
   readonly primaryJavaTempDirectory: string;
   readonly witnessJavaTempDirectory: string;
-  readonly primaryMiningConfigPath: string;
-  readonly witnessMiningConfigPath: string;
   readonly primaryNonMiningConfigPath: string;
   readonly witnessNonMiningConfigPath: string;
   readonly configSha256Hex: Readonly<{
-    primaryMining: string;
-    witnessMining: string;
     primaryNonMining: string;
     witnessNonMining: string;
+  }>;
+}
+
+interface RuntimeLayout extends NonMiningRuntimeLayout {
+  readonly primaryMiningConfigPath: string;
+  readonly witnessMiningConfigPath: string;
+  readonly configSha256Hex: NonMiningRuntimeLayout['configSha256Hex'] & Readonly<{
+    primaryMining: string;
+    witnessMining: string;
   }>;
 }
 
@@ -1154,6 +1163,242 @@ interface NormalizedProcessInput {
   readonly nodeAssemblyJarSha256Hex: string;
   readonly buildIdentityDigestHex: string;
   readonly executableIdentityDigestHex: string;
+}
+
+export interface SubstrateFederatedCopiedNonMiningErgoNodePairV1Input {
+  readonly primaryRoot: string;
+  readonly witnessRoot: string;
+  readonly capturedManifestSha256Hex: string;
+  readonly assertSourcesQuiescent: () => void | Promise<void>;
+  readonly expectedSnapshot: Readonly<TargetSnapshot>;
+}
+
+export interface SubstrateFederatedCopiedNonMiningErgoObservationLeaseV1 {
+  readonly expectedSnapshot: Readonly<TargetSnapshot>;
+  readonly readExactSnapshots: () => Promise<Readonly<{
+    primary: Readonly<TargetSnapshot>;
+    witness: Readonly<TargetSnapshot>;
+  }>>;
+}
+
+/**
+ * Opens separately admitted copies under exclusive caller control. Pins and the
+ * quiescence callback are not execution admission. The observation lease grants
+ * no legacy target, signing or custody authority. Disposable directories remain
+ * available to the caller; successful return does not attest database consistency.
+ */
+export async function withSubstrateFederatedCopiedNonMiningErgoNodePairV1<T>(
+  processInput: Readonly<SubstrateFederatedIsolatedDevnetErgoNodeProcessV1Input>,
+  launchBinding: Readonly<SubstrateFederatedIsolatedDevnetErgoNodeLaunchBindingV1>,
+  copiedInput: Readonly<SubstrateFederatedCopiedNonMiningErgoNodePairV1Input>,
+  action: (lease: Readonly<SubstrateFederatedCopiedNonMiningErgoObservationLeaseV1>) => Promise<T>,
+): Promise<Readonly<{
+  schema: 'e2s.substrate-federated-copied-non-mining-ergo-node-pair.v1';
+  value: T;
+  runtimeDirectory: string;
+  finalSnapshot: Readonly<TargetSnapshot>;
+  capturedManifestSha256Hex: string;
+  nodeConsistencyEstablished: false;
+  executionAuthorityRestored: false;
+}>> {
+  const fields = copiedErgoRecord(copiedInput, ['primaryRoot', 'witnessRoot',
+    'capturedManifestSha256Hex', 'assertSourcesQuiescent', 'expectedSnapshot']);
+  const snapshot = copiedErgoRecord(fields.expectedSnapshot,
+    ['network', 'fullHeight', 'indexedHeight', 'headerIdHex']);
+  if (snapshot.network !== 'devnet' || !Number.isSafeInteger(snapshot.fullHeight)
+    || (snapshot.fullHeight as number) < 1 || (snapshot.fullHeight as number) > 2_147_483_647
+    || snapshot.indexedHeight !== snapshot.fullHeight) {
+    throw new Error('copied Ergo expected snapshot must be exact indexed devnet');
+  }
+  const expected = Object.freeze({ network: 'devnet' as const,
+    fullHeight: snapshot.fullHeight as number, indexedHeight: snapshot.fullHeight as number,
+    headerIdHex: fixedHex(snapshot.headerIdHex, 32, 'copied Ergo expected header') });
+  const pin = fields.capturedManifestSha256Hex;
+  if (typeof pin !== 'string' || !/^[0-9a-f]{64}$/.test(pin)) {
+    throw new Error('copied Ergo manifest pin must be lowercase SHA256');
+  }
+  if (typeof fields.assertSourcesQuiescent !== 'function' || types.isProxy(fields.assertSourcesQuiescent)
+    || typeof action !== 'function' || types.isProxy(action)) {
+    throw new Error('copied Ergo owner requires ordinary quiescence and observation callbacks');
+  }
+  const guard = fields.assertSourcesQuiescent as () => void | Promise<void>;
+  if (typeof fields.primaryRoot !== 'string' || typeof fields.witnessRoot !== 'string') {
+    throw new Error('copied Ergo roots must be absolute paths');
+  }
+  const source = Object.freeze({ kind: 'ergo' as const, primaryRoot: fields.primaryRoot,
+    witnessRoot: fields.witnessRoot, capturedManifestSha256Hex: pin });
+  const input = normalizeProcessInput(processInput);
+  const binding = normalizeLaunchBinding(launchBinding);
+  assertPortsUnowned(OWNED_PORTS);
+  const root = createOwnedRuntimeRoot(() => undefined);
+  let primary: Readonly<OwnedNode> | undefined;
+  let witness: Readonly<OwnedNode> | undefined;
+  let failure: unknown;
+  let failed = false;
+  let value!: T;
+  let active = false;
+  try {
+    const copiedRoot = join(root, 'copied-state');
+    const manifest = await copySubstrateFederatedTwoCycleNodeStateV1({ ...source,
+      destinationDirectory: copiedRoot, assertSourcesQuiescent: guard });
+    const copiedPin = sha256(Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, 'utf8'));
+    const runtime = createCopiedNonMiningRuntime(root, copiedRoot, binding);
+    const directoryPins = [root, copiedRoot, runtime.primaryDataDirectory, runtime.witnessDataDirectory,
+      runtime.primaryJavaTempDirectory, runtime.witnessJavaTempDirectory].map(path => {
+      const stat = lstatSync(path);
+      return { path, dev: stat.dev, ino: stat.ino };
+    });
+    const assertFiles = () => {
+      assertOwnedRuntimePath(root);
+      for (const { path, dev, ino } of directoryPins) {
+        const stat = lstatSync(path);
+        if (!stat.isDirectory() || stat.isSymbolicLink() || stat.dev !== dev || stat.ino !== ino
+          || realpathSync(path).toLowerCase() !== resolve(path).toLowerCase()) {
+          throw new Error('copied Ergo runtime directory identity changed');
+        }
+      }
+      recheckProcessArtifacts(input);
+      for (const [path, hash] of [[runtime.logbackPath, runtime.logbackSha256Hex],
+        [runtime.primaryNonMiningConfigPath, runtime.configSha256Hex.primaryNonMining],
+        [runtime.witnessNonMiningConfigPath, runtime.configSha256Hex.witnessNonMining]]) {
+        if (lstatSync(path!).nlink !== 1) throw new Error('copied Ergo configuration is hardlinked');
+        assertFileDigest(path!, hash!, 'copied Ergo configuration');
+      }
+    };
+    await guard();
+    assertSubstrateFederatedCapturedNodeStateV1(source);
+    assertSubstrateFederatedCapturedNodeStateV1({ kind: 'ergo', primaryRoot: runtime.primaryDataDirectory,
+      witnessRoot: runtime.witnessDataDirectory, capturedManifestSha256Hex: copiedPin });
+    assertFiles();
+    assertPortsUnowned(OWNED_PORTS);
+    primary = spawnOwnedNode(input, runtime, 'primary', 'non-mining');
+    await waitForBasicNodeReadiness(primary);
+    assertFiles();
+    assertOwnedNodeIdentity(input, runtime, primary);
+    witness = spawnOwnedNode(input, runtime, 'witness', 'non-mining');
+    await waitForBasicNodeReadiness(witness);
+    const primaryNode = primary;
+    const witnessNode = witness;
+    const assertPair = () => {
+      assertFiles();
+      assertOwnedNodeIdentity(input, runtime, primaryNode);
+      assertOwnedNodeIdentity(input, runtime, witnessNode);
+      assertOwnedListenerBindings(primaryNode, witnessNode);
+    };
+    assertPair();
+    await assertStableExactSnapshot(primary, witness, expected, true);
+    assertPair();
+    active = true;
+    const reads = new Set<Promise<unknown>>();
+    const readFailures: unknown[] = [];
+    const assertLease = () => {
+      if (!active) throw new Error('copied Ergo observation lease is revoked');
+      assertPair();
+    };
+    const lease: Readonly<SubstrateFederatedCopiedNonMiningErgoObservationLeaseV1> = Object.freeze({
+      expectedSnapshot: expected,
+      readExactSnapshots: () => {
+        const operation = (async () => {
+          assertLease();
+          const [p, w] = await settleCopiedErgoReads([
+            readTargetSnapshot(primaryNode, true), readTargetSnapshot(witnessNode, true),
+          ]);
+          assertLease();
+          assertExactSnapshot(p!, expected, 'primary');
+          assertExactSnapshot(w!, expected, 'witness');
+          return Object.freeze({ primary: p!, witness: w! });
+        })();
+        reads.add(operation);
+        void operation.then(() => reads.delete(operation), error => {
+          reads.delete(operation); readFailures.push(error);
+        });
+        return operation;
+      },
+    });
+    value = await runManagedAction(async () => {
+      let actionFailed = false;
+      let actionFailure: unknown;
+      let result!: T;
+      try { result = await action(lease); }
+      catch (error) { actionFailed = true; actionFailure = error; }
+      finally {
+        active = false;
+        await Promise.allSettled([...reads]);
+      }
+      if (actionFailed) throw actionFailure;
+      if (readFailures.length > 0) throw readFailures[0];
+      return result;
+    }, lease);
+    await assertStableExactSnapshot(primary, witness, expected, true);
+    assertPair();
+  } catch (error) { failed = true; failure = error; }
+  finally { active = false; }
+  const stopFailures: unknown[] = [];
+  for (const node of [witness, primary]) {
+    try { await stopOwnedNode(node, !failed); }
+    catch (error) { stopFailures.push(error); }
+  }
+  if (primary !== undefined || witness !== undefined) {
+    const terminated = [primary, witness].every(node => node === undefined
+      || node.child.exitCode !== null || node.child.signalCode !== null);
+    let portsUnowned = false;
+    try { assertPortsUnowned(OWNED_PORTS); portsUnowned = true; }
+    catch (error) { stopFailures.push(error); }
+    if (decideSubstrateFederatedIsolatedDevnetCleanupAuthorityV1(terminated, portsUnowned)
+      !== 'release_cleanup_authority') {
+      // Keep the owned lifetime and retained directories on an unverified stop.
+      return await holdOwnedNodeCleanupAuthority();
+    }
+  }
+  if (stopFailures.length > 0) throw new AggregateError(
+    [...(failed ? [failure] : []), ...stopFailures], 'copied Ergo owner stop failed');
+  if (failed) throw failure;
+  return Object.freeze({ schema: 'e2s.substrate-federated-copied-non-mining-ergo-node-pair.v1' as const,
+    value, runtimeDirectory: root, finalSnapshot: expected, capturedManifestSha256Hex: pin,
+    nodeConsistencyEstablished: false as const, executionAuthorityRestored: false as const });
+}
+
+function copiedErgoRecord(value: unknown, keys: readonly string[]): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || types.isProxy(value)
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) {
+    throw new Error('copied Ergo input must be a plain record');
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  if (Reflect.ownKeys(value).length !== keys.length
+    || keys.some(key => !Object.hasOwn(descriptors, key) || !Object.hasOwn(descriptors[key]!, 'value'))) {
+    throw new Error('copied Ergo input fields or accessors differ');
+  }
+  return value as Record<string, unknown>;
+}
+
+async function settleCopiedErgoReads<T>(reads: readonly Promise<T>[]): Promise<T[]> {
+  const settled = await Promise.allSettled(reads);
+  const failure = settled.find(result => result.status === 'rejected');
+  if (failure?.status === 'rejected') throw failure.reason;
+  return settled.map(result => (result as PromiseFulfilledResult<T>).value);
+}
+
+function createCopiedNonMiningRuntime(root: string, copiedRoot: string,
+  binding: Readonly<SubstrateFederatedIsolatedDevnetErgoNodeLaunchBindingV1>): Readonly<NonMiningRuntimeLayout> {
+  const logbackPath = join(root, 'logback.xml');
+  writeFileSync(logbackPath, logbackBytes(), { flag: 'wx', mode: 0o600 });
+  const primaryDataDirectory = join(copiedRoot, 'primary');
+  const witnessDataDirectory = join(copiedRoot, 'witness');
+  const primaryNonMiningConfigPath = join(root, 'primary-non-mining.conf');
+  const witnessNonMiningConfigPath = join(root, 'witness-non-mining.conf');
+  for (const [role, path, dataDirectory] of [
+    ['primary', primaryNonMiningConfigPath, primaryDataDirectory],
+    ['witness', witnessNonMiningConfigPath, witnessDataDirectory],
+  ] as const) writeFileSync(path, buildSubstrateFederatedIsolatedDevnetErgoNodeConfigV1({
+    role, mode: 'non-mining', dataDirectory, binding,
+  }), { flag: 'wx', mode: 0o600 });
+  return Object.freeze({ root, logbackPath, logbackSha256Hex: fileSha256(logbackPath),
+    primaryDataDirectory, witnessDataDirectory,
+    primaryJavaTempDirectory: createOwnedDirectory(root, 'primary-jvm-temp'),
+    witnessJavaTempDirectory: createOwnedDirectory(root, 'witness-jvm-temp'),
+    primaryNonMiningConfigPath, witnessNonMiningConfigPath,
+    configSha256Hex: Object.freeze({ primaryNonMining: fileSha256(primaryNonMiningConfigPath),
+      witnessNonMining: fileSha256(witnessNonMiningConfigPath) }) });
 }
 
 /**
@@ -3536,7 +3781,7 @@ function logbackBytes(): Buffer {
 
 function spawnOwnedNode(
   input: Readonly<NormalizedProcessInput>,
-  runtime: Readonly<RuntimeLayout>,
+  runtime: Readonly<RuntimeLayout | NonMiningRuntimeLayout>,
   role: NodeRole,
   mode: NodeMode,
   ephemeralMiningMnemonic?: string,
@@ -3544,6 +3789,10 @@ function spawnOwnedNode(
   requiredMiningTransactionIdHex?: string,
   maximumBlockHeight?: number,
 ): OwnedNode {
+  const miningRuntime = 'primaryMiningConfigPath' in runtime ? runtime : undefined;
+  if (mode === 'mining' && miningRuntime === undefined) {
+    throw new Error('copied Ergo runtime does not contain mining configurations');
+  }
   const requiresMiningSecret = role === 'primary' && mode === 'mining';
   if (
     requiresMiningSecret
@@ -3567,17 +3816,17 @@ function spawnOwnedNode(
   }
   const configPath = role === 'primary'
     ? mode === 'mining'
-      ? runtime.primaryMiningConfigPath
+      ? miningRuntime!.primaryMiningConfigPath
       : runtime.primaryNonMiningConfigPath
     : mode === 'mining'
-      ? runtime.witnessMiningConfigPath
+      ? miningRuntime!.witnessMiningConfigPath
       : runtime.witnessNonMiningConfigPath;
   const configSha256Hex = role === 'primary'
     ? mode === 'mining'
-      ? runtime.configSha256Hex.primaryMining
+      ? miningRuntime!.configSha256Hex.primaryMining
       : runtime.configSha256Hex.primaryNonMining
     : mode === 'mining'
-      ? runtime.configSha256Hex.witnessMining
+      ? miningRuntime!.configSha256Hex.witnessMining
       : runtime.configSha256Hex.witnessNonMining;
   assertFileDigest(configPath, configSha256Hex, `${role} ${mode} configuration`);
   const javaTempDirectory = role === 'primary'
@@ -4100,9 +4349,10 @@ async function waitForExactSnapshot(
   node: Readonly<OwnedNode>,
   expected: Readonly<TargetSnapshot>,
   timeoutMs: number,
+  settleReads = false,
 ): Promise<void> {
   await retryNode(node, timeoutMs, async () => {
-    const actual = await readTargetSnapshot(node);
+    const actual = await readTargetSnapshot(node, settleReads);
     assertExactSnapshot(actual, expected, node.role);
   });
 }
@@ -4111,29 +4361,31 @@ async function assertStableExactSnapshot(
   primary: Readonly<OwnedNode>,
   witness: Readonly<OwnedNode>,
   expected: Readonly<TargetSnapshot>,
+  settleReads = false,
 ): Promise<void> {
-  await waitForExactSnapshot(primary, expected, STARTUP_TIMEOUT_MS);
-  await waitForExactSnapshot(witness, expected, STARTUP_TIMEOUT_MS);
+  await waitForExactSnapshot(primary, expected, STARTUP_TIMEOUT_MS, settleReads);
+  await waitForExactSnapshot(witness, expected, STARTUP_TIMEOUT_MS, settleReads);
   await delay(STABILITY_DELAY_MS);
-  const [primaryAfter, witnessAfter] = await Promise.all([
-    readTargetSnapshot(primary),
-    readTargetSnapshot(witness),
-  ]);
+  const reads = [readTargetSnapshot(primary, settleReads), readTargetSnapshot(witness, settleReads)];
+  const [primaryAfter, witnessAfter] = settleReads ? await settleCopiedErgoReads(reads) : await Promise.all(reads);
   assertExactSnapshot(primaryAfter, expected, 'primary');
   assertExactSnapshot(witnessAfter, expected, 'witness');
 }
 
 async function readTargetSnapshot(
   node: Readonly<OwnedNode>,
+  settleReads = false,
 ): Promise<Readonly<TargetSnapshot>> {
   const origin = node.role === 'primary'
     ? SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN
     : SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN;
-  const [infoValue, headersValue, indexValue] = await Promise.all([
+  const reads = [
     getJson(origin, '/info'),
     getJson(origin, '/blocks/lastHeaders/1'),
     getJson(origin, '/blockchain/indexedHeight'),
-  ]);
+  ];
+  const [infoValue, headersValue, indexValue] = settleReads
+    ? await settleCopiedErgoReads(reads) : await Promise.all(reads);
   const info = plainRecord(infoValue, `${node.role} node info`);
   const networkValue = info.network ?? info.networkType;
   if (typeof networkValue !== 'string' || networkValue.trim().toLowerCase() !== 'devnet') {
@@ -4279,7 +4531,7 @@ async function waitForClose(child: ChildProcess, timeoutMs: number): Promise<voi
 
 function assertOwnedNodeIdentity(
   input: Readonly<NormalizedProcessInput>,
-  runtime: Readonly<RuntimeLayout>,
+  runtime: Readonly<NonMiningRuntimeLayout>,
   node: Readonly<OwnedNode>,
   observedExecutablePath?: string,
 ): void {

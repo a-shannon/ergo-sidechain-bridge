@@ -1926,6 +1926,12 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
   string,
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
+  ['substrate-federated-two-cycle-node-state-copy-v1.ts', new Map([
+    ['assertSubstrateFederatedCapturedNodeStateV1', new Set([
+      'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+      'substrate-federated-two-cycle-node-state-copy-v1.test.ts',
+    ])],
+  ])],
   ['scripts/build-wasm-avl-pipeline-v2.ts', new Map([
     ['runWasmAvlBuildPipelineV2', new Set([
       'scripts/build-wasm-avl.ts',
@@ -2338,6 +2344,9 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
   [
     'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
     new Map([
+      ['withSubstrateFederatedCopiedNonMiningErgoNodePairV1', new Set([
+        'substrate-federated-copied-non-mining-ergo-node-process-v1.test.ts',
+      ])],
       ['pauseSubstrateFederatedIsolatedDevnetOwnedMiningSubmissionV1', new Set([
         FEDERATED_GENESIS_TARGET_ROOT,
         'substrate-federated-isolated-devnet-mining-pause-v1.test.ts',

@@ -42,13 +42,20 @@ C61 and C62 operation labels do not establish the same cause.
 The paired precheck falsifier confirms the existing selection of a permanent
 witness-read error after all paired reads settle, including replacement by the
 final custody guard. It establishes no runtime defect or historical cause.
-The selected local recovery preparation connects the existing captured-node
-manifest to another disposable copy: verify the separately admitted manifest
-pin and complete database inventory before creating output, then recheck both
-during materialization. Preserve the existing owner-source copy behavior.
-The next consumer is a fresh non-mining owner on the verified copies; actual
-restart acceptance still requires a successful lifecycle capture and separate
-recovery admission. No new campaign, push or CI is selected.
+The captured-node manifest now connects to another disposable copy with an
+exact separately admitted raw pin, complete database inventory and drift checks;
+the existing owner-source copy behavior is preserved. The local owner join
+opens verified copies in a fresh non-mining owner, observes the explicit exact
+indexed devnet snapshot, joins callback reads and stops both peers before
+return. Its observation lease grants no existing target or custody authority.
+All34 new synthetic owner cases,128 copy cases and362 architecture cases pass;
+the affected legacy owner, mining-pause and capture suites pass96 cases with11
+unchanged actual-runtime guards inapplicable. TypeScript/import checks and
+independent exact source review pass. These selections are scoped and are not
+accumulated with earlier overlapping runs.
+Actual restart acceptance still requires a successful lifecycle capture,
+expected public tip and separate recovery admission. No new campaign, push or
+CI is selected.
 
 The owned HTTP and test-framework dependency closure is validated locally.
 Axios 1.20.0 and dev-only source-map-js 1.2.2 retain genuine loopback transport
@@ -1930,7 +1937,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Captured node inventory -> disposable recovery copies | Connect the existing manifest to the copy API through a separately admitted exact pin; close real synthetic-file refusals and documentation before the fresh non-mining owner join | Exact source inventory and manifest must agree before staging, with drift refused during copying. This is local recovery preparation, not database consistency, restart or execution authority; C24-C62 holds remain permanent |
+| **Now** | Successful lifecycle capture -> admitted accumulated-state recovery | Use the closed copy/owner components only after separately selecting a genuine lifecycle result and binding the stopped capture, exact expected public tip and fresh recovery admission to a concrete caller | The non-mining owner component is locally validated on synthetic files and simulated process/HTTP boundaries. No successful accumulated-state capture or operational caller admission exists; C24-C62 holds remain permanent |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Separately select and admit one local synthetic campaign after a deciding checkpoint, exact local source identity, applicable checks/review and fresh runtime/source/output/custody/fee gates; apply guarded publication and due exact-head CI at public promotion | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
@@ -1975,7 +1982,9 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Pinned captured-node materialization (selected locally) | An existing fixed-subtree capture and separately admitted manifest pin produce another disposable copy without changing the default owner-source path or adding restart authority | Change one database byte under an unchanged manifest and require refusal before staging; cover both layouts, exact inventory, manifest fields, links, bounds, overlap and drift. Close affected consumers and independent exact review, then connect the fresh non-mining owner; no automatic C63 |
+| Accumulated-state recovery admission (next result) | A separately selected successful lifecycle capture and explicit expected public tip reach the closed materializer/non-mining owner through a concrete admitted caller | Actual stopped capture and fresh execution admission are missing. Prepare the caller only when its deciding evidence contract is fixed; no historical runtime reads, reused custody or automatic C63 |
+| Copied non-mining Ergo owner (locally validated) | Verified captured-node copies reach fresh non-mining owned processes, exact expected paired snapshot observations and verified termination without issuing old target or custody authority | 34 synthetic owner cases,128 copy cases and362 architecture cases pass. Existing owner/mining-pause/capture consumers pass96 cases with11 unchanged actual-runtime guards inapplicable. TypeScript/imports and independent source review pass. Exact final claims and guarded local promotion bind this checkpoint; no actual JVM restart or restored execution authority |
+| Pinned captured-node materialization (locally closed atdda85577) | An existing fixed-subtree capture and separately admitted manifest pin produce another disposable copy without changing the default owner-source path or adding restart authority | 113 whole-file cases,21 capture consumers and95 generic consumers pass with exact independent review and guarded local promotion. Files define allowed directory ancestors; unbound empty directories reject. This is byte correspondence on synthetic captures, not actual node consistency or restart |
 | Test-framework dependency closure (validated locally) | Supported Vitest 4.1.11 closes the three development advisories while preserving assertions, source inventory and runtime capability boundaries | Fresh locked installation and full audit zero; Vite7.3.6/Rollup4.62.4 retained. Exact CLI listing/selection, all638 source files with23131 passing cases and26 existing guarded cases, TypeScript and affected provenance/JVM checks pass. Exact independent review and guarded local promotion bind the candidate. No override, suppressed error or runtime budget change |
 | Owned HTTP dependency closure (validated locally) | Minimum patched dependencies preserve genuine GET/check-only POST behavior and current source/tool provenance | Axios1.20.0/source-map-js1.2.2, actual inherited-hook RED/GREEN, fresh production audit zero, current compiler/WASM builds, 241 affected cases, 56 source guards and actual JVM35/20 pass. Tracker's new fixed public fixture is a distinct input; historical results/locks remain scoped. Exact review and guarded local promotion apply; no campaign or readiness authority |
 | Operator public-source preparation (closed locally at1e88842b) | Repository instructions connect fresh plain unstaged source reconstruction, explicit raw Frontier validation and the existing non-authorizing preflight | All 77 baseline cases and the real CLI policy differential,95 affected generic consumers, exact source/claims review and guarded local promotion pass. Separate clean-root own npm/compiler preparation, full BOTH raw command and real preflight pass with all fourteen flags false and empty outputs. Reuse only under the exact candidate input closure; no campaign dispatch |

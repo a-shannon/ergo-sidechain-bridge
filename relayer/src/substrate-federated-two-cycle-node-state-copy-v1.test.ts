@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  assertSubstrateFederatedCapturedNodeStateV1,
   copySubstrateFederatedTwoCycleNodeStateV1 as copy,
   type TwoCycleNodeStateCopyInputV1,
 } from './substrate-federated-two-cycle-node-state-copy-v1.js';
@@ -81,6 +82,56 @@ function expectNoMaterialization(f: Awaited<ReturnType<typeof capturedFixture>>)
   expect(existsSync(f.input.destinationDirectory)).toBe(false);
   expect(readdirSync(f.root).filter(name => name.startsWith('.materialized.partial-'))).toEqual([]);
 }
+
+describe('read-only captured node verification', () => {
+  it.each(['ergo', 'frontier'] as const)('verifies genuine synthetic %s capture without creating a copy', async kind => {
+    const f = await capturedFixture(kind);
+    assertSubstrateFederatedCapturedNodeStateV1({ ...f.input, capturedManifestSha256Hex: f.input.capturedManifestSha256Hex! });
+    expect(f.guardCalls()).toBe(0);
+    expect(readFileSync(f.manifestPath)).toEqual(f.originalManifestBytes);
+    expectNoMaterialization(f);
+  });
+
+  it.each(['one-byte', 'added-file', 'missing-file', 'empty-directory', 'wallet', 'data-hardlink',
+    'manifest-hardlink', 'manifest-drift', 'missing-manifest', 'wrong-kind', 'wrong-pin', 'wrong-role'] as const)(
+    'refuses isolated %s without creating a copy', async fault => {
+      const f = await capturedFixture();
+      const input = { kind: f.input.kind, primaryRoot: f.input.primaryRoot, witnessRoot: f.input.witnessRoot,
+        capturedManifestSha256Hex: f.input.capturedManifestSha256Hex! };
+      if (fault === 'one-byte') writeFileSync(f.file, 'drifted');
+      if (fault === 'added-file') writeFileSync(join(input.primaryRoot, 'state', 'extra.sst'), 'extra');
+      if (fault === 'missing-file') rmSync(f.file);
+      if (fault === 'empty-directory') mkdirSync(join(input.primaryRoot, 'state', 'empty'));
+      if (fault === 'wallet') mkdirSync(join(input.witnessRoot, 'wallet'));
+      if (fault === 'data-hardlink') linkSync(f.file, join(f.root, 'data-link'));
+      if (fault === 'manifest-hardlink') linkSync(f.manifestPath, join(f.root, 'manifest-link'));
+      if (fault === 'manifest-drift') writeFileSync(f.manifestPath, `${f.originalManifestBytes.toString()} `);
+      if (fault === 'missing-manifest') rmSync(f.manifestPath);
+      if (fault === 'wrong-kind') input.kind = 'frontier';
+      if (fault === 'wrong-pin') input.capturedManifestSha256Hex = 'f'.repeat(64);
+      if (fault === 'wrong-role') input.primaryRoot = input.witnessRoot;
+      expect(() => assertSubstrateFederatedCapturedNodeStateV1(input)).toThrow();
+      expect(f.guardCalls()).toBe(0);
+      expectNoMaterialization(f);
+    });
+
+  it('refuses a file changed between its two inventories', async () => {
+    const f = await capturedFixture();
+    const { lstatSync: actualLstat } = await vi.importActual<typeof import('node:fs')>('node:fs');
+    let manifestChecks = 0;
+    const hook = vi.mocked(lstatSync).mockImplementation((...args: Parameters<typeof lstatSync>) => {
+      const stat = actualLstat(...args);
+      if (String(args[0]) === f.manifestPath && ++manifestChecks === 8) writeFileSync(f.file, 'later drift');
+      return stat;
+    });
+    try {
+      expect(() => assertSubstrateFederatedCapturedNodeStateV1({ ...f.input,
+        capturedManifestSha256Hex: f.input.capturedManifestSha256Hex! })).toThrow(/tree drifted/);
+      expect(manifestChecks).toBe(8);
+    } finally { hook.mockImplementation(actualLstat); }
+    expectNoMaterialization(f);
+  });
+});
 
 describe('captured manifest pinned materialization', () => {
   it('retains legacy empty directories but refuses their unbound pinned materialization', async () => {

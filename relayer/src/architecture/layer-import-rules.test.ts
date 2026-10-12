@@ -1023,6 +1023,44 @@ describe('layer import rules', () => {
     expect(inspect({ [worker]: 'export {};', [command]: source }).map(item => item.message)).toContain(expected);
   });
 
+  it.each([
+    ['substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+      'withSubstrateFederatedCopiedNonMiningErgoNodePairV1',
+      'substrate-federated-copied-non-mining-ergo-node-process-v1.test.ts'],
+    ['substrate-federated-two-cycle-node-state-copy-v1.ts',
+      'assertSubstrateFederatedCapturedNodeStateV1',
+      'substrate-federated-isolated-devnet-ergo-node-process-v1.ts'],
+  ])('limits copied-state binding %s#%s to its exact consumer', (module, binding, owner) => {
+    const specifier = `./${module.replace(/\.ts$/, '.js')}`;
+    const sources = { [module]: `export function ${binding}() {}` };
+    const imported = `import { ${binding} } from '${specifier}'; ${binding}();`;
+    expect(inspect({ ...sources, [owner]: imported })).toEqual([]);
+    expect(inspect({ ...sources, 'foreign-copied-owner.ts': imported }).map(item => item.message))
+      .toContain(`exclusive authority import has the wrong owner: ${specifier}#${binding}`);
+    expect(inspect({ ...sources, [owner]: `import { ${binding} as escaped } from '${specifier}'; escaped();` })
+      .map(item => item.message)).toContain(`exclusive authority import must not be aliased: ${specifier}#${binding}`);
+    for (const source of [`import * as owner from '${specifier}';`, `export { ${binding} } from '${specifier}';`,
+      `const owner = await import('${specifier}');`]) {
+      expect(inspect({ ...sources, [owner]: source }).map(item => item.message))
+        .toContain(`exclusive authority module must use named runtime imports: ${specifier}`);
+    }
+  });
+
+  it('does not admit copied-state observation through any existing campaign root', () => {
+    const module = 'substrate-federated-isolated-devnet-ergo-node-process-v1.ts';
+    const binding = 'withSubstrateFederatedCopiedNonMiningErgoNodePairV1';
+    const specifier = '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+    for (const owner of [GENESIS_SETUP_ROOT, TRACKER_V2_CAMPAIGN_ROOT, MANAGED_SETUP_V2]) {
+      expect(inspect(staticAppFixture(owner, `import { ${binding} } from '${specifier}'; ${binding}();`))
+        .map(item => item.message)).toContain(`exclusive authority import has the wrong owner: ${specifier}#${binding}`);
+    }
+    expect(inspect({ [module]: `export function ${binding}() {}`,
+      'copied-state-signer.ts': `import { consumeSubstrateFederatedIsolatedDevnetMiningCredentialV1 } from './substrate-federated-isolated-devnet-mining-credential-v1.js'; consumeSubstrateFederatedIsolatedDevnetMiningCredentialV1();`,
+      'substrate-federated-isolated-devnet-mining-credential-v1.ts': 'export {};',
+    }).map(item => item.message)).toContain(
+      'exclusive authority import has the wrong owner: ./substrate-federated-isolated-devnet-mining-credential-v1.js#consumeSubstrateFederatedIsolatedDevnetMiningCredentialV1');
+  });
+
   it('rejects a local root re-export through worker and command to an unregistered consumer', () => {
     const stem = 'substrate-federated-isolated-devnet-tracker-v2-campaign';
     const binding = 'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot';
