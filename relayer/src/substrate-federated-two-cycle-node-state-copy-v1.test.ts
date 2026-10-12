@@ -52,6 +52,211 @@ function fixture(kind: 'frontier' | 'ergo' = 'frontier', tempParent = tmpdir()) 
     file: join(primaryRoot, paths[0], 'nested', '000001.sst') };
 }
 
+async function capturedFixture(kind: 'frontier' | 'ergo' = 'ergo',
+  beforeCapture?: (f: ReturnType<typeof fixture>) => void) {
+  const f = fixture(kind);
+  beforeCapture?.(f);
+  const manifest = await copy(f.input);
+  const capturedRoot = f.input.destinationDirectory;
+  const manifestPath = join(capturedRoot, 'manifest.json');
+  const originalManifestBytes = readFileSync(manifestPath);
+  let calls = 0;
+  const input: TwoCycleNodeStateCopyInputV1 = {
+    kind, primaryRoot: join(capturedRoot, 'primary'), witnessRoot: join(capturedRoot, 'witness'),
+    destinationDirectory: join(f.root, 'materialized'),
+    capturedManifestSha256Hex: createHash('sha256').update(originalManifestBytes).digest('hex'),
+    assertSourcesQuiescent: () => { calls++; },
+  };
+  return { ...f, input, manifest, capturedRoot, manifestPath, originalManifestBytes,
+    guardCalls: () => calls,
+    file: join(input.primaryRoot, f.paths[0], 'nested', '000001.sst'),
+    repin: (bytes: Buffer | string): TwoCycleNodeStateCopyInputV1 => {
+      writeFileSync(manifestPath, bytes);
+      return { ...input, capturedManifestSha256Hex: createHash('sha256').update(bytes).digest('hex') };
+    },
+  };
+}
+
+function expectNoMaterialization(f: Awaited<ReturnType<typeof capturedFixture>>): void {
+  expect(existsSync(f.input.destinationDirectory)).toBe(false);
+  expect(readdirSync(f.root).filter(name => name.startsWith('.materialized.partial-'))).toEqual([]);
+}
+
+describe('captured manifest pinned materialization', () => {
+  it('retains legacy empty directories but refuses their unbound pinned materialization', async () => {
+    const f = await capturedFixture('ergo', source => {
+      mkdirSync(join(source.input.primaryRoot, 'state', 'empty'));
+    });
+    expect(lstatSync(join(f.input.primaryRoot, 'state', 'empty')).isDirectory()).toBe(true);
+    expect(f.manifest.files).toHaveLength(8);
+    expect(f.manifest.files.some(file => file.path.includes('empty'))).toBe(false);
+    await expect(copy(f.input)).rejects.toThrow(/unexpected|entry bound/);
+    expectNoMaterialization(f);
+  });
+
+  it('refuses a missing captured manifest before staging', async () => {
+    const f = await capturedFixture();
+    rmSync(f.manifestPath);
+    await expect(copy(f.input)).rejects.toThrow();
+    expectNoMaterialization(f);
+  });
+
+  it.each(['ergo', 'frontier'] as const)('materializes a genuine synthetic %s capture with identical bytes', async kind => {
+    const f = await capturedFixture(kind);
+    const result = await copy(f.input);
+    expect(f.guardCalls()).toBe(2);
+    expect(result).toEqual(f.manifest);
+    expect(result.files).toHaveLength(8);
+    expect(result.nodeConsistencyEstablished).toBe(false);
+    expect(result.freshRestartValidated).toBe(false);
+    expect(readFileSync(f.manifestPath)).toEqual(f.originalManifestBytes);
+    expect(readFileSync(join(f.input.destinationDirectory, 'manifest.json'))).toEqual(f.originalManifestBytes);
+    for (const file of result.files) {
+      expect(readFileSync(join(f.input.destinationDirectory, file.node, file.path)))
+        .toEqual(readFileSync(join(f.capturedRoot, file.node, file.path)));
+    }
+    expect(readdirSync(f.input.destinationDirectory).sort()).toEqual(['manifest.json', 'primary', 'witness']);
+  });
+
+  it.each(['one-byte', 'added', 'missing', 'role-swap'] as const)(
+    'refuses captured database %s before staging under the unchanged manifest pin', async fault => {
+      const f = await capturedFixture();
+      if (fault === 'one-byte') {
+        const bytes = readFileSync(f.file); bytes[0] ^= 1; writeFileSync(f.file, bytes);
+      } else if (fault === 'added') writeFileSync(join(f.input.primaryRoot, 'state', 'extra.sst'), 'extra');
+      else if (fault === 'missing') rmSync(join(f.input.primaryRoot, 'state', 'LOCK'));
+      else {
+        const witness = join(f.input.witnessRoot, 'state', 'nested', '000001.sst');
+        const primaryBytes = readFileSync(f.file);
+        writeFileSync(f.file, readFileSync(witness)); writeFileSync(witness, primaryBytes);
+      }
+      expect(readFileSync(f.manifestPath)).toEqual(f.originalManifestBytes);
+      await expect(copy(f.input)).rejects.toThrow(/inventory differs/);
+      expectNoMaterialization(f);
+    });
+
+  it.each(['root-extra', 'wallet', 'config', 'empty-directory', 'data-hardlink', 'manifest-hardlink',
+    'data-junction', 'manifest-junction'] as const)('refuses captured closure %s before staging', async fault => {
+    const f = await capturedFixture();
+    if (fault === 'root-extra') writeFileSync(join(f.capturedRoot, 'extra'), 'extra');
+    if (fault === 'wallet') mkdirSync(join(f.input.primaryRoot, 'wallet'));
+    if (fault === 'config') writeFileSync(join(f.input.witnessRoot, 'config.json'), '{}');
+    if (fault === 'empty-directory') mkdirSync(join(f.input.primaryRoot, 'state', 'empty'));
+    if (fault === 'data-hardlink') linkSync(f.file, join(f.root, 'data-link'));
+    if (fault === 'manifest-hardlink') linkSync(f.manifestPath, join(f.root, 'manifest-link'));
+    if (fault === 'data-junction') {
+      const nested = join(f.input.primaryRoot, 'state', 'nested');
+      renameSync(nested, join(f.root, 'held-nested'));
+      symlinkSync(join(f.root, 'held-nested'), nested, 'junction');
+    }
+    if (fault === 'manifest-junction') {
+      rmSync(f.manifestPath); symlinkSync(f.input.primaryRoot, f.manifestPath, 'junction');
+    }
+    await expect(copy(f.input)).rejects.toThrow(/unexpected|entry bound|hardlink|alias|regular/);
+    expectNoMaterialization(f);
+  });
+
+  it.each(['null', 'uppercase', 'short', 'wrong-digest'] as const)('refuses manifest pin %s', async fault => {
+    const f = await capturedFixture();
+    const pin = fault === 'null' ? null : fault === 'uppercase' ? 'A'.repeat(64)
+      : fault === 'short' ? 'a'.repeat(63) : '0'.repeat(64);
+    await expect(copy({ ...f.input, capturedManifestSha256Hex: pin } as unknown as TwoCycleNodeStateCopyInputV1))
+      .rejects.toThrow(/pin|SHA256/);
+    expectNoMaterialization(f);
+  });
+
+  const manifestFaults: ReadonlyArray<readonly [string, (m: Record<string, unknown>, files: Record<string, unknown>[]) => void, RegExp]> = [
+    ['extra-field', m => { m.extra = false; }, /fields/],
+    ['missing-field', m => { delete m.totalBytes; }, /fields/],
+    ['schema', m => { m.schema = 'other'; }, /identity/],
+    ['kind', m => { m.kind = 'frontier'; }, /identity/],
+    ['consistency-claim', m => { m.nodeConsistencyEstablished = true; }, /claims/],
+    ['restart-claim', m => { m.freshRestartValidated = true; }, /claims/],
+    ['false-string', m => { m.freshRestartValidated = 'false'; }, /claims/],
+    ['files-type', m => { m.files = {}; }, /file bound/],
+    ['files-empty', m => { m.files = []; }, /file bound/],
+    ['file-extra-field', (_m, fs) => { fs[0].extra = 0; }, /fields/],
+    ['file-missing-field', (_m, fs) => { delete fs[0].sha256Hex; }, /fields/],
+    ['file-null', (_m, fs) => { fs[0] = null as unknown as Record<string, unknown>; }, /fields/],
+    ['node-role', (_m, fs) => { fs[0].node = 'third'; }, /node role/],
+    ['duplicate-path', (_m, fs) => { fs[1] = { ...fs[0] }; }, /repeats/],
+    ['path-outside', (_m, fs) => { fs[0].path = 'wallet/key'; }, /allowlist/],
+    ['path-type', (_m, fs) => { fs[0].path = null; }, /allowlist/],
+    ['path-parent', (_m, fs) => { fs[0].path = 'state/../secret'; }, /unsafe/],
+    ['path-backslash', (_m, fs) => { fs[0].path = 'state/a\\b'; }, /unsafe/],
+    ['path-stream', (_m, fs) => { fs[0].path = 'state/a:stream'; }, /unsafe/],
+    ['path-reserved', (_m, fs) => { fs[0].path = 'state/CON'; }, /unsafe/],
+    ['path-empty', (_m, fs) => { fs[0].path = 'state//x'; }, /unsafe/],
+    ['bytes-negative', (_m, fs) => { fs[0].bytes = -1; }, /bound/],
+    ['bytes-fraction', (_m, fs) => { fs[0].bytes = 0.5; }, /bound/],
+    ['bytes-string', (_m, fs) => { fs[0].bytes = '0'; }, /bound/],
+    ['bytes-unsafe', (_m, fs) => { fs[0].bytes = Number.MAX_SAFE_INTEGER + 1; }, /bound/],
+    ['bytes-coordinated-total', (m, fs) => { fs[0].bytes = Number(fs[0].bytes) + 1;
+      m.totalBytes = Number(m.totalBytes) + 1; }, /inventory/],
+    ['hash-uppercase', (_m, fs) => { fs[0].sha256Hex = 'A'.repeat(64); }, /hash/],
+    ['hash-wrong', (_m, fs) => { fs[0].sha256Hex = '0'.repeat(64); }, /inventory/],
+    ['hash-type', (_m, fs) => { fs[0].sha256Hex = null; }, /hash/],
+    ['missing-file-coordinated-total', (m, fs) => { const removed = fs.pop()!;
+      m.totalBytes = Number(m.totalBytes) - Number(removed.bytes); }, /inventory/],
+    ['total-wrong', m => { m.totalBytes = Number(m.totalBytes) + 1; }, /total/],
+    ['total-string', m => { m.totalBytes = String(m.totalBytes); }, /total/],
+    ['ordinal', (_m, fs) => { [fs[0], fs[1]] = [fs[1], fs[0]]; }, /inventory/],
+  ];
+  it.each(manifestFaults)('refuses re-pinned manifest %s without staging', async (_name, mutate, error) => {
+    const f = await capturedFixture();
+    const manifest = JSON.parse(f.originalManifestBytes.toString('utf8')) as Record<string, unknown>;
+    mutate(manifest, manifest.files as Record<string, unknown>[]);
+    const input = f.repin(JSON.stringify(manifest));
+    await expect(copy(input)).rejects.toThrow(error);
+    expectNoMaterialization(f);
+  });
+
+  it.each(['duplicate-key', 'bom', 'invalid-utf8', 'empty', 'oversize', 'trailing-json'] as const)(
+    'refuses re-pinned manifest bytes %s without staging', async fault => {
+      const f = await capturedFixture();
+      const original = f.originalManifestBytes;
+      const bytes = fault === 'duplicate-key' ? Buffer.from(original.toString('utf8').replace('{', '{"kind":"ergo",'))
+        : fault === 'bom' ? Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), original])
+        : fault === 'invalid-utf8' ? Buffer.concat([original, Buffer.from([0xff])])
+        : fault === 'empty' ? Buffer.alloc(0) : fault === 'oversize' ? Buffer.alloc(16 * 1024 * 1024 + 1, 0x20)
+        : Buffer.concat([original, Buffer.from('{}')]);
+      await expect(copy(f.repin(bytes))).rejects.toThrow();
+      expectNoMaterialization(f);
+    });
+
+  it.each(['maxFiles', 'maxFileBytes', 'maxTotalBytes'] as const)(
+    'enforces captured %s before staging', async bound => {
+      const f = await capturedFixture();
+      await expect(copy({ ...f.input, [bound]: 1 })).rejects.toThrow(/bound/);
+      expectNoMaterialization(f);
+    });
+
+  it.each([1, 2])('refuses manifest byte drift during quiescence guard %s', async at => {
+    const f = await capturedFixture();
+    let calls = 0;
+    await expect(copy({ ...f.input, assertSourcesQuiescent: () => {
+      if (++calls === at) writeFileSync(f.manifestPath, Buffer.concat([f.originalManifestBytes, Buffer.from(' ')]));
+    } })).rejects.toThrow(/SHA256|identity|changed|drift/);
+    expect(calls).toBe(at);
+    expect(existsSync(f.input.destinationDirectory)).toBe(false);
+    const partials = readdirSync(f.root).filter(name => name.startsWith('.materialized.partial-'));
+    expect(partials).toHaveLength(at === 1 ? 0 : 1);
+    for (const partial of partials) expect(existsSync(join(f.root, partial, 'manifest.json'))).toBe(false);
+  });
+
+  it.each(['captured-root', 'captured-child', 'roles-reversed', 'different-parents'] as const)(
+    'rejects capture binding %s before staging', async fault => {
+      const f = await capturedFixture();
+      const input = fault === 'captured-root' ? { ...f.input, destinationDirectory: f.capturedRoot }
+        : fault === 'captured-child' ? { ...f.input, destinationDirectory: join(f.capturedRoot, 'child') }
+        : fault === 'roles-reversed' ? { ...f.input, primaryRoot: f.input.witnessRoot, witnessRoot: f.input.primaryRoot }
+        : { ...f.input, witnessRoot: fixture('ergo').input.witnessRoot };
+      await expect(copy(input)).rejects.toThrow(/overlap|captured|capture/);
+      expectNoMaterialization(f);
+      expect(readdirSync(f.capturedRoot).sort()).toEqual(['manifest.json', 'primary', 'witness']);
+    });
+});
+
 describe('bounded key-free stopped-node database copy', () => {
   it('uses a canonical synthetic temp parent without accepting aliased node roots', async () => {
     const parent = mkdtempSync(join(realpathSync.native(tmpdir()), 'bridge-node-copy-parent-'));

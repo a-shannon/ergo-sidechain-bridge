@@ -5,6 +5,7 @@ import {
   type Stats,
 } from 'node:fs';
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
+import { parseStrictJson } from './strict-json.js';
 
 export const SUBSTRATE_FEDERATED_TWO_CYCLE_NODE_STATE_COPY_V1_SCHEMA =
   'e2s.substrate-federated-two-cycle-node-state-copy.v1' as const;
@@ -19,6 +20,10 @@ export interface TwoCycleNodeStateCopyInputV1 {
   /** Owner must prove process shutdown and absence of writers/listeners. Called twice.
    * This callback is a precondition, not a shutdown receipt or consistency proof. */
   readonly assertSourcesQuiescent: () => void | Promise<void>;
+  /** Separately admitted captured manifest pin. When present, roots must be the
+   * exact primary/witness children of one capture, with no extra entries.
+   * Prepares another disposable copy; supplies no restart or execution authority. */
+  readonly capturedManifestSha256Hex?: string;
   readonly maxFiles?: number;
   readonly maxTotalBytes?: number;
   readonly maxFileBytes?: number;
@@ -42,6 +47,7 @@ const SUBTREES = Object.freeze({
 });
 const MAX_DEPTH = 64;
 const MAX_ENTRIES = 500_000;
+const MAX_CAPTURE_MANIFEST_BYTES = 16 * 1024 * 1024;
 type Entry = { node: 'primary' | 'witness'; path: string; directory: boolean;
   identity: string; bytes: number; sha256Hex?: string };
 type Bounds = { files: number; total: number; file: number };
@@ -66,19 +72,42 @@ export async function copySubstrateFederatedTwoCycleNodeStateV1(
   };
   const roots = { primary: checkedPath(input.primaryRoot, true),
     witness: checkedPath(input.witnessRoot, true) };
+  const capturedPin = input.capturedManifestSha256Hex;
+  let capturedRoot: string | undefined;
+  if (capturedPin !== undefined) {
+    if (typeof capturedPin !== 'string' || !/^[0-9a-f]{64}$/.test(capturedPin)) {
+      throw new Error('captured manifest pin must be lowercase SHA256');
+    }
+    if (basename(roots.primary) !== 'primary' || basename(roots.witness) !== 'witness'
+      || dirname(roots.primary) !== dirname(roots.witness)) {
+      throw new Error('captured node roles must share the exact capture root');
+    }
+    capturedRoot = checkedPath(dirname(roots.primary), true);
+  }
   const output = absolutePath(input.destinationDirectory);
   const parent = checkedPath(dirname(output), true);
   for (const [a, b] of [[roots.primary, roots.witness], [roots.primary, output],
     [roots.witness, output]]) {
     if (inside(a, b) || inside(b, a)) throw new Error('node source and destination roots overlap');
   }
+  if (capturedRoot !== undefined && (inside(capturedRoot, output) || inside(output, capturedRoot))) {
+    throw new Error('captured root and destination overlap');
+  }
   if (output === parent) throw new Error('invalid copy destination');
   assertAbsent(output);
   const rootIdentities = [identity(lstatSync(roots.primary)), identity(lstatSync(roots.witness))];
+  const capturedRootIdentity = capturedRoot === undefined ? undefined : identity(lstatSync(capturedRoot));
   const parentIdentity = identity(lstatSync(parent), false);
   await guard();
   checkRoots();
+  const captured = capturedRoot === undefined ? undefined
+    : readCapturedManifest(join(capturedRoot, 'manifest.json'), capturedPin!, kind, bounds);
   const before = inventory(roots, SUBTREES[kind], bounds);
+  if (captured !== undefined) {
+    assertManifestInventory(captured.manifest, before);
+    assertExactDestination(capturedRoot!, before.filter(entry => !entry.directory), true);
+    recheckCapturedManifest();
+  }
   const staging = mkdtempSync(join(parent, `.${basename(output)}.partial-`));
   // Failed partials remain private and inspectable. They are never returned as exports.
   for (const entry of before) {
@@ -97,6 +126,10 @@ export async function copySubstrateFederatedTwoCycleNodeStateV1(
   }
   await guard();
   checkRoots();
+  if (captured !== undefined) {
+    recheckCapturedManifest();
+    assertExactDestination(capturedRoot!, before.filter(entry => !entry.directory), true);
+  }
   checkedPath(parent, true);
   if (identity(lstatSync(parent), false) !== parentIdentity) throw new Error('destination parent changed');
   if (JSON.stringify(inventory(roots, SUBTREES[kind], bounds)) !== JSON.stringify(before)) {
@@ -129,7 +162,18 @@ export async function copySubstrateFederatedTwoCycleNodeStateV1(
   renameSync(staging, output);
   return manifest;
 
+  function recheckCapturedManifest(): void {
+    if (hashFile(join(capturedRoot!, 'manifest.json'), MAX_CAPTURE_MANIFEST_BYTES,
+      undefined, captured!.identity).sha256Hex !== capturedPin) {
+      throw new Error('captured manifest changed during materialization');
+    }
+  }
+
   function checkRoots(): void {
+    if (capturedRoot !== undefined) {
+      checkedPath(capturedRoot, true);
+      if (identity(lstatSync(capturedRoot)) !== capturedRootIdentity) throw new Error('captured root drifted');
+    }
     for (const [index, root] of [roots.primary, roots.witness].entries()) {
       checkedPath(root, true);
       if (identity(lstatSync(root)) !== rootIdentities[index]) throw new Error('node source root drifted');
@@ -216,8 +260,9 @@ function hashFile(path: string, limit: number, copyTo?: string, expectedIdentity
   }
 }
 
-function assertExactDestination(root: string, entries: Entry[]): void {
+function assertExactDestination(root: string, entries: Entry[], includeManifest = false): void {
   const expected = new Set<string>();
+  if (includeManifest) expected.add('manifest.json');
   for (const entry of entries) {
     let path = `${entry.node}/${entry.path}`;
     for (;;) {
@@ -243,6 +288,87 @@ function assertExactDestination(root: string, entries: Entry[]): void {
   }
   for (const name of names(root)) visit(name);
   if (seen !== expected.size) throw new Error('missing destination entry');
+}
+
+function readCapturedManifest(path: string, pin: string, kind: 'frontier' | 'ergo', bounds: Bounds) {
+  checkedPath(path, false);
+  const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  let bytes: Buffer;
+  let fileIdentity: string;
+  try {
+    const before = fstatSync(fd);
+    if (!before.isFile() || before.nlink !== 1 || before.size < 1
+      || before.size > MAX_CAPTURE_MANIFEST_BYTES) throw new Error('captured manifest byte bound or type differs');
+    fileIdentity = identity(before);
+    bytes = Buffer.alloc(before.size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const count = readSync(fd, bytes, offset, bytes.length - offset, null);
+      if (count === 0) throw new Error('captured manifest truncated');
+      offset += count;
+    }
+    checkedPath(path, false);
+    if (identity(fstatSync(fd)) !== fileIdentity || identity(lstatSync(path)) !== fileIdentity) {
+      throw new Error('captured manifest drifted while reading');
+    }
+  } finally { closeSync(fd); }
+  if (createHash('sha256').update(bytes).digest('hex') !== pin) throw new Error('captured manifest SHA256 differs');
+  let text: string;
+  try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes); }
+  catch { throw new Error('captured manifest is not UTF8'); }
+  const manifest = record(parseStrictJson(text, 'captured manifest'),
+    ['schema', 'kind', 'files', 'totalBytes', 'nodeConsistencyEstablished', 'freshRestartValidated']);
+  if (manifest.schema !== SUBSTRATE_FEDERATED_TWO_CYCLE_NODE_STATE_COPY_V1_SCHEMA
+    || manifest.kind !== kind || manifest.nodeConsistencyEstablished !== false
+    || manifest.freshRestartValidated !== false) throw new Error('captured manifest identity or claims differ');
+  if (!Array.isArray(manifest.files) || manifest.files.length < 1 || manifest.files.length > bounds.files) {
+    throw new Error('captured manifest file bound differs');
+  }
+  const seen = new Set<string>();
+  let total = 0;
+  const files = manifest.files.map(value => {
+    const file = record(value, ['node', 'path', 'bytes', 'sha256Hex']);
+    if (file.node !== 'primary' && file.node !== 'witness') throw new Error('captured manifest node role differs');
+    const path = file.path;
+    if (typeof path !== 'string' || !SUBTREES[kind].some(tree => path.startsWith(`${tree}/`))) {
+      throw new Error('captured manifest path is outside database allowlist');
+    }
+    for (const part of path.split('/')) safeName(part);
+    const key = `${file.node}/${path}`;
+    if (seen.has(key)) throw new Error('captured manifest repeats a database file');
+    seen.add(key);
+    if (!Number.isSafeInteger(file.bytes) || (file.bytes as number) < 0
+      || (file.bytes as number) > bounds.file || total + (file.bytes as number) > bounds.total) {
+      throw new Error('captured manifest file/byte bound differs');
+    }
+    if (typeof file.sha256Hex !== 'string' || !/^[0-9a-f]{64}$/.test(file.sha256Hex)) {
+      throw new Error('captured manifest file hash differs');
+    }
+    total += file.bytes as number;
+    return Object.freeze({ node: file.node, path, bytes: file.bytes as number,
+      sha256Hex: file.sha256Hex });
+  });
+  if (!Number.isSafeInteger(manifest.totalBytes) || manifest.totalBytes !== total) {
+    throw new Error('captured manifest total differs');
+  }
+  return { identity: fileIdentity, manifest: Object.freeze({ files: Object.freeze(files), totalBytes: total }) };
+}
+
+function record(value: unknown, keys: readonly string[]): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key))) {
+    throw new Error('captured manifest fields differ');
+  }
+  return value as Record<string, unknown>;
+}
+
+function assertManifestInventory(manifest: { files: readonly unknown[]; totalBytes: number }, entries: Entry[]): void {
+  const files = entries.filter(entry => !entry.directory).map(({ node, path, bytes, sha256Hex }) =>
+    ({ node, path, bytes, sha256Hex }));
+  if (JSON.stringify(files) !== JSON.stringify(manifest.files)
+    || files.reduce((sum, file) => sum + file.bytes, 0) !== manifest.totalBytes) {
+    throw new Error('captured database inventory differs from pinned manifest');
+  }
 }
 
 function boundedNames(path: string, limit: number): string[] {

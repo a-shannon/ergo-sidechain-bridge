@@ -562,6 +562,76 @@ describe('native committed-vault observation scheduling (mocked provenance and n
     expect(mocks.checkSignedTransaction).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])('selects the exact paired precheck refusal with final custody replacement %s', async replaceAtFinalGuard => {
+    const f = nativeFixture();
+    const permanent = new Error('fixture permanent witness read refusal');
+    const custody = new Error('fixture final target custody refusal');
+    let release!: () => void;
+    let started!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const entered = new Promise<void>(resolve => { started = resolve; });
+    let completedReads = 0;
+    mocks.tipResponses.set(PRIMARY, [
+      { height: 101, id: tipId(101) },
+      { height: 102, id: tipId(102) },
+    ]);
+    mocks.readBox.mockImplementation(async (origin, id) => {
+      try {
+        if (origin === WITNESS && id === f.input.packet.boxes.sourceFundingInput.boxId) {
+          throw permanent;
+        }
+        if (origin === WITNESS && id === f.input.packet.boxes.sourceLock.boxId) {
+          started();
+          await pending;
+        }
+        return mocks.boxes.get(id) ?? null;
+      } finally { completedReads += 1; }
+    });
+    const session = create(f.input as never);
+    const assertTarget = mocks.assertTarget.getMockImplementation()!;
+    mocks.assertTarget.mockImplementation(value => {
+      // Only the outer finally runs after all eight box reads have settled.
+      if (replaceAtFinalGuard && completedReads === 8) throw custody;
+      return assertTarget(value);
+    });
+    let settled = false;
+    const result = session.revalidator.revalidate(f.checked as never)
+      .then(() => { settled = true; return undefined; }, error => { settled = true; return error; });
+    let pendingState;
+    try {
+      await entered;
+      await new Promise(resolve => setImmediate(resolve));
+      pendingState = {
+        settled, completedReads,
+        primaryTipReads: mocks.tipCalls.get(PRIMARY),
+        witnessTipReads: mocks.tipCalls.get(WITNESS),
+      };
+    } finally { release(); }
+    const error = await result;
+    expect(pendingState).toEqual({
+      settled: false, completedReads: 7, primaryTipReads: 2, witnessTipReads: 1,
+    });
+    expect(completedReads).toBe(8);
+    expect(error).toBe(replaceAtFinalGuard ? custody : permanent);
+    expect(projectEscapingOperation(error)).toBe('input-observation-before-check');
+    if (replaceAtFinalGuard) expect(projectEscapingOperation(permanent)).toBeNull();
+    expect(mocks.readBox).toHaveBeenCalledTimes(8);
+    expect(mocks.normalizeEip12Box).toHaveBeenCalledTimes(3);
+    expect(mocks.tipCalls.get(PRIMARY)).toBe(2);
+    expect(mocks.tipCalls.get(WITNESS)).toBe(1);
+    expect(mocks.readHeader).not.toHaveBeenCalled();
+    expect(mocks.checkSignedTransaction).not.toHaveBeenCalled();
+    // Restore only the fixture guard so the failed one-shot state, rather than
+    // the injected custody error, decides both capability refusals below.
+    mocks.assertTarget.mockImplementation(assertTarget);
+    expect(() => session.takePreTransportObservation()).toThrow(/unavailable or consumed/);
+    expect(() => session.broadcastAuthorizer.authorize({ checked: f.checked,
+      revalidationDigestHex: hex('99') } as never)).toThrow();
+    await expect(session.revalidator.revalidate(f.checked as never)).rejects.toThrow(/one-shot/);
+    expect(mocks.readBox).toHaveBeenCalledTimes(8);
+    expect(mocks.checkSignedTransaction).not.toHaveBeenCalled();
+  });
+
   it.each([64, 65])('enforces the %i-block post-check ancestry boundary', async advance => {
     const f = nativeFixture();
     mocks.checkSignedTransaction.mockImplementation(async () => {

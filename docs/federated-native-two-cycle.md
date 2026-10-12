@@ -433,6 +433,25 @@ not establish cross-node consistency or fresh-process restart. Recovery
 acceptance requires a separately admitted run and validation on disposable
 copies.
 
+The node-state copy API accepts `capturedManifestSha256Hex` when preparing a
+second disposable copy from a capture. Supply the exact `primary` and `witness`
+children of one captured root, a separately admitted SHA-256 of its
+`manifest.json`, and a fresh destination outside that root. The reader accepts
+at most 16 MiB of strict UTF-8 JSON and verifies the existing schema, role/path
+inventory, sizes, hashes and both false claims against the actual fixed database
+subtrees. Captured directories must be ancestors of a manifest-listed file;
+empty directories that the existing manifest cannot bind are unsupported by
+this reader. Missing or extra entries, links, overlapping roots and mismatched
+bytes refuse before a staging directory is created. The source and manifest are
+checked again during materialization; an interrupted or failed partial copy is
+never published as a completed export.
+
+The quiescence callback remains a caller obligation, not proof of shutdown.
+Matching manifests and copies establish byte correspondence only. This API
+does not start nodes, reopen databases, recover custody or restore execution
+authority. A fresh non-mining process owner and accumulated-state observations
+remain separate recovery consumers.
+
 ## Observed campaign status
 
 Campaign 24 invoked this command at
