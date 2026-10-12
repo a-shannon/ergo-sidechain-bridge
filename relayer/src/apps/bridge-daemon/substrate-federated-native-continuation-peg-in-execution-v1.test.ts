@@ -130,6 +130,7 @@ describe('native continuation peg-in execution transport', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
+    for (const mock of Object.values(mocked)) mock.mockReset();
     mocked.projectProgress.mockReset().mockReturnValue(null);
     sourcePrior = 'none';
     vaultPrior = 'none';

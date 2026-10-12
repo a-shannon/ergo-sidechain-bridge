@@ -210,12 +210,16 @@ let active: boolean;
 let started: boolean;
 let calls: { url: string; method: string; params: unknown[] }[];
 let readResult: (url: string, method: string, params: unknown[]) => unknown;
-let stop: ReturnType<typeof vi.fn>;
+let stop: ReturnType<typeof vi.fn<() => Promise<void>>>;
 let compiled: any;
 let batch: any;
 let receipts: any[];
 let journalState: StateTracker | undefined;
-let observeConfirmation: ReturnType<typeof vi.fn>;
+let observeConfirmation: ReturnType<typeof vi.fn<(id: string, origin: string) => Promise<Partial<{
+  status: string;
+  confirmationHeight: number;
+  confirmationHeaderIdHex: string;
+}> | null>>>;
 let readErgoBox: (origin: string, id: string) => unknown;
 let readErgoTip: (origin: string) => unknown;
 let readErgoInclusion: (origin: string, height: number) => unknown;
@@ -223,7 +227,7 @@ let readErgoAnchor: (origin: string, height: number) => unknown;
 let retainedSetup: any;
 let frontierEndpoints: Readonly<{ primaryRpcUrl: string; witnessRpcUrl: string }>;
 let frontierActive: boolean;
-let closeNative: ReturnType<typeof vi.fn>;
+let closeNative: ReturnType<typeof vi.fn<() => Promise<{ component: string }>>>;
 let nativeAction: ReturnType<typeof vi.fn>;
 let batchActive: boolean;
 let journalDirectory: string;
@@ -347,6 +351,7 @@ function canonicalBox(fields: Omit<Eip12Box, 'boxId'>): Eip12Box {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocked.continuationReservation.mockReset();
   mocked.projectConfirmation.mockReturnValue(null); mocked.projectSubmission.mockReturnValue(null);
   mocked.projectProgress.mockReturnValue(null);
   mocked.projectStartupPhase.mockReturnValue(null);
@@ -1775,7 +1780,8 @@ describe('fresh FED target composition', () => {
     const cleanup = new Error('continuation operation cleanup failed');
     const create = vi.mocked(sources.createSubstrateFederatedNativeGenesisSourceAttestationOperationV1)
       .getMockImplementation()!;
-    const assertOperation = sources.assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1;
+    const assertOperation = vi.mocked(sources.assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1)
+      .getMockImplementation()!;
     let created = 0;
     let backing: ReturnType<typeof makeSourceOperation> | undefined;
     let wrapper: ReturnType<typeof makeSourceOperation> | undefined;

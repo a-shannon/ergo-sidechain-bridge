@@ -55,7 +55,7 @@ const DYNAMIC_PROOF_MARKER = 'bridge-lab-dynamic-source-proof-sha256=';
 const MAX_CONSUMER_RUNTIME_MS = 30 * 60_000;
 const POST_CARGO_REVALIDATION_BUDGET_MS = 60_000;
 const EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256 =
-  'ddfc4a317d124401d3ebd491e1b62770229ce0d6f6adbd07b61f21910f599aa5';
+  '1573a69aa3c5cafa302621efcc65032b653e9cf1548a32c69e2dd5011ca8b56d';
 const RECEIPTS = new WeakSet<object>();
 const CONSUMED_PACKET_PROOFS = new WeakSet<object>();
 const CONSUMING_PACKET_PROOFS = new WeakSet<object>();

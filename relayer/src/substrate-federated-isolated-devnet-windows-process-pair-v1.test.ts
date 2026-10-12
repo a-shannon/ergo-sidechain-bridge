@@ -158,10 +158,12 @@ describe('bounded netstat listener parser', () => {
   });
 });
 
-beforeEach(() => boundary.spawnSync.mockReset().mockImplementation((_executable: string, args: string[]) =>
-  args[0] === '-a' ? rawResult(netstat(listeners().map(row =>
-    `TCP ${row.LocalAddress}:${row.LocalPort} 0.0.0.0:0 LISTENING ${row.OwningProcess}`)))
-    : result({ images: images() })));
+beforeEach(() => {
+  boundary.spawnSync.mockReset().mockImplementation((_executable: string, args: string[]) =>
+    args[0] === '-a' ? rawResult(netstat(listeners().map(row =>
+      `TCP ${row.LocalAddress}:${row.LocalPort} 0.0.0.0:0 LISTENING ${row.OwningProcess}`)))
+      : result({ images: images() }));
+});
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe.skipIf(process.platform !== 'win32')('fresh Windows process-pair observation', () => {

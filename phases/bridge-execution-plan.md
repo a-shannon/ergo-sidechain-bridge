@@ -38,22 +38,36 @@ The inner predicate, raw cause, completion, cleanup and custody disposal remain
 unknown. The detail identifies the last operation entered only. Neither new
 diagnostics nor passing tests may reclassify C61 or any earlier hold.
 
-The owned HTTP dependency closure is validated locally: Axios 1.20.0 and
-dev-only source-map-js 1.2.2 retain genuine loopback transport behavior. The
-inherited-prototype hook falsifier fails on Axios 1.19.0 and passes on 1.20.0.
-A fresh installation's production audit reports zero vulnerabilities; three
-development-tool advisories remain. Upstream releases and advisories were
-checked on 2026-10-12. The separate supported Vitest migration is the next
-local dependency result; no transitive override is selected.
+The owned HTTP and test-framework dependency closure is validated locally.
+Axios 1.20.0 and dev-only source-map-js 1.2.2 retain genuine loopback transport
+behavior; the inherited-prototype hook falsifier fails on Axios 1.19.0 and
+passes on 1.20.0. Vitest 4.1.11 closes the remaining development advisories
+while retaining Vite 7.3.6 and Rollup 4.62.4. The fresh locked installation's
+full audit reports zero vulnerabilities. Upstream releases and advisories
+were checked on 2026-10-12; no transitive override is selected.
+
+The default bounded runner covers all 638 collected source-test files:
+23,131 cases pass and 26 remain unexecuted under their existing explicit guards.
+Independent accounting verifies the exact schedule, successful whole-file
+summaries and exhaustive shards, excluding failed partial and overlapping
+focused runs. Real CLI listing and exact-name selection also pass. Compatibility
+changes correct hook returns, fixture mock state and backing captures, retain
+typed refusal inputs, and exclude generated dist files from discovery.
+Assertions, refusal behavior, runner composition and runtime budgets remain
+unchanged. This is local compatibility evidence, not guarded node or campaign
+acceptance.
 
 Current package/bundle/WASM pins and both live JVM callers match. Fresh canonical
 compiler and WASM builds pass with unchanged generated artifact identities.
 The stale WASM package.json pin and tracker wrapper pin are corrected; each
 caller now also pins the implementation behind the re-export. Only explicitly
 reviewed raw source representations are admitted, with no read-time
-normalization. All 56 source-pin cases and 241 affected transport/provenance
-cases pass; one historical JVM-host case remains inapplicable under its
-unchanged guard. TypeScript and the import guard pass.
+normalization. The current native consensus-lock binding is corrected in both
+consumers. All 56 source-pin cases and the 42-case native-build test file pass;
+actual preparation-entry single-byte and extra-LF mutations reject before
+tools or builds. These tests do not establish an actual Cargo build. TypeScript
+and the import guard pass. Historical JVM-host evidence remains scoped to its
+unchanged guard.
 
 Both actual JVM callers pass: 35 complete signed-continuation cases and twenty
 [tracker mempool cases](../validity-proof/consumer-jvm/native-tracker-mempool.md).
@@ -64,7 +78,10 @@ this input. The two-file tracker overlay remains separate from the current
 eight-file signed-continuation overlay. Historical compiler host locks stay
 fixed. These selections overlap and are not summed; they establish no node
 service, chain inclusion, independent custody or packaged lifecycle acceptance.
-Exact independent closeout review and guarded local promotion finish this lot.
+Exact independent closeout review and guarded local promotion bind this lot.
+Next prepare a separate clean checkout of that same candidate, its own locked
+dependency/compiler runtime, full BOTH raw source baseline and the documented
+non-custodial operator preflight with all fourteen flags Boolean false.
 No campaign, push or new CI is selected.
 
 Repository-only operator source preparation is closed locally at `1e88842b`.
@@ -1901,7 +1918,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Supported test-framework dependencies -> unchanged assertion and runner contract | Select the minimum supported migration that closes Vitest, mocker and pool advisories; map the existing runner/reporters before changing the framework | Prior HTTP closure has fresh production audit zero, exact current builds, affected transport checks, 56 source guards and real JVM35/20 passes. Framework migration remains local work, with exact inventories, refusal semantics and runtime budgets preserved. No campaign or publication authority; C24-C61 holds remain permanent |
+| **Now** | Clean local candidate -> non-custodial operator prerequisites | After guarded local promotion, prepare a separate exact clean checkout, its own locked dependency/compiler runtime and plain unstaged source checkouts; run the documented full BOTH raw baseline and preflight | Require baseline PASS, errors empty and all six checks strict true, then local-preflight-passed with all fourteen authority/execution flags Boolean false. Reuse unchanged tests and public tool/cache evidence only in scope. This neither selects nor admits a campaign; C24-C61 holds remain permanent |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Separately select and admit one local synthetic campaign after a deciding checkpoint, exact local source identity, applicable checks/review and fresh runtime/source/output/custody/fee gates; apply guarded publication and due exact-head CI at public promotion | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
@@ -1946,7 +1963,7 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Test-framework dependency closure (next local result) | A supported Vitest migration closes the three remaining development advisories without changing assertions, inventory or runtime capability boundaries | Map installed advisory minima and runner/reporter interfaces, choose the smallest supported version, then prove exact-name listing/counts, ordinary/special composition, error refusal and affected test consumers on a fresh installation. No forced transitive override, suppressed error or runtime budget change |
+| Test-framework dependency closure (validated locally) | Supported Vitest 4.1.11 closes the three development advisories while preserving assertions, source inventory and runtime capability boundaries | Fresh locked installation and full audit zero; Vite7.3.6/Rollup4.62.4 retained. Exact CLI listing/selection, all638 source files with23131 passing cases and26 existing guarded cases, TypeScript and affected provenance/JVM checks pass. Exact independent review and guarded local promotion bind the candidate. No override, suppressed error or runtime budget change |
 | Owned HTTP dependency closure (validated locally) | Minimum patched dependencies preserve genuine GET/check-only POST behavior and current source/tool provenance | Axios1.20.0/source-map-js1.2.2, actual inherited-hook RED/GREEN, fresh production audit zero, current compiler/WASM builds, 241 affected cases, 56 source guards and actual JVM35/20 pass. Tracker's new fixed public fixture is a distinct input; historical results/locks remain scoped. Exact review and guarded local promotion apply; no campaign or readiness authority |
 | Operator public-source preparation (closed locally at1e88842b) | Repository instructions connect fresh plain unstaged source reconstruction, explicit raw Frontier validation and the existing non-authorizing preflight | All 77 baseline cases and the real CLI policy differential,95 affected generic consumers, exact source/claims review and guarded local promotion pass. Separate clean-root own npm/compiler preparation, full BOTH raw command and real preflight pass with all fourteen flags false and empty outputs. Reuse only under the exact candidate input closure; no campaign dispatch |
 | Signed-continuation JVM consumer (locally closed at e800de3d) | Exact fully signed bytes, three ordered input boxes and both explicit vote contexts reach the pinned native stateless/stateful transaction validator through a documented bounded command | All 35 JVM cases and 32 command acceptance/refusal cases, exact independent review and guarded local promotion pass. Preserve the unchanged scoped offline result; the next complete lifecycle requires separate fresh admission |

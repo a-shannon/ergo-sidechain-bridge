@@ -18,9 +18,9 @@ $ExpectedRecoverySpecHash = '41b1ef9a15eeab3d3d12ac974c6a77c4d26da36e06ef5512cdd
 $ExpectedNodeHash = '63c259c81e5d472b5f11c8d506070130cb04a1ecf84b80377a34ed6ec9048088'
 $ExpectedJobRunnerHash = '47a08af66ef3134fefeee392e5578be9295e5171dca83c8861822d7e464ff627'
 $ExpectedBoundedProcessLibraryHash = @(
-    '4f13f9e8de0b011a2f11b540585c185367d47a5227aff05259d311d340efe352',
-    '1ba9e800235d92f886c7e08790ecde85f22759544725205c0f26b9347d159427',
-    'ba84b3d38a3b87c98cd09441b1e374c99727cc1820c9c218da4e8c6da3d48044')
+    '391aa32f06203512517ca32a9b062247f224cfae29d542b01fb355633849c75a',
+    'eec0c0e7a61f5489f957c3ea0d93041cd518cc2a09157122d8648476f67e870c',
+    'ea07ff1c95e54e60cfd4e621dce04de6074c46e9744dace674c1dbef4190276a')
 $ExpectedBoundedProcessImplementationHash = @(
     '6a3153c6a69c290ced5f7fd7eaebbb975d69aa1010e9c6bd98ca31e71041c208',
     'b84c68bb7ddd9526832c92a76c149f10d024be477e73127399439ad46d85da02',
@@ -28,7 +28,7 @@ $ExpectedBoundedProcessImplementationHash = @(
 $ExpectedProcessOwnerHash = '21ba11605b4bb06b5d94eb8d8d013a675c7c6f7d2d15bed89ac626d7e7cdbc1e'
 $ExpectedTsxCliHash = '0ef1d6f8dee95174853c479fb4d9ffdcebf755125a0b477a1236bac331ccf9d5'
 $ExpectedTsxPackageHash = '4321447dcfb5bc39e683e6a49555bfb6dadc4543fc64baf5cc43020e9c1775a1'
-$ExpectedPackageLockHash = '1902a44c0ec0f8e68e7d2c3e3eaacf07401be02a3f809ee00da9539fba0444f5'
+$ExpectedPackageLockHash = 'ac35cf3f84afbe1ffd089f6f5b89864182045db05ad21c2c8a059f1d120aa5ad'
 $ExpectedTests = 20
 $SbtTimeoutMilliseconds = 300000
 $TerminationGraceMilliseconds = 15000

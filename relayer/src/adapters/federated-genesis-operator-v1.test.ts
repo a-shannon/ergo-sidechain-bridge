@@ -25,16 +25,20 @@ vi.mock('./federated-native-reservation-execution-v1.js', () => ({
 
 const authenticatedContinuationParents = new WeakSet<object>();
 const authenticatedContinuationStepParents = new WeakSet<object>();
-beforeEach(() => vi.mocked(assertFederatedNativeContinuationParentV1).mockReset().mockImplementation(parent => {
-  if (parent === null || typeof parent !== 'object' || !authenticatedContinuationParents.has(parent)) {
-    throw new Error('FED continuation parent is not authenticated');
-  }
-}));
-beforeEach(() => vi.mocked(assertFederatedNativeContinuationStepParentV1).mockReset().mockImplementation(parent => {
-  if (parent === null || typeof parent !== 'object' || !authenticatedContinuationStepParents.has(parent)) {
-    throw new Error('FED continuation step parent is not authenticated');
-  }
-}));
+beforeEach(() => {
+  vi.mocked(assertFederatedNativeContinuationParentV1).mockReset().mockImplementation(parent => {
+    if (parent === null || typeof parent !== 'object' || !authenticatedContinuationParents.has(parent)) {
+      throw new Error('FED continuation parent is not authenticated');
+    }
+  });
+});
+beforeEach(() => {
+  vi.mocked(assertFederatedNativeContinuationStepParentV1).mockReset().mockImplementation(parent => {
+    if (parent === null || typeof parent !== 'object' || !authenticatedContinuationStepParents.has(parent)) {
+      throw new Error('FED continuation step parent is not authenticated');
+    }
+  });
+});
 afterEach(() => vi.restoreAllMocks());
 
 describe('FED native post-mint withdrawal signing', () => {

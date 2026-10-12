@@ -8,9 +8,9 @@ import { runBoundedProcess } from './bounded-process-runner.js';
 const root = resolve(import.meta.dirname, '../..');
 const callers = ['tracker-mempool', 'continuation-transaction'] as const;
 const wrapperHashes = [
-  '4f13f9e8de0b011a2f11b540585c185367d47a5227aff05259d311d340efe352',
-  '1ba9e800235d92f886c7e08790ecde85f22759544725205c0f26b9347d159427',
-  'ba84b3d38a3b87c98cd09441b1e374c99727cc1820c9c218da4e8c6da3d48044',
+  '391aa32f06203512517ca32a9b062247f224cfae29d542b01fb355633849c75a',
+  'eec0c0e7a61f5489f957c3ea0d93041cd518cc2a09157122d8648476f67e870c',
+  'ea07ff1c95e54e60cfd4e621dce04de6074c46e9744dace674c1dbef4190276a',
 ];
 const implementationHashes = [
   '6a3153c6a69c290ced5f7fd7eaebbb975d69aa1010e9c6bd98ca31e71041c208',

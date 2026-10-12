@@ -250,7 +250,7 @@ function pipelineDependencies(): WasmAvlBuildPipelineDependenciesV2 & {
   inspectBuildTools: ReturnType<typeof vi.fn>;
   runBoundedProcess: ReturnType<typeof vi.fn>;
   assertPackageSmoke: ReturnType<typeof vi.fn>;
-  emitBuildOutput: ReturnType<typeof vi.fn>;
+  emitBuildOutput: ReturnType<typeof vi.fn<NonNullable<WasmAvlBuildPipelineDependenciesV2['emitBuildOutput']>>>;
 } {
   return {
     fingerprintSource: vi.fn(() => PIPELINE_SOURCE_SHA256),

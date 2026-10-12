@@ -19,9 +19,9 @@ $ExpectedSpecHash = @(
 $ExpectedLockHash = '1573a69aa3c5cafa302621efcc65032b653e9cf1548a32c69e2dd5011ca8b56d'
 $ExpectedPatchHash = 'cd282677b05e1fca21d9c94e6338566ce4448ce503f7055de8667aaa86378fdf'
 $ExpectedBoundedProcessLibraryHash = @(
-    '4f13f9e8de0b011a2f11b540585c185367d47a5227aff05259d311d340efe352',
-    '1ba9e800235d92f886c7e08790ecde85f22759544725205c0f26b9347d159427',
-    'ba84b3d38a3b87c98cd09441b1e374c99727cc1820c9c218da4e8c6da3d48044')
+    '391aa32f06203512517ca32a9b062247f224cfae29d542b01fb355633849c75a',
+    'eec0c0e7a61f5489f957c3ea0d93041cd518cc2a09157122d8648476f67e870c',
+    'ea07ff1c95e54e60cfd4e621dce04de6074c46e9744dace674c1dbef4190276a')
 $ExpectedBoundedProcessImplementationHash = @(
     '6a3153c6a69c290ced5f7fd7eaebbb975d69aa1010e9c6bd98ca31e71041c208',
     'b84c68bb7ddd9526832c92a76c149f10d024be477e73127399439ad46d85da02',
@@ -212,7 +212,7 @@ $InputPins[$BoundedProcessImplementationPath] = $ExpectedBoundedProcessImplement
 $InputPins[$ProcessOwnerPath] = '21ba11605b4bb06b5d94eb8d8d013a675c7c6f7d2d15bed89ac626d7e7cdbc1e'
 $InputPins[$TsxCliPath] = '0ef1d6f8dee95174853c479fb4d9ffdcebf755125a0b477a1236bac331ccf9d5'
 $InputPins[$TsxPackagePath] = '4321447dcfb5bc39e683e6a49555bfb6dadc4543fc64baf5cc43020e9c1775a1'
-$InputPins[$PackageLockPath] = '1902a44c0ec0f8e68e7d2c3e3eaacf07401be02a3f809ee00da9539fba0444f5'
+$InputPins[$PackageLockPath] = 'ac35cf3f84afbe1ffd089f6f5b89864182045db05ad21c2c8a059f1d120aa5ad'
 $InputPins[$SpecPath] = $ExpectedSpecHash
 foreach ($root in @($BridgeRoot, $ErgoNodeRoot)) {
     foreach ($path in @($FixturePath, $OutputRoot)) {

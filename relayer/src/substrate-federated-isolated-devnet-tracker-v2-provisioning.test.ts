@@ -2627,7 +2627,7 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
                   recipientErgoTreeHex: fixture.session.signer.p2pkErgoTreeHex };
                 const liveBoxes = [deposit.boxes.reserveSuccessor, dup.outputs[0]!, fee.transaction.outputs[0]!, admitted.outputs[0]!];
                 const beforeChecks = observed.checkBodies.length;
-                const originalRead = ergoHelpers.ngetDirect;
+                const originalRead = vi.mocked(ergoHelpers.ngetDirect).getMockImplementation()!;
                 let injected = false;
                 const inputFault = /^withdrawal-input-([0-3])-(primary|witness)$/.exec(fault);
                 const postFault = /^withdrawal-post-(input|witness)-([0-3])$/.exec(fault);
@@ -3972,7 +3972,7 @@ async function exerciseWithdrawalV2Lifecycle(
   expect(reserved.operationProfile).toBe('e2s.substrate-federated-local-devnet-withdrawal-operation.v2');
   expect(reserved.status).toBe('pending');
   expect(() => reserveWithdrawalV2(authorization, state)).toThrow(/consumed/);
-  const originalRead = ergoHelpers.ngetDirect;
+  const originalRead = vi.mocked(ergoHelpers.ngetDirect).getMockImplementation()!;
   const stale = fault === 'withdrawal-lifecycle-stale-fee'
     ? vi.spyOn(ergoHelpers, 'ngetDirect').mockImplementation(async (...args) => {
       const value = await originalRead(...args);

@@ -26,7 +26,7 @@ let account: string;
 let header: object;
 let extrinsics: string[];
 const candidate = { genesisHashHex: GENESIS, extrinsicHashHex: HASH, signedExtrinsicHex: EXTRINSIC };
-let authorize: ReturnType<typeof vi.fn>;
+let authorize: ReturnType<typeof vi.fn<() => void>>;
 
 beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), 'bridge-native-attempt-test-'));
