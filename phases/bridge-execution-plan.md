@@ -73,6 +73,13 @@ A genuine successful lifecycle capture, stopped-state ownership and separately
 admitted recovery caller remain due. Synthetic source composition cannot
 substitute for those observations or supply another campaign admission.
 
+The public parent selection also prepares the exact five copied-owner input
+fields through its separately selected raw pin and explicit expected ancestry.
+The pure preparation reuses the canonical parent parser and performs no I/O,
+callback or launch. Synthetic composition connects that result to the existing
+copy/paired-observe/stop owner and refuses altered component bytes or an observed
+tip mismatch. Actual capture and separately admitted execution remain open.
+
 The owned HTTP and test-framework dependency closure is validated locally.
 Axios 1.20.0 and dev-only source-map-js 1.2.2 retain genuine loopback transport
 behavior; the inherited-prototype hook falsifier fails on Axios 1.19.0 and
@@ -1998,7 +2005,7 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Accumulated-state recovery admission (next result) | Connect the bounded public selection from a genuine successful lifecycle capture to a separately admitted copied-Ergo observation caller | The pure selector and optional packaged producer bind component-pin roles, the expected confirmation snapshot and existing result/locator ancestry. Actual successful capture, stopped-state ownership and fresh recovery execution admission remain missing. No historical runtime reads, reused custody or automatic C63 |
+| Accumulated-state recovery admission (next result) | Admit a copied-Ergo observation caller against a genuine successful lifecycle capture and its selected public parent companion | The pure selector, optional packaged producer and public-parent owner-input preparation bind component-pin roles, expected snapshot and result/locator ancestry. Synthetic owner composition is closed; actual successful capture, stopped-state ownership and fresh recovery execution admission remain missing. No historical runtime reads, reused custody or automatic C63 |
 | Copied non-mining Ergo owner (locally validated) | Verified captured-node copies reach fresh non-mining owned processes, exact expected paired snapshot observations and verified termination without issuing old target or custody authority | 34 synthetic owner cases,128 copy cases and362 architecture cases pass. Existing owner/mining-pause/capture consumers pass96 cases with11 unchanged actual-runtime guards inapplicable. TypeScript/imports and independent source review pass. Exact final claims and guarded local promotion bind this checkpoint; no actual JVM restart or restored execution authority |
 | Pinned captured-node materialization (locally closed atdda85577) | An existing fixed-subtree capture and separately admitted manifest pin produce another disposable copy without changing the default owner-source path or adding restart authority | 113 whole-file cases,21 capture consumers and95 generic consumers pass with exact independent review and guarded local promotion. Files define allowed directory ancestors; unbound empty directories reject. This is byte correspondence on synthetic captures, not actual node consistency or restart |
 | Test-framework dependency closure (validated locally) | Supported Vitest 4.1.11 closes the three development advisories while preserving assertions, source inventory and runtime capability boundaries | Fresh locked installation and full audit zero; Vite7.3.6/Rollup4.62.4 retained. Exact CLI listing/selection, all638 source files with23131 passing cases and26 existing guarded cases, TypeScript and affected provenance/JVM checks pass. Exact independent review and guarded local promotion bind the candidate. No override, suppressed error or runtime budget change |

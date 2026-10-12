@@ -26,6 +26,13 @@ import { copySubstrateFederatedTwoCycleNodeStateV1 as copy } from './substrate-f
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
 import { prepareSubstrateFederatedTwoCycleCopiedErgoSelectionV1 } from './substrate-federated-two-cycle-copied-ergo-selection-v1.js';
 import { extendedRootResult } from './test-support/substrate-federated-native-two-cycle-root-result.js';
+import { canonicalJson } from './strict-json.js';
+import { projectSubstrateFederatedNativeTwoCycleResultV1 } from './substrate-federated-native-two-cycle-invocation-v1.js';
+import { createNativeTwoCycleWorkerRecoveryLocatorV1,
+  createNativeTwoCycleParentRecoveryLocatorV1 } from './substrate-federated-native-two-cycle-recovery-locator-v1.js';
+import { createNativeTwoCycleWorkerCopiedErgoSelectionV1,
+  createNativeTwoCycleParentCopiedErgoSelectionV1,
+  prepareNativeTwoCycleCopiedErgoOwnerInputV1 } from './substrate-federated-native-two-cycle-copied-ergo-selection-v1.js';
 
 class FakeChild extends EventEmitter {
   exitCode: number | null = null;
@@ -126,7 +133,9 @@ async function fixture(initialHeight = 20) {
 }
 
 describe('copied non-mining Ergo owner with synthetic process boundaries', () => {
-  it('consumes a separately selected successful-root capture with the exact Ergo pin and expected tip', async () => {
+  it.each(['complete root', 'public parent', 'public parent changed component',
+    'public parent different observed tip'] as const)(
+    'consumes a separately selected %s capture with the exact Ergo pin and expected tip', async source => {
     const f = await fixture(220);
     const root = extendedRootResult();
     const captureRoot = join(f.root, root.recoveryEvidence.buildDirectoryName, 'target',
@@ -152,11 +161,66 @@ describe('copied non-mining Ergo owner with synthetic process boundaries', () =>
     root.recoveryEvidence.manifestSha256Hex = sha(manifestText);
     Object.assign(root.secondCycle.confirmationExecution, { finalSnapshot: f.expected });
     const rootText = JSON.stringify(root);
-    const selection = prepareSubstrateFederatedTwoCycleCopiedErgoSelectionV1({
+    const selectedRoot = prepareSubstrateFederatedTwoCycleCopiedErgoSelectionV1({
       rootResultText: rootText, expectedRootResultSha256Hex: sha(rootText), captureManifestText: manifestText,
       buildParentDirectory: f.root, assertSourcesQuiescent: f.input.assertSourcesQuiescent,
     });
+    const selection = source === 'complete root' ? selectedRoot : (() => {
+      const encode = (value: unknown) => `${canonicalJson(value)}\n`;
+      const projected = projectSubstrateFederatedNativeTwoCycleResultV1(root);
+      const locatorBindings = { configSha256Hex: '01'.repeat(32), bridgeCommit: '02'.repeat(20),
+        bridgeTree: '03'.repeat(20), pathIdentityDigestHex: '04'.repeat(32),
+        toolIdentityDigestHex: '05'.repeat(32), rootResultDigestHex: projected.rootResultDigestHex };
+      const bindings = { ...locatorBindings, projectedReceiptDigestHex: projected.receiptDigestHex };
+      const workerLocator = createNativeTwoCycleWorkerRecoveryLocatorV1(root.recoveryEvidence, locatorBindings);
+      const terminalReceiptDigestHex = '06'.repeat(32);
+      const parentLocator = createNativeTwoCycleParentRecoveryLocatorV1(encode(workerLocator), locatorBindings,
+        terminalReceiptDigestHex);
+      const expected = { bindings, locator: root.recoveryEvidence,
+        ergoManifestSha256Hex: selectedRoot.ownerInput.capturedManifestSha256Hex,
+        workerRecoveryLocatorReceiptDigestHex: workerLocator.receiptDigestHex,
+        rootRawSha256Hex: sha(rootText), expectedSnapshot: f.expected };
+      const workerSelection = createNativeTwoCycleWorkerCopiedErgoSelectionV1({
+        rootResultText: rootText, captureManifestText: manifestText, buildParentDirectory: f.root,
+        workerRecoveryLocatorText: encode(workerLocator), bindings,
+      });
+      const parentSelection = createNativeTwoCycleParentCopiedErgoSelectionV1({
+        workerSelectionText: encode(workerSelection), workerRecoveryLocatorText: encode(workerLocator),
+        parentRecoveryLocatorText: encode(parentLocator), terminalReceiptDigestHex, expected,
+      });
+      const parentSelectionText = encode(parentSelection);
+      const prepared = prepareNativeTwoCycleCopiedErgoOwnerInputV1({
+        parentSelectionText, expectedParentSelectionSha256Hex: sha(parentSelectionText),
+        expected: { ...expected, terminalReceiptDigestHex,
+          parentRecoveryLocatorReceiptDigestHex: parentLocator.receiptDigestHex,
+          workerSelectionReceiptDigestHex: workerSelection.receiptDigestHex },
+        buildParentDirectory: f.root, assertSourcesQuiescent: f.input.assertSourcesQuiescent,
+      });
+      expect(prepared.ownerInput).toEqual(selectedRoot.ownerInput);
+      expect(prepared.ownerInput.assertSourcesQuiescent).toBe(f.input.assertSourcesQuiescent);
+      return prepared;
+    })();
     expect(selection.ownerInput.capturedManifestSha256Hex).not.toBe(selection.aggregateManifestSha256Hex);
+    if (source === 'public parent changed component') {
+      writeFileSync(join(selection.ownerInput.primaryRoot, 'state', 'synthetic.bin'), 'changed captured bytes');
+      await expect(f.run(async () => { throw new Error('callback must not enter'); }, selection.ownerInput))
+        .rejects.toThrow();
+      expect(f.children).toHaveLength(0);
+      return;
+    }
+    if (source === 'public parent different observed tip') {
+      const ordinary = f.http.getMockImplementation()!;
+      let entered = false;
+      await expect(f.run(async lease => {
+        entered = true;
+        f.http.mockImplementation((url, init) => new URL(String(url)).pathname === '/blocks/lastHeaders/1'
+          ? Promise.resolve(new Response(JSON.stringify([{ id: '45'.repeat(32), height: 220 }]))) : ordinary(url, init));
+        await lease.readExactSnapshots();
+      }, selection.ownerInput)).rejects.toThrow(/snapshot differs/);
+      expect(entered).toBe(true);
+      expect(f.live()).toHaveLength(0);
+      return;
+    }
     const observed = await f.run(async lease => {
       expect(await lease.readExactSnapshots()).toEqual({ primary: f.expected, witness: f.expected });
       return 'selected synthetic tip';

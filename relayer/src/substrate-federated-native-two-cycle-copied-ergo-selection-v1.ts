@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { lstatSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
 import { types } from 'node:util';
+import type { SubstrateFederatedCopiedNonMiningErgoNodePairV1Input } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import { canonicalJson, sha256CanonicalJson, parseStrictJson } from './strict-json.js';
 import { canonicalPathIdentity, readBoundedRegularFile } from './create-only-out-of-repository-artifact.js';
 import { prepareSubstrateFederatedTwoCycleCopiedErgoSelectionV1 } from './substrate-federated-two-cycle-copied-ergo-selection-v1.js';
@@ -67,6 +68,46 @@ export interface NativeTwoCycleParentCopiedErgoSelectionV1 extends SelectionBody
   readonly parentRecoveryLocatorReceiptDigestHex: string;
   readonly workerSelectionReceiptDigestHex: string;
   readonly receiptDigestHex: string;
+}
+
+export interface NativeTwoCycleCopiedErgoOwnerInputPreparationV1 {
+  readonly parentSelectionText: string;
+  readonly expectedParentSelectionSha256Hex: string;
+  readonly expected: Readonly<NativeTwoCycleParentCopiedErgoSelectionExpectedV1>;
+  readonly buildParentDirectory: string;
+  readonly assertSourcesQuiescent: () => void | Promise<void>;
+}
+
+/** Pure preparation from a separately selected public parent receipt. The callback
+ * is retained by reference, never invoked here. Filesystem custody, stopped-state
+ * verification and operation-specific admission remain the owner's prerequisites. */
+export function prepareNativeTwoCycleCopiedErgoOwnerInputV1(
+  input: Readonly<NativeTwoCycleCopiedErgoOwnerInputPreparationV1>,
+) {
+  const raw = exact(input, ['parentSelectionText', 'expectedParentSelectionSha256Hex', 'expected',
+    'buildParentDirectory', 'assertSourcesQuiescent']);
+  const assertSourcesQuiescent = raw.assertSourcesQuiescent;
+  if (typeof assertSourcesQuiescent !== 'function' || types.isProxy(assertSourcesQuiescent)) {
+    throw new Error('copied Ergo owner input requires a non-proxy quiescence callback');
+  }
+  const parentSelectionText = boundedText(raw.parentSelectionText, 16 * 1024);
+  const parentSelectionRawSha256Hex = hex(raw.expectedParentSelectionSha256Hex);
+  if (hash(parentSelectionText) !== parentSelectionRawSha256Hex) {
+    throw new Error('copied Ergo parent selection raw SHA256 differs');
+  }
+  const parent = parseNativeTwoCycleParentCopiedErgoSelectionV1(parentSelectionText,
+    raw.expected as NativeTwoCycleParentCopiedErgoSelectionExpectedV1);
+  const buildParentDirectory = lexicalParent(raw.buildParentDirectory);
+  const ergoRoot = join(buildParentDirectory, parent.locator.buildDirectoryName, 'target', parent.locator.directoryName, 'ergo');
+  const ownerInput: Readonly<SubstrateFederatedCopiedNonMiningErgoNodePairV1Input> = Object.freeze({
+    primaryRoot: join(ergoRoot, 'primary'), witnessRoot: join(ergoRoot, 'witness'),
+    capturedManifestSha256Hex: parent.ergoManifestSha256Hex, expectedSnapshot: parent.expectedSnapshot,
+    assertSourcesQuiescent: assertSourcesQuiescent as () => void | Promise<void>,
+  });
+  return Object.freeze({ schema: 'e2s.substrate-federated-native-two-cycle-copied-ergo-owner-input-selection.v1' as const,
+    version: 1 as const, parentSelectionRawSha256Hex, parentSelectionReceiptDigestHex: parent.receiptDigestHex,
+    rootRawSha256Hex: parent.rootRawSha256Hex, legacyProjectedReceiptDigestHex: parent.projectedReceiptDigestHex,
+    aggregateManifestSha256Hex: parent.locator.manifestSha256Hex, ownerInput, ...CLAIMS });
 }
 
 /** Derives the public selection from the complete live producer result. No caller

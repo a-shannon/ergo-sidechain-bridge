@@ -541,6 +541,24 @@ recovery execution remain unobserved. The selection does not establish payout
 persistence, stopped-state ownership, custody disposal or permission to start
 recovery.
 
+`prepareNativeTwoCycleCopiedErgoOwnerInputV1` connects a separately selected
+public parent companion to the copied owner without requiring the complete root
+or worker files. Supply the companion text, its independently selected raw
+SHA-256, explicit expected parent ancestry, a controlled local build parent and
+the quiescence callback. The function reuses the canonical parent parser,
+derives the fixed capture layout, and returns exactly the owner's five input
+fields with the Ergo component pin and selected expected snapshot. It freezes
+the returned records and retains the callback by reference without invoking it.
+
+Preparation performs no file or network reads and does not launch the owner.
+Its raw parent pin is distinct from the receipt, root, aggregate and component
+pins. Five false claims remain explicit; optional independently selected root
+or snapshot checks retain their parser meaning. Matching a self-consistent
+companion does not authenticate its tip. The owner must still validate the
+actual component inventory and bytes, quiescence, process inputs and paired
+observations under a separate recovery admission. The current composition
+uses synthetic capture files and simulated process/HTTP boundaries.
+
 ## Observed campaign status
 
 Campaign 24 invoked this command at

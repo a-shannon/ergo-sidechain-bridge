@@ -9,13 +9,118 @@ import { projectSubstrateFederatedNativeTwoCycleResultV1 } from './substrate-fed
 import { createNativeTwoCycleWorkerRecoveryLocatorV1, createNativeTwoCycleParentRecoveryLocatorV1 } from './substrate-federated-native-two-cycle-recovery-locator-v1.js';
 import { createNativeTwoCycleWorkerCopiedErgoSelectionV1, parseNativeTwoCycleWorkerCopiedErgoSelectionV1,
   createNativeTwoCycleParentCopiedErgoSelectionV1, parseNativeTwoCycleParentCopiedErgoSelectionV1,
-  readNativeTwoCycleCopiedErgoCaptureManifestV1 } from './substrate-federated-native-two-cycle-copied-ergo-selection-v1.js';
+  readNativeTwoCycleCopiedErgoCaptureManifestV1, prepareNativeTwoCycleCopiedErgoOwnerInputV1,
+  type NativeTwoCycleCopiedErgoOwnerInputPreparationV1 } from './substrate-federated-native-two-cycle-copied-ergo-selection-v1.js';
 
 const text = (value: unknown) => `${canonicalJson(value)}\n`;
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 const other = 'ef'.repeat(32);
 const workerDomain = 'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_WORKER_COPIED_ERGO_SELECTION_V1';
 const parentDomain = 'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_PARENT_COPIED_ERGO_SELECTION_V1';
+
+describe('pure public parent to copied Ergo owner input', () => {
+  function preparation() {
+    const f = fixture(); let calls = 0;
+    const assertSourcesQuiescent = () => { calls++; throw new Error('must not run during preparation'); };
+    const parentSelectionText = text(f.parent);
+    const input: NativeTwoCycleCopiedErgoOwnerInputPreparationV1 = {
+      parentSelectionText, expectedParentSelectionSha256Hex: hash(parentSelectionText), expected: f.parentExpected,
+      buildParentDirectory: resolve('synthetic-unmaterialized-owner-parent'), assertSourcesQuiescent,
+    };
+    return { f, input, calls: () => calls };
+  }
+  it('prepares exact frozen five-field owner input from public parent text without raw root or worker files', () => {
+    const { f, input, calls } = preparation();
+    const selected = prepareNativeTwoCycleCopiedErgoOwnerInputV1(input);
+    const ergo = join(input.buildParentDirectory, f.parent.locator.buildDirectoryName, 'target', f.parent.locator.directoryName, 'ergo');
+    expect(selected.ownerInput).toEqual({ primaryRoot: join(ergo, 'primary'), witnessRoot: join(ergo, 'witness'),
+      capturedManifestSha256Hex: f.parent.ergoManifestSha256Hex, expectedSnapshot: f.parent.expectedSnapshot,
+      assertSourcesQuiescent: input.assertSourcesQuiescent });
+    expect(Object.keys(selected.ownerInput).sort()).toEqual(['assertSourcesQuiescent', 'capturedManifestSha256Hex',
+      'expectedSnapshot', 'primaryRoot', 'witnessRoot']);
+    expect(selected).toMatchObject({ schema: 'e2s.substrate-federated-native-two-cycle-copied-ergo-owner-input-selection.v1',
+      version: 1, parentSelectionRawSha256Hex: hash(input.parentSelectionText), parentSelectionReceiptDigestHex: f.parent.receiptDigestHex,
+      rootRawSha256Hex: f.parent.rootRawSha256Hex, legacyProjectedReceiptDigestHex: f.parent.projectedReceiptDigestHex,
+      aggregateManifestSha256Hex: f.parent.locator.manifestSha256Hex, successAuthenticated: false, recoveryAdmitted: false,
+      nodeConsistencyEstablished: false, freshRestartValidated: false, executionAuthorityRestored: false });
+    expect(selected.ownerInput.assertSourcesQuiescent).toBe(input.assertSourcesQuiescent);
+    expect(calls()).toBe(0);
+    for (const value of [selected, selected.ownerInput, selected.ownerInput.expectedSnapshot]) expect(Object.isFrozen(value)).toBe(true);
+    f.parentExpected.expectedSnapshot.fullHeight++;
+    expect(selected.ownerInput.expectedSnapshot.fullHeight).toBe(220);
+  });
+  it('retains an asynchronous callback by reference without invoking it', () => {
+    const { input } = preparation(); let calls = 0;
+    const callback = async () => { calls++; };
+    expect(prepareNativeTwoCycleCopiedErgoOwnerInputV1({ ...input, assertSourcesQuiescent: callback })
+      .ownerInput.assertSourcesQuiescent).toBe(callback);
+    expect(calls).toBe(0);
+  });
+  it.each(['wrong', 'uppercase', 'short', 'LF', 'receipt-digest'] as const)('rejects selected raw pin %s', fault => {
+    const { f, input, calls } = preparation();
+    const pin = fault === 'wrong' ? other : fault === 'uppercase' ? 'AB'.repeat(32) : fault === 'short' ? 'a'.repeat(63)
+      : fault === 'LF' ? input.expectedParentSelectionSha256Hex + '\n' : f.parent.receiptDigestHex;
+    expect(() => prepareNativeTwoCycleCopiedErgoOwnerInputV1({ ...input, expectedParentSelectionSha256Hex: pin })).toThrow();
+    expect(calls()).toBe(0);
+  });
+  it.each(['stale-raw-pin', 're-pinned-noncanonical'] as const)('refuses changed parent bytes %s', fault => {
+    const { input } = preparation(); const changed = input.parentSelectionText + ' ';
+    expect(() => prepareNativeTwoCycleCopiedErgoOwnerInputV1({ ...input, parentSelectionText: changed,
+      expectedParentSelectionSha256Hex: fault === 'stale-raw-pin' ? input.expectedParentSelectionSha256Hex : hash(changed) })).toThrow();
+  });
+  const ancestryFields = ['terminalReceiptDigestHex', 'parentRecoveryLocatorReceiptDigestHex', 'workerSelectionReceiptDigestHex',
+    'workerRecoveryLocatorReceiptDigestHex', 'ergoManifestSha256Hex', 'rootRawSha256Hex', 'rootResultDigestHex',
+    'projectedReceiptDigestHex', 'configSha256Hex'] as const;
+  it.each(ancestryFields)('refuses independently changed parent %s with both hashes recomputed', field => {
+    const { f, input, calls } = preparation(); const changed = resign({ ...f.parent, [field]: other }, parentDomain);
+    expect(() => prepareNativeTwoCycleCopiedErgoOwnerInputV1({ ...input, parentSelectionText: changed,
+      expectedParentSelectionSha256Hex: hash(changed) })).toThrow();
+    expect(calls()).toBe(0);
+  });
+  it.each(['build', 'capture', 'aggregate', 'tip'] as const)('refuses independent selected %s drift after re-pinning', fault => {
+    const { f, input } = preparation(); const changed = resign({ ...f.parent,
+      ...(fault === 'tip' ? { expectedSnapshot: { ...f.parent.expectedSnapshot, headerIdHex: other } }
+        : { locator: { ...f.parent.locator, ...(fault === 'build' ? { buildDirectoryName: 'bridge-fed-genesis-Zz9876' }
+          : fault === 'capture' ? { directoryName: 'two-cycle-recovery-Zz9876' } : { manifestSha256Hex: other }) } }) }, parentDomain);
+    expect(() => prepareNativeTwoCycleCopiedErgoOwnerInputV1({ ...input, parentSelectionText: changed,
+      expectedParentSelectionSha256Hex: hash(changed) })).toThrow();
+  });
+  it.each(['relative', 'traversal', 'UNC', 'device', 'ADS', 'NUL'] as const)('refuses build parent %s lexically', fault => {
+    const { input } = preparation(); const buildParentDirectory = fault === 'relative' ? 'relative/build'
+      : fault === 'traversal' ? `${input.buildParentDirectory}/../other` : fault === 'UNC' ? '//server/share/build'
+        : fault === 'device' ? '//?/C:/build' : fault === 'ADS' ? `${input.buildParentDirectory}:stream` : `${input.buildParentDirectory}\0`;
+    expect(() => prepareNativeTwoCycleCopiedErgoOwnerInputV1({ ...input, buildParentDirectory })).toThrow();
+  });
+  it.each(['proxy', 'getter', 'symbol', 'nonenumerable', 'extra', 'missing', 'callback-proxy', 'callback-nonfunction',
+    'expected-proxy', 'expected-getter', 'snapshot-proxy'] as const)('refuses hostile %s without hooks', fault => {
+      const { input } = preparation(); let calls = 0; let changed: object = { ...input };
+      const traps = { getPrototypeOf() { calls++; throw Error('trap'); }, ownKeys() { calls++; throw Error('trap'); },
+        apply() { calls++; throw Error('trap'); } };
+      if (fault === 'proxy') changed = new Proxy(changed, traps);
+      if (fault === 'getter') Object.defineProperty(changed, 'parentSelectionText', { enumerable: true, get() { calls++; throw Error('getter'); } });
+      if (fault === 'symbol') Object.assign(changed, { [Symbol('extra')]: true });
+      if (fault === 'nonenumerable') Object.defineProperty(changed, 'expected', { enumerable: false });
+      if (fault === 'extra') Object.assign(changed, { extra: true });
+      if (fault === 'missing') Reflect.deleteProperty(changed, 'expected');
+      if (fault === 'callback-proxy') Object.assign(changed, { assertSourcesQuiescent: new Proxy(input.assertSourcesQuiescent, traps) });
+      if (fault === 'callback-nonfunction') Object.assign(changed, { assertSourcesQuiescent: {} });
+      if (fault === 'expected-proxy') Object.assign(changed, { expected: new Proxy(input.expected, traps) });
+      if (fault === 'expected-getter') { const expected = { ...input.expected }; Object.defineProperty(expected, 'bindings',
+        { enumerable: true, get() { calls++; throw Error('getter'); } }); Object.assign(changed, { expected }); }
+      if (fault === 'snapshot-proxy') Object.assign(changed, { expected: { ...input.expected,
+        expectedSnapshot: new Proxy(input.expected.expectedSnapshot!, traps) } });
+      expect(() => prepareNativeTwoCycleCopiedErgoOwnerInputV1(changed as NativeTwoCycleCopiedErgoOwnerInputPreparationV1)).toThrow();
+      expect(calls).toBe(0);
+    });
+  it('retains false claims when no independently selected tip or raw root pin is available', () => {
+    const { f, input } = preparation(); const { expectedSnapshot: _tip, rootRawSha256Hex: _raw, ...expected } = input.expected;
+    const changed = resign({ ...f.parent, expectedSnapshot: { ...f.parent.expectedSnapshot, headerIdHex: other } }, parentDomain);
+    const selected = prepareNativeTwoCycleCopiedErgoOwnerInputV1({ ...input, expected, parentSelectionText: changed,
+      expectedParentSelectionSha256Hex: hash(changed) });
+    expect(selected.ownerInput.expectedSnapshot.headerIdHex).toBe(other);
+    expect(selected.successAuthenticated).toBe(false); expect(selected.recoveryAdmitted).toBe(false);
+  });
+});
 function resign(value: object, domain: string): string {
   const { receiptDigestHex: _ignored, ...body } = value as Record<string, unknown>;
   return text({ ...body, receiptDigestHex: sha256CanonicalJson(body, domain) });

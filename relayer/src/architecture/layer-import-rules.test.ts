@@ -1025,6 +1025,9 @@ describe('layer import rules', () => {
 
   it.each([
     ['substrate-federated-native-two-cycle-copied-ergo-selection-v1.ts',
+      'prepareNativeTwoCycleCopiedErgoOwnerInputV1',
+      'substrate-federated-copied-non-mining-ergo-node-process-v1.test.ts'],
+    ['substrate-federated-native-two-cycle-copied-ergo-selection-v1.ts',
       'createNativeTwoCycleWorkerCopiedErgoSelectionV1',
       'substrate-federated-native-two-cycle-copied-ergo-selection-v1.test.ts'],
     ['substrate-federated-native-two-cycle-copied-ergo-selection-v1.ts',
