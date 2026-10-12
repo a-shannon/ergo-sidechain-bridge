@@ -13,9 +13,19 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ExpectedNodeCommit = '2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1'
-$ExpectedSpecHash = 'ab7f9defc3e49121702673ad057ddb3d9cac197c657f8c033468eeab131b8cdf'
+$ExpectedSpecHash = @(
+    'ab7f9defc3e49121702673ad057ddb3d9cac197c657f8c033468eeab131b8cdf',
+    '84b2bb399bb6c8762a993cacf5c6e0261ffcc1f36047416849fc562e09790314')
 $ExpectedLockHash = '1573a69aa3c5cafa302621efcc65032b653e9cf1548a32c69e2dd5011ca8b56d'
 $ExpectedPatchHash = 'cd282677b05e1fca21d9c94e6338566ce4448ce503f7055de8667aaa86378fdf'
+$ExpectedBoundedProcessLibraryHash = @(
+    '4f13f9e8de0b011a2f11b540585c185367d47a5227aff05259d311d340efe352',
+    '1ba9e800235d92f886c7e08790ecde85f22759544725205c0f26b9347d159427',
+    'ba84b3d38a3b87c98cd09441b1e374c99727cc1820c9c218da4e8c6da3d48044')
+$ExpectedBoundedProcessImplementationHash = @(
+    '6a3153c6a69c290ced5f7fd7eaebbb975d69aa1010e9c6bd98ca31e71041c208',
+    'b84c68bb7ddd9526832c92a76c149f10d024be477e73127399439ad46d85da02',
+    '2dadbfc063fc51f7f7c6ed85ac95380378957447110ebf8daee13723eb797ab3')
 $ExpectedTests = 35
 $SbtTimeoutMilliseconds = 300000
 $TerminationGraceMilliseconds = 15000
@@ -65,10 +75,17 @@ function Resolve-RealPath([string] $Path, [bool] $Directory) {
     }
     return $item.FullName
 }
-function Assert-Hash([string] $Path, [string] $Expected) {
+function Assert-Hash([string] $Path, [object] $Expected) {
+    $pins = @($Expected)
+    if ($pins.Count -eq 0) { throw 'Expected digest set is empty' }
+    $seen = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($pin in $pins) {
+        if ($pin -isnot [string] -or $pin -cnotmatch '^[0-9a-f]{64}$' -or -not $seen.Add($pin)) {
+            throw 'Expected digest set is malformed or duplicated'
+        }
+    }
     $resolved = Resolve-RealPath $Path $false
-    if ($Expected -cnotmatch '^[0-9a-f]{64}$' -or
-        (Get-FileHash -LiteralPath $resolved -Algorithm SHA256).Hash.ToLowerInvariant() -cne $Expected) {
+    if ($pins -cnotcontains (Get-FileHash -LiteralPath $resolved -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()) {
         throw "Input digest mismatch: $Path"
     }
 }
@@ -179,6 +196,7 @@ $LockPath = Resolve-RealPath (Join-Path $BridgeRoot 'sources/consensus-source-lo
 $PatchPath = Resolve-RealPath (Join-Path $BridgeRoot 'sources/ergo-node/0002-sidechain-extension-fields-candidate-recovery.patch') $false
 $JobRunnerPath = Resolve-RealPath (Join-Path $RelayerRoot 'src/scripts/windows-job-process.ps1') $false
 $BoundedProcessLibraryPath = Resolve-RealPath (Join-Path $RelayerRoot 'src/pinned-local-native-verifier-build.ts') $false
+$BoundedProcessImplementationPath = Resolve-RealPath (Join-Path $RelayerRoot 'src/bounded-process-runner.ts') $false
 $ProcessOwnerPath = Resolve-RealPath (Join-Path $RelayerRoot 'src/scripts/run-substrate-federated-native-tracker-mempool-process.ts') $false
 $TsxCliPath = Resolve-RealPath (Join-Path $RelayerRoot 'node_modules/tsx/dist/cli.mjs') $false
 $TsxPackagePath = Resolve-RealPath (Join-Path $RelayerRoot 'node_modules/tsx/package.json') $false
@@ -189,11 +207,12 @@ $InputPins[$NodePath] = '63c259c81e5d472b5f11c8d506070130cb04a1ecf84b80377a34ed6
 $InputPins[$JavaPath] = '69ae5108b20bb132442ebe756a41e67f9b33b65b7ae6dc2a87b3b04947bab19e'
 $InputPins[$SbtLauncherPath] = 'b4c0c55d68f11b1510d884641cb1b1456191dac40ddc958bf86c825adc344e16'
 $InputPins[$JobRunnerPath] = '47a08af66ef3134fefeee392e5578be9295e5171dca83c8861822d7e464ff627'
-$InputPins[$BoundedProcessLibraryPath] = '4f13f9e8de0b011a2f11b540585c185367d47a5227aff05259d311d340efe352'
+$InputPins[$BoundedProcessLibraryPath] = $ExpectedBoundedProcessLibraryHash
+$InputPins[$BoundedProcessImplementationPath] = $ExpectedBoundedProcessImplementationHash
 $InputPins[$ProcessOwnerPath] = '21ba11605b4bb06b5d94eb8d8d013a675c7c6f7d2d15bed89ac626d7e7cdbc1e'
 $InputPins[$TsxCliPath] = '0ef1d6f8dee95174853c479fb4d9ffdcebf755125a0b477a1236bac331ccf9d5'
 $InputPins[$TsxPackagePath] = '4321447dcfb5bc39e683e6a49555bfb6dadc4543fc64baf5cc43020e9c1775a1'
-$InputPins[$PackageLockPath] = 'a7563e82e39489befde85608276a5739f1b5d4d924e13b33c50829d28f9178b8'
+$InputPins[$PackageLockPath] = '1902a44c0ec0f8e68e7d2c3e3eaacf07401be02a3f809ee00da9539fba0444f5'
 $InputPins[$SpecPath] = $ExpectedSpecHash
 foreach ($root in @($BridgeRoot, $ErgoNodeRoot)) {
     foreach ($path in @($FixturePath, $OutputRoot)) {

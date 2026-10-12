@@ -226,7 +226,7 @@ class BridgeSubstrateFederatedNativeTrackerMempoolSpec
 
   private def checkContextWindow(index: Int, fullValid: Boolean): Unit = inVersion {
     require(index == 8 || index == 9, "bounded context-window comparison")
-    sha256(fixtureBytes) shouldBe "ff5b4efec4ef8dc0d1c3631f43ad0c3d18ad8972c8c647141c6de720abade8bf"
+    sha256(fixtureBytes) shouldBe "a19a03efbeca8a7a515f75992a772c720499816a9b3c153caaef7969a292ebe1"
     signedBytes.length shouldBe 4173
     headers.head.height shouldBe 1029
     int(cursor, "checkpointExpiryHeight") shouldBe 1060

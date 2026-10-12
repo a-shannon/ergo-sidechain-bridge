@@ -13,15 +13,22 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ExpectedNodeCommit = '2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1'
-$ExpectedSpecHash = 'b2170ad15314a46ccfe3c597fa64d08d9c941142c315dd48def051323159365e'
+$ExpectedSpecHash = '51c546cb36c9c8cf20e6dd1a93ac618872f27f08175f0297de518c80cd125ccd'
 $ExpectedRecoverySpecHash = '41b1ef9a15eeab3d3d12ac974c6a77c4d26da36e06ef5512cdd28c961bf4d8ad'
 $ExpectedNodeHash = '63c259c81e5d472b5f11c8d506070130cb04a1ecf84b80377a34ed6ec9048088'
 $ExpectedJobRunnerHash = '47a08af66ef3134fefeee392e5578be9295e5171dca83c8861822d7e464ff627'
-$ExpectedBoundedProcessLibraryHash = '09cc5b729365b8e41b276117b54888dd58d0f2dc89b08a21db1f64853cfa82af'
+$ExpectedBoundedProcessLibraryHash = @(
+    '4f13f9e8de0b011a2f11b540585c185367d47a5227aff05259d311d340efe352',
+    '1ba9e800235d92f886c7e08790ecde85f22759544725205c0f26b9347d159427',
+    'ba84b3d38a3b87c98cd09441b1e374c99727cc1820c9c218da4e8c6da3d48044')
+$ExpectedBoundedProcessImplementationHash = @(
+    '6a3153c6a69c290ced5f7fd7eaebbb975d69aa1010e9c6bd98ca31e71041c208',
+    'b84c68bb7ddd9526832c92a76c149f10d024be477e73127399439ad46d85da02',
+    '2dadbfc063fc51f7f7c6ed85ac95380378957447110ebf8daee13723eb797ab3')
 $ExpectedProcessOwnerHash = '21ba11605b4bb06b5d94eb8d8d013a675c7c6f7d2d15bed89ac626d7e7cdbc1e'
 $ExpectedTsxCliHash = '0ef1d6f8dee95174853c479fb4d9ffdcebf755125a0b477a1236bac331ccf9d5'
 $ExpectedTsxPackageHash = '4321447dcfb5bc39e683e6a49555bfb6dadc4543fc64baf5cc43020e9c1775a1'
-$ExpectedPackageLockHash = 'a7563e82e39489befde85608276a5739f1b5d4d924e13b33c50829d28f9178b8'
+$ExpectedPackageLockHash = '1902a44c0ec0f8e68e7d2c3e3eaacf07401be02a3f809ee00da9539fba0444f5'
 $ExpectedTests = 20
 $SbtTimeoutMilliseconds = 300000
 $TerminationGraceMilliseconds = 15000
@@ -50,9 +57,16 @@ function Resolve-RealPath([string] $Path, [bool] $Directory) {
     return $item.FullName
 }
 
-function Assert-Hash([string] $Path, [string] $Expected) {
-    if ($Expected -cnotmatch '^[0-9a-f]{64}$' -or
-        (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $Expected) {
+function Assert-Hash([string] $Path, [object] $Expected) {
+    $pins = @($Expected)
+    if ($pins.Count -eq 0) { throw 'Expected digest set is empty' }
+    $seen = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($pin in $pins) {
+        if ($pin -isnot [string] -or $pin -cnotmatch '^[0-9a-f]{64}$' -or -not $seen.Add($pin)) {
+            throw 'Expected digest set is malformed or duplicated'
+        }
+    }
+    if ($pins -cnotcontains (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()) {
         throw "Input digest mismatch: $Path"
     }
 }
@@ -112,6 +126,23 @@ function Remove-OwnedScratchChildren([string] $Parent) {
     }
 }
 
+function Assert-SuccessOutput([string] $Output, [int] $ExitCode) {
+    $ExpectedTests = 20
+    if ($ExitCode -ne 0) { throw 'Offline tracker validation exited nonzero' }
+    $counts = [regex]::Matches($Output, '(?m)^\[info\] Total number of tests run:[^\r\n]*\r?$')
+    $suites = [regex]::Matches($Output, '(?m)^\[info\] Suites:[^\r\n]*\r?$')
+    $success = [regex]::Matches($Output, '(?m)^\[info\] Tests:[^\r\n]*\r?$')
+    $passed = [regex]::Matches($Output, '(?m)^\[info\] All tests passed[^\r\n]*\r?$')
+    if ($counts.Count -ne 1 -or
+        $counts[0].Value -cnotmatch ('^\[info\] Total number of tests run: ' + $ExpectedTests + '\r?$') -or
+        $suites.Count -ne 1 -or $suites[0].Value -cnotmatch '^\[info\] Suites: completed 2, aborted 0\r?$' -or
+        $success.Count -ne 1 -or
+        $success[0].Value -cnotmatch ('^\[info\] Tests: succeeded ' + $ExpectedTests + ', failed 0, canceled 0, ignored 0, pending 0\r?$') -or
+        $passed.Count -ne 1 -or $passed[0].Value -cnotmatch '^\[info\] All tests passed\.\r?$') {
+        throw 'Pinned validator did not report all 20 tests in two suites with no aborted or skipped cases'
+    }
+}
+
 function Invoke-BoundedJob(
     [string] $NodeExecutable,
     [string] $TsxCli,
@@ -158,6 +189,7 @@ function Invoke-BoundedJob(
         if ($exitCode -ne 0) {
             throw "Pinned native tracker mempool validation failed with exit code $exitCode"
         }
+        Assert-SuccessOutput $output $exitCode
         return $output
     } finally {
         [Environment]::SetEnvironmentVariable($requestEnvironmentKey, $priorValue, 'Process')
@@ -168,6 +200,7 @@ $BridgeRoot = Resolve-RealPath ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot 
 $RelayerRoot = Resolve-RealPath (Join-Path $BridgeRoot 'relayer') $true
 $JobRunnerPath = Resolve-RealPath (Join-Path $BridgeRoot 'relayer/src/scripts/windows-job-process.ps1') $false
 $BoundedProcessLibraryPath = Resolve-RealPath (Join-Path $RelayerRoot 'src/pinned-local-native-verifier-build.ts') $false
+$BoundedProcessImplementationPath = Resolve-RealPath (Join-Path $RelayerRoot 'src/bounded-process-runner.ts') $false
 $ProcessOwnerPath = Resolve-RealPath (Join-Path $RelayerRoot 'src/scripts/run-substrate-federated-native-tracker-mempool-process.ts') $false
 $TsxCliPath = Resolve-RealPath (Join-Path $RelayerRoot 'node_modules/tsx/dist/cli.mjs') $false
 $TsxPackagePath = Resolve-RealPath (Join-Path $RelayerRoot 'node_modules/tsx/package.json') $false
@@ -204,6 +237,7 @@ Assert-Hash $JavaPath '69ae5108b20bb132442ebe756a41e67f9b33b65b7ae6dc2a87b3b0494
 Assert-Hash $SbtLauncherPath 'b4c0c55d68f11b1510d884641cb1b1456191dac40ddc958bf86c825adc344e16'
 Assert-Hash $JobRunnerPath $ExpectedJobRunnerHash
 Assert-Hash $BoundedProcessLibraryPath $ExpectedBoundedProcessLibraryHash
+Assert-Hash $BoundedProcessImplementationPath $ExpectedBoundedProcessImplementationHash
 Assert-Hash $ProcessOwnerPath $ExpectedProcessOwnerHash
 Assert-Hash $TsxCliPath $ExpectedTsxCliHash
 Assert-Hash $TsxPackagePath $ExpectedTsxPackageHash
@@ -275,11 +309,6 @@ try {
     foreach ($name in $savedEnvironment.Keys) { [Environment]::SetEnvironmentVariable([string]$name, $null, 'Process') }
     foreach ($name in $childEnvironment.Keys) { [Environment]::SetEnvironmentVariable($name, $childEnvironment[$name], 'Process') }
     $result = Invoke-BoundedJob $NodePath $TsxCliPath $ProcessOwnerPath $JavaPath $arguments $ErgoNodeRoot ([ref]$ownerReturned)
-    $counts = [regex]::Matches($result, '(?m)^\[info\] Total number of tests run: ([0-9]+)\r?$')
-    if ($ExpectedTests -lt 1 -or $counts.Count -ne 1 -or
-        $counts[0].Groups[1].Value -cne [string]$ExpectedTests -or $result -notmatch 'All tests passed') {
-        throw 'Pinned node did not report the complete expected test set'
-    }
 } catch {
     $primaryError = $_.Exception
 } finally {
@@ -287,6 +316,8 @@ try {
     foreach ($name in $savedEnvironment.Keys) { [Environment]::SetEnvironmentVariable([string]$name, [string]$savedEnvironment[$name], 'Process') }
     $closeoutErrors = New-Object 'Collections.Generic.List[Exception]'
     try { Assert-NodeSource } catch { $closeoutErrors.Add($_.Exception) }
+    try { Assert-Hash $BoundedProcessLibraryPath $ExpectedBoundedProcessLibraryHash } catch { $closeoutErrors.Add($_.Exception) }
+    try { Assert-Hash $BoundedProcessImplementationPath $ExpectedBoundedProcessImplementationHash } catch { $closeoutErrors.Add($_.Exception) }
     try { Assert-Hash $spec $ExpectedSpecHash } catch { $closeoutErrors.Add($_.Exception) }
     try { Assert-Hash $recoverySpec $ExpectedRecoverySpecHash } catch { $closeoutErrors.Add($_.Exception) }
     try { Assert-Hash $FixturePath $FixtureSha256 } catch { $closeoutErrors.Add($_.Exception) }

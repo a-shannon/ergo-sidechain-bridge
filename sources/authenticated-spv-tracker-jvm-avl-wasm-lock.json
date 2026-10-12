@@ -19,11 +19,11 @@
     },
     {
       "path": "relayer/package.json",
-      "sha256": "1525093d890932e236bf3bf8df07319cbb2f89ca3c5288dff9cdc15c25cefd89"
+      "sha256": "df6f90ba7bd882b0c6fad862261084508cc6694072b150a96cee815c307a778c"
     },
     {
       "path": "relayer/package-lock.json",
-      "sha256": "a7563e82e39489befde85608276a5739f1b5d4d924e13b33c50829d28f9178b8"
+      "sha256": "1902a44c0ec0f8e68e7d2c3e3eaacf07401be02a3f809ee00da9539fba0444f5"
     },
     {
       "path": "relayer/tsconfig.json",

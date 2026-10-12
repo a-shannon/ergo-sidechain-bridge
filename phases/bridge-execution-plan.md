@@ -38,8 +38,37 @@ The inner predicate, raw cause, completion, cleanup and custody disposal remain
 unknown. The detail identifies the last operation entered only. Neither new
 diagnostics nor passing tests may reclassify C61 or any earlier hold.
 
-The selected local result is repository-only operator source preparation,
-ending at the existing non-authorizing preflight. The public source validator
+The owned HTTP dependency closure is validated locally: Axios 1.20.0 and
+dev-only source-map-js 1.2.2 retain genuine loopback transport behavior. The
+inherited-prototype hook falsifier fails on Axios 1.19.0 and passes on 1.20.0.
+A fresh installation's production audit reports zero vulnerabilities; three
+development-tool advisories remain. Upstream releases and advisories were
+checked on 2026-10-12. The separate supported Vitest migration is the next
+local dependency result; no transitive override is selected.
+
+Current package/bundle/WASM pins and both live JVM callers match. Fresh canonical
+compiler and WASM builds pass with unchanged generated artifact identities.
+The stale WASM package.json pin and tracker wrapper pin are corrected; each
+caller now also pins the implementation behind the re-export. Only explicitly
+reviewed raw source representations are admitted, with no read-time
+normalization. All 56 source-pin cases and 241 affected transport/provenance
+cases pass; one historical JVM-host case remains inapplicable under its
+unchanged guard. TypeScript and the import guard pass.
+
+Both actual JVM callers pass: 35 complete signed-continuation cases and twenty
+[tracker mempool cases](../validity-proof/consumer-jvm/native-tracker-mempool.md).
+The latter use a new fixed public fixture, SHA-256 `a19a03efbeca8a7a515f75992a772c720499816a9b3c153caaef7969a292ebe1`,
+with the existing transaction/context assertions unchanged. The old `ff5b4efe…`
+fixture was generated from a random ephemeral signer and is not reproduced by
+this input. The two-file tracker overlay remains separate from the current
+eight-file signed-continuation overlay. Historical compiler host locks stay
+fixed. These selections overlap and are not summed; they establish no node
+service, chain inclusion, independent custody or packaged lifecycle acceptance.
+Exact independent closeout review and guarded local promotion finish this lot.
+No campaign, push or new CI is selected.
+
+Repository-only operator source preparation is closed locally at `1e88842b`.
+The public source validator
 now exposes `--frontier-byte-policy raw`; omission retains the existing
 controlled-CRLF compatibility policy, and Ergo normalization is unchanged.
 Duplicate, missing, unknown and non-full-mode selections refuse. The real
@@ -50,9 +79,11 @@ All 77 source-baseline cases pass. The
 [operator prerequisite sequence](../docs/federated-native-two-cycle.md#check-prerequisites-without-starting-a-campaign)
 connects this check to the existing preflight and its fourteen false flags.
 Exact independent review, affected command/claims consumers and guarded local
-promotion remain due for this candidate. Reproduce the stable clean candidate
-in a separate root with its own npm installation and locked compiler runtime;
-stop before dispatch. No automatic C62, push or new CI is selected.
+promotion pass. A separate clean same-head root has its own npm installation
+and locked compiler runtime; the real preflight passes with all fourteen flags
+strictly false and empty campaign outputs. These results are candidate-scoped,
+so changed dependency/provenance bytes need their own affected checks. No
+automatic C62 is selected.
 
 The existing genuine native continuation consumer already constructs and signs
 the packet and invokes the actual
@@ -1870,7 +1901,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Fresh public source reconstruction -> full BOTH raw CLI -> existing operator preflight | Close CLI selection/refusals and the linked runbook, review the stable candidate, then reproduce it in a separate clean root with its own npm installation and locked compiler runtime; stop before dispatch | All 77 baseline cases and the real CLI LF-positive/CRLF-negative pair pass. The new two raw-client precheck cases and five existing cases pass in their scopes. Preflight must retain all fourteen Boolean false flags; neither report grants campaign authority. C24-C61 holds remain permanent |
+| **Now** | Supported test-framework dependencies -> unchanged assertion and runner contract | Select the minimum supported migration that closes Vitest, mocker and pool advisories; map the existing runner/reporters before changing the framework | Prior HTTP closure has fresh production audit zero, exact current builds, affected transport checks, 56 source guards and real JVM35/20 passes. Framework migration remains local work, with exact inventories, refusal semantics and runtime budgets preserved. No campaign or publication authority; C24-C61 holds remain permanent |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Separately select and admit one local synthetic campaign after a deciding checkpoint, exact local source identity, applicable checks/review and fresh runtime/source/output/custody/fee gates; apply guarded publication and due exact-head CI at public promotion | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
@@ -1915,7 +1946,9 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Operator public-source preparation (selected local result) | Repository instructions connect fresh plain unstaged source reconstruction, explicit raw Frontier validation and the existing non-authorizing preflight | All 77 baseline cases and the real CLI policy differential pass. Complete affected generic consumers, exact claims review and guarded local promotion, then reproduce in a separate clean root with fresh npm/compiler prerequisites and all fourteen preflight flags false. No campaign dispatch or new wrapper is needed |
+| Test-framework dependency closure (next local result) | A supported Vitest migration closes the three remaining development advisories without changing assertions, inventory or runtime capability boundaries | Map installed advisory minima and runner/reporter interfaces, choose the smallest supported version, then prove exact-name listing/counts, ordinary/special composition, error refusal and affected test consumers on a fresh installation. No forced transitive override, suppressed error or runtime budget change |
+| Owned HTTP dependency closure (validated locally) | Minimum patched dependencies preserve genuine GET/check-only POST behavior and current source/tool provenance | Axios1.20.0/source-map-js1.2.2, actual inherited-hook RED/GREEN, fresh production audit zero, current compiler/WASM builds, 241 affected cases, 56 source guards and actual JVM35/20 pass. Tracker's new fixed public fixture is a distinct input; historical results/locks remain scoped. Exact review and guarded local promotion apply; no campaign or readiness authority |
+| Operator public-source preparation (closed locally at1e88842b) | Repository instructions connect fresh plain unstaged source reconstruction, explicit raw Frontier validation and the existing non-authorizing preflight | All 77 baseline cases and the real CLI policy differential,95 affected generic consumers, exact source/claims review and guarded local promotion pass. Separate clean-root own npm/compiler preparation, full BOTH raw command and real preflight pass with all fourteen flags false and empty outputs. Reuse only under the exact candidate input closure; no campaign dispatch |
 | Signed-continuation JVM consumer (locally closed at e800de3d) | Exact fully signed bytes, three ordered input boxes and both explicit vote contexts reach the pinned native stateless/stateful transaction validator through a documented bounded command | All 35 JVM cases and 32 command acceptance/refusal cases, exact independent review and guarded local promotion pass. Preserve the unchanged scoped offline result; the next complete lifecycle requires separate fresh admission |
 | Native revalidation entered-operation join (locally validated) | Original escaping native error reaches optional bounded operation detail with unchanged failure semantics and complete prior revalidation ancestry | All six source-owned phases and isolated stale/conflicting/unsafe/cleanup refusals pass. Missing/invalid/occupied detail preserves old failures; contradictory success refuses. Source review GO and 95 generic consumer cases pass; exact final claims and guarded local promotion apply. Old schemas/bytes remain unchanged; no historical cause or execution authority |
 | Native continuation wire/advancing-header falsifier (locally closed) | Pass the genuine packet and checked handles through actual read decoding, normalization and revalidation; refuse one changed input or invalid header relation before authorization/reservation/submission | All 78 cases passed on the original authorizer; five focused cases pass on the new diagnostic producer. The two new convergence/exhaustion cases pass with exact observation counts and unchanged signed identities; all old names and budgets remain unchanged. No full 80-case replay is claimed. Component observations and checker responses are synthetic; no historical cause or campaign authority follows |
