@@ -460,6 +460,7 @@ type ContinuationFault = SecondTrackerFault | SecondPayoutFault | MiningAuthorit
   | 'continuation raw node JSON valid' | 'continuation raw node JSON reserve drift'
   | 'continuation raw node JSON descendants 2' | 'continuation raw node JSON descendants 64'
   | 'continuation raw node JSON ancestry 65'
+  | 'continuation raw node JSON precheck converges' | 'continuation raw node JSON precheck exhausts'
   | 'continuation copied withdrawal attempt' | 'continuation unconfirmed payout' | 'continuation old packet'
   | 'continuation foreign target' | 'continuation duplicate source invocation' | 'continuation disposed during source preparation'
   | 'continuation disposed during source checker' | 'continuation wrong vault packet'
@@ -484,6 +485,7 @@ describe('native FED withdrawal continuation', () => {
     'tracker WASM expiry', 'continuation valid', 'continuation raw node JSON valid',
     'continuation raw node JSON reserve drift', 'continuation raw node JSON descendants 2',
     'continuation raw node JSON descendants 64', 'continuation raw node JSON ancestry 65',
+    'continuation raw node JSON precheck converges', 'continuation raw node JSON precheck exhausts',
     'continuation old terminal signer',
     'continuation copied withdrawal check', 'continuation copied withdrawal attempt', 'continuation unconfirmed payout',
     'continuation old packet', 'continuation foreign target', 'continuation duplicate source invocation',
@@ -509,6 +511,14 @@ describe('native FED withdrawal continuation', () => {
     const continuation = { stage: 'none' as 'none' | 'builder' | 'source' | 'vault' | 'withdrawal-fee' | 'tracker-fee' };
     const continuationFault = fault.startsWith('continuation ');
     const rawNodeJson = fault.startsWith('continuation raw node JSON ');
+    const rawPrecheckWindow = fault === 'continuation raw node JSON precheck converges'
+      || fault === 'continuation raw node JSON precheck exhausts';
+    const rawPrecheckHeaders: Readonly<Record<string, unknown>>[] = [];
+    const rawPrecheckTipReads = new Map<string, number>();
+    const rawPrecheckInputReads = new Map<string, number>();
+    let rawPrecheckCandidate: fleet.LocalWasmSignedCheckCandidate | undefined;
+    let rawPrecheckCandidateJson: string | undefined;
+    let rawPrecheckBoxesJson: string | undefined;
     const rawAncestryAdvance = fault === 'continuation raw node JSON descendants 2' ? 2
       : fault === 'continuation raw node JSON descendants 64' ? 64
         : fault === 'continuation raw node JSON ancestry 65' ? 65 : 0;
@@ -574,13 +584,44 @@ describe('native FED withdrawal continuation', () => {
           ...ports,
           revalidate: async checked => {
             reserveRevalidationCalls++;
+            if (rawPrecheckWindow) {
+              rawPrecheckCandidate = checked.signed.signerArtifact as fleet.LocalWasmSignedCheckCandidate;
+              expect(rawPrecheckCandidate).toBeDefined();
+              rawPrecheckCandidateJson = canonicalJson(rawPrecheckCandidate);
+              rawPrecheckBoxesJson = canonicalJson([...boxes.entries()]);
+              // Vary only the observed canonical tip window. Keep the actual
+              // signed candidate, signing context and UTXO responses unchanged.
+              let headers = signingHeaders;
+              rawPrecheckHeaders.push(headers[0]!);
+              for (let index = 0; index < 5; index++) {
+                headers = appendSyntheticMinedHeader(headers);
+                rawPrecheckHeaders.push(headers[0]!);
+              }
+              for (let index = 0; index < rawPrecheckHeaders.length; index++) {
+                const header = rawPrecheckHeaders[index]!;
+                expect(header.id).toBe(Buffer.from(blakejs.blake2b(
+                  serializeCanonicalErgoHeaderV2(header), undefined, 32)).toString('hex'));
+                if (index > 0) expect(header.parentId).toBe(rawPrecheckHeaders[index - 1]!.id);
+                const evaluationHeight = Number(header.height) + 1;
+                expect(evaluationHeight).toBeGreaterThanOrEqual(secondContinuationPacket!.boxes.reserveSuccessor.creationHeight);
+                expect(evaluationHeight).toBeLessThanOrEqual(secondContinuationPacket!.boxes.reserveSuccessor.creationHeight + 100);
+                expect(evaluationHeight).toBeLessThan(secondContinuationPacket!.boxes.sourceLock.creationHeight + 10_000);
+              }
+            }
             if (rawAncestryAdvance > 0) {
               rawAncestryAnchorId = String(signingHeaders[0]!.id);
               for (const header of signingHeaders) rawHeadersById.set(String(header.id), header);
             }
             reserveRevalidationActive = true;
             try { return await ports.revalidate(checked); }
-            finally { reserveRevalidationActive = false; }
+            finally {
+              reserveRevalidationActive = false;
+              if (rawPrecheckWindow) {
+                expect(checked.signed.signerArtifact).toBe(rawPrecheckCandidate);
+                expect(canonicalJson(checked.signed.signerArtifact)).toBe(rawPrecheckCandidateJson);
+                expect(canonicalJson([...boxes.entries()])).toBe(rawPrecheckBoxesJson);
+              }
+            }
           },
           authorize: value => { reserveAuthorizations++; return ports.authorize(value); },
           reserve: value => { reserveReservations++; return ports.reserve(value); },
@@ -1061,6 +1102,10 @@ describe('native FED withdrawal continuation', () => {
       return pending;
     });
     vi.spyOn(fleet, 'checkSignedTransaction').mockImplementation(async (...args) => {
+      if (rawPrecheckWindow && reserveRevalidationActive) {
+        expect(args[0]).toBe(rawPrecheckCandidate);
+        expect(canonicalJson(args[0])).toBe(rawPrecheckCandidateJson);
+      }
       if ((fault === 'continuation valid' || rawNodeJson) && secondContinuationPacket !== undefined
         && args[0].txId === secondContinuationPacket.transactions.reserveTransition.txId) {
         secondReserveSignedCandidate = args[0];
@@ -1130,7 +1175,16 @@ describe('native FED withdrawal continuation', () => {
         let status = 200;
         try {
           const ancestryId = /^\/blocks\/([0-9a-f]{64})\/header$/.exec(path)?.[1];
-          if (reserveRevalidationActive && rawAncestryAdvance > 0 && path === '/blocks/lastHeaders/1') {
+          if (reserveRevalidationActive && rawPrecheckWindow && path === '/blocks/lastHeaders/1') {
+            const count = rawPrecheckTipReads.get(origin) ?? 0;
+            rawPrecheckTipReads.set(origin, count + 1);
+            // First window: witness is stable one block behind primary. The
+            // second paired window converges; exhaustion advances every read.
+            const index = fault === 'continuation raw node JSON precheck exhausts' ? count
+              : origin === WITNESS && count < 2 ? 0 : 1;
+            expect(rawPrecheckHeaders[index]).toBeDefined();
+            data = [rawPrecheckHeaders[index]!];
+          } else if (reserveRevalidationActive && rawAncestryAdvance > 0 && path === '/blocks/lastHeaders/1') {
             data = [signingHeaders[0]!];
           } else if (reserveRevalidationActive && rawAncestryAdvance > 0 && ancestryId !== undefined) {
             const reads = rawAncestryReads.get(origin) ?? [];
@@ -1150,6 +1204,9 @@ describe('native FED withdrawal continuation', () => {
         }
         if (reserveRevalidationActive && path === '/blocks/lastHeaders/1') {
           rawRevalidationTips.add(canonicalJson(data));
+        }
+        if (reserveRevalidationActive && rawPrecheckWindow && path.startsWith('/utxo/byId/')) {
+          rawPrecheckInputReads.set(origin, (rawPrecheckInputReads.get(origin) ?? 0) + 1);
         }
         if (reserveRevalidationActive && path.startsWith('/utxo/byId/') && status === 200) {
           const box = data as Eip12Box;
@@ -1704,6 +1761,7 @@ describe('native FED withdrawal continuation', () => {
             'continuation valid', 'continuation raw node JSON valid', 'continuation raw node JSON reserve drift',
             'continuation raw node JSON descendants 2', 'continuation raw node JSON descendants 64',
             'continuation raw node JSON ancestry 65',
+            'continuation raw node JSON precheck converges', 'continuation raw node JSON precheck exhausts',
             'continuation foreign observation before draft',
             'continuation copied observation before evidence', 'continuation mismatched reservation draft',
             'continuation current target lost before transport', 'continuation custody lost after funding await',
@@ -1836,6 +1894,27 @@ describe('native FED withdrawal continuation', () => {
               target: confirmationTarget, batch, packet: second,
               sourceLockObservation: sourceExecution.outputObservation, setupSession: session, state,
             });
+            if (fault === 'continuation raw node JSON precheck exhausts') {
+              await expect(vaultPromise).rejects.toThrow(/native committed-vault tip did not stabilize during input observation/);
+              expect(reserveRevalidationCalls).toBe(1);
+              expect(rawRevalidationTips.size).toBe(6);
+              expect(rawAncestryReads.size).toBe(0);
+              expect(rawReserveDrifts).toBe(0);
+              expect(rawReserveCheckCalls).toEqual(['isolated local peg-in committed-vault check']);
+              expect(secondReserveVmEvaluationLabels).toEqual(rawReserveCheckCalls);
+              for (const origin of [PRIMARY, WITNESS]) {
+                expect(rawPrecheckTipReads.get(origin)).toBe(6);
+                expect(rawPrecheckInputReads.get(origin)).toBe(12);
+                for (const box of [second.boxes.reservePredecessor, second.boxes.sourceLock, second.boxes.transitionFeeFunding]) {
+                  expect(rawTransitionReads.get(`${origin}/${box.boxId}`)).toBe(3);
+                }
+              }
+              expect([reserveAuthorizations, reserveReservations, reserveSubmissions]).toEqual([0, 0, 0]);
+              expect(state.getErgoOperationalTransactionAttempt(second.transactions.reserveTransition.txId)).toBeNull();
+              expect(submissionBodies).toHaveLength(beforeTransportSubmissions + 1);
+              assertHistoricalRowsUnchanged();
+              return;
+            }
             if (fault === 'continuation raw node JSON reserve drift') {
               await expect(vaultPromise).rejects.toThrow(/reserve predecessor.*(?:valid EIP-12 box|serialized box contents)/);
               expect(reserveRevalidationCalls).toBe(1);
@@ -1876,7 +1955,7 @@ describe('native FED withdrawal continuation', () => {
             if (rawNodeJson) {
               expect(reserveRevalidationCalls).toBe(1);
               expect(rawReserveDrifts).toBe(0);
-              expect(rawRevalidationTips.size).toBe(rawAncestryAdvance > 0 ? 2 : 1);
+              expect(rawRevalidationTips.size).toBe(rawAncestryAdvance > 0 || rawPrecheckWindow ? 2 : 1);
               expect(rawHeaderAdvances).toBe(rawAncestryAdvance);
               if (rawAncestryAdvance > 0) {
                 expect(rawAncestryReads.size).toBe(2);
@@ -1896,8 +1975,13 @@ describe('native FED withdrawal continuation', () => {
               ]);
               expect(rawReserveCheckCalls).toEqual(secondReserveVmEvaluationLabels);
               for (const origin of [PRIMARY, WITNESS]) {
+                if (rawPrecheckWindow) {
+                  expect(rawPrecheckTipReads.get(origin)).toBe(6);
+                  expect(rawPrecheckInputReads.get(origin)).toBe(12);
+                  expect(rawAncestryReads.size).toBe(0);
+                }
                 for (const box of [second.boxes.reservePredecessor, second.boxes.sourceLock, second.boxes.transitionFeeFunding]) {
-                  expect(rawTransitionReads.get(`${origin}/${box.boxId}`)).toBe(2);
+                  expect(rawTransitionReads.get(`${origin}/${box.boxId}`)).toBe(rawPrecheckWindow ? 3 : 2);
                 }
               }
               expect(state.getErgoOperationalTransactionAttempt(vaultExecution.expectedTxId)?.status).toBe('confirmed');

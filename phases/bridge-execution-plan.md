@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-10-11
+Updated: 2026-10-12
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,14 +28,31 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–60 are permanently consumed or held. Packaged C60 on local
-`5bfee4521b41d69a8a3a16f4094937e590f50871` terminated once at
-`2026-10-11T19:43:32.6475339Z`, with integer command exit 1, null launcher
+**Now:** Campaigns 24–61 are permanently consumed or held. Packaged C61 on local
+`e800de3d9ac60ee5218854c952da2d70af35236c` terminated once at
+`2026-10-11T23:43:05.8453529Z`, with integer command exit 1, null launcher
 exception and no parent result. Main and independent review validated the
 bounded current public parent graph and canonical digest joins:
-`execution_failure/root-or-cleanup/cycle-1/committed-reserve/operational-revalidate/continuation/revalidator-call`.
+`execution_failure/root-or-cleanup/cycle-1/committed-reserve/operational-revalidate/continuation/revalidator-call/input-observation-before-check`.
 The inner predicate, raw cause, completion, cleanup and custody disposal remain
-unknown. Neither new diagnostics nor passing tests may reclassify C60.
+unknown. The detail identifies the last operation entered only. Neither new
+diagnostics nor passing tests may reclassify C61 or any earlier hold.
+
+The selected local result is repository-only operator source preparation,
+ending at the existing non-authorizing preflight. The public source validator
+now exposes `--frontier-byte-policy raw`; omission retains the existing
+controlled-CRLF compatibility policy, and Ergo normalization is unchanged.
+Duplicate, missing, unknown and non-full-mode selections refuse. The real
+documented command passes full BOTH validation on fresh plain unstaged source
+checkouts. Changing only Frontier `Cargo.lock` to CRLF passes the default policy
+and refuses the explicit raw policy; its exact original bytes were restored.
+All 77 source-baseline cases pass. The
+[operator prerequisite sequence](../docs/federated-native-two-cycle.md#check-prerequisites-without-starting-a-campaign)
+connects this check to the existing preflight and its fourteen false flags.
+Exact independent review, affected command/claims consumers and guarded local
+promotion remain due for this candidate. Reproduce the stable clean candidate
+in a separate root with its own npm installation and locked compiler runtime;
+stop before dispatch. No automatic C62, push or new CI is selected.
 
 The existing genuine native continuation consumer already constructs and signs
 the packet and invokes the actual
@@ -49,9 +66,15 @@ contract-height bounds remain open. Five focused cases, TypeScript, the import
 guard and exact independent source review pass. The complete 78-case file passes
 on the original authorizer; the five cases also pass on the new diagnostic
 producer. No public-source mismatch has been established. These fixtures do not establish
-actual node, custody or complete packaged lifecycle acceptance. No automatic
-C61, push or new CI; the local candidate requires affected validation,
-exact independent review and guarded local promotion.
+actual node, custody or complete packaged lifecycle acceptance. Two additional
+raw-client precheck cases now cover convergence after a lagging witness and
+exhaustion of all three unstable observation windows. The pair passes through
+the actual decoder, WASM normalizer and revalidator; exhaustion makes no fresh
+check, authorization, reservation or submission. The five earlier focused cases
+also pass unchanged. The resulting inventory has 80 unique cases, preserving
+all 78 earlier names and budgets; the full 80-case file has not been replayed.
+Independent exact review passes for this test-only delta. These observations
+establish no historical cause or runtime correction.
 
 Invocation-owned metadata for the six existing internal native
 revalidator operations, carried through a new bounded optional worker/parent
@@ -84,7 +107,7 @@ all cases without skips or an aborted suite. Its 32 executable acceptance
 checks include two detected guard mutants. These selections are not summed.
 This closes an offline join. Supplied boxes do not establish UTXO membership,
 HTTP/mempool admission, custody or the complete packaged lifecycle; no outcome
-identifies C60's cause or authorizes C61. The real fleet checker runs in the
+identifies C60's or C61's cause or authorizes another campaign. The real fleet checker runs in the
 fixture, but its node check response remains synthetic. Exact independent
 review and guarded local promotion apply to this coherent candidate; no push
 or new CI is selected. The missing genuine packaged lifecycle remains the
@@ -1847,13 +1870,13 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Fully signed continuation accepted by WASM -> pinned offline JVM consumer (locally validated) | Close the documented command, exact claims review and guarded local promotion on the stable candidate | All 35 JVM cases and 32 command acceptance/refusal cases pass. The full validator distinguishes fee-proof, stateless and conservation failures. The fixture's node response remains synthetic; this evidence does not establish node admission, C60's cause or campaign authority. C24-C60 holds remain permanent |
+| **Now** | Fresh public source reconstruction -> full BOTH raw CLI -> existing operator preflight | Close CLI selection/refusals and the linked runbook, review the stable candidate, then reproduce it in a separate clean root with its own npm installation and locked compiler runtime; stop before dispatch | All 77 baseline cases and the real CLI LF-positive/CRLF-negative pair pass. The new two raw-client precheck cases and five existing cases pass in their scopes. Preflight must retain all fourteen Boolean false flags; neither report grants campaign authority. C24-C61 holds remain permanent |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Separately select and admit one local synthetic campaign after a deciding checkpoint, exact local source identity, applicable checks/review and fresh runtime/source/output/custody/fee gates; apply guarded publication and due exact-head CI at public promotion | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns 24–60 remain consumed or held. C42 is incomplete/ambiguous without a
+Campaigns 24–61 remain consumed or held. C42 is incomplete/ambiguous without a
 parent terminal artifact; C43–C51 failed once as recorded in Current Focus and
 the active handoff. None authorizes retry, resume or custody reuse. The earlier
 timing, tracker-phase and source-lock checkpoints are closed; the selected
@@ -1892,9 +1915,10 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Signed-continuation JVM consumer (locally validated) | Exact fully signed bytes, three ordered input boxes and both explicit vote contexts reach the pinned native stateless/stateful transaction validator through a documented bounded command | Genuine export, intact full validation, isolated fee-proof/stateless/conservation refusals and context bindings pass. Exact command result acceptance and two guard mutants pass. Preserve the scoped offline result and apply exact independent claims review plus guarded local promotion; the next complete lifecycle requires separate fresh admission |
+| Operator public-source preparation (selected local result) | Repository instructions connect fresh plain unstaged source reconstruction, explicit raw Frontier validation and the existing non-authorizing preflight | All 77 baseline cases and the real CLI policy differential pass. Complete affected generic consumers, exact claims review and guarded local promotion, then reproduce in a separate clean root with fresh npm/compiler prerequisites and all fourteen preflight flags false. No campaign dispatch or new wrapper is needed |
+| Signed-continuation JVM consumer (locally closed at e800de3d) | Exact fully signed bytes, three ordered input boxes and both explicit vote contexts reach the pinned native stateless/stateful transaction validator through a documented bounded command | All 35 JVM cases and 32 command acceptance/refusal cases, exact independent review and guarded local promotion pass. Preserve the unchanged scoped offline result; the next complete lifecycle requires separate fresh admission |
 | Native revalidation entered-operation join (locally validated) | Original escaping native error reaches optional bounded operation detail with unchanged failure semantics and complete prior revalidation ancestry | All six source-owned phases and isolated stale/conflicting/unsafe/cleanup refusals pass. Missing/invalid/occupied detail preserves old failures; contradictory success refuses. Source review GO and 95 generic consumer cases pass; exact final claims and guarded local promotion apply. Old schemas/bytes remain unchanged; no historical cause or execution authority |
-| Native continuation wire/advancing-header falsifier (locally closed) | Pass the genuine packet and checked handles through actual read decoding, normalization and revalidation; refuse one changed input or invalid header relation before authorization/reservation/submission | All 78 cases pass on the original authorizer; five focused cases also pass on the new diagnostic producer for intact response, reserve-value drift, descendants+2/+64 and ancestry+65. Signed identities, original73 cases and budgets remain unchanged. Component observations and checker responses are synthetic; no historical cause or campaign authority follows |
+| Native continuation wire/advancing-header falsifier (locally closed) | Pass the genuine packet and checked handles through actual read decoding, normalization and revalidation; refuse one changed input or invalid header relation before authorization/reservation/submission | All 78 cases passed on the original authorizer; five focused cases pass on the new diagnostic producer. The two new convergence/exhaustion cases pass with exact observation counts and unchanged signed identities; all old names and budgets remain unchanged. No full 80-case replay is claimed. Component observations and checker responses are synthetic; no historical cause or campaign authority follows |
 | Mining-barrier source-to-attestation join (locally closed at5bfee452) | Establish the success-path contract while retaining original target/custody/credential guards | The cumulative node patch, four Scala suites, exact source reconstruction, one-way owned pause, indexed watermark, three fresh confirmations and immutable E−2 checkpoint mining passed exact independent review and guarded local promotion. C60 exercised this checkpoint once and failed upstream of the second pause; inner cause and lifecycle completion remain unknown. No push or new CI |
 | FED report-to-release preparation (locally closed) | Produce a dedicated canonical FED report and connect it to the actual release CLI/checklist without relabelling Gate 3 | The documented producer and strict release consumer are locally validated at the retained checkpoint. Candidate/target binding, fixed open obligations and false completion/readiness claims remain required; a later candidate needs its own exact preparation report |
 | Admission-window producer/decoder falsifier (locally closed) | Same fixed statement/anchor under two contiguous advancing header views reaches genuine expiry | Ten file cases, TypeScript and independent exact review pass. This is a prospective boundary test, not process/signature acceptance or C59's cause; a guard alone is not a lifecycle correction |

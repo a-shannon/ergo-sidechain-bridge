@@ -1190,7 +1190,9 @@ describe('consensus source baseline', () => {
 
   it('forwards raw policy through the real baseline entry point', async () => {
     const baseline = await loadBaselineModule();
+    const cli = await loadCliModule();
     expect(baseline).toBeDefined();
+    expect(cli).toBeDefined();
     if (!baseline) return;
     const root = mkdtempSync(resolve(tmpdir(), 'bridge-raw-policy-forwarding-'));
     const source = resolve(root, 'frontier');
@@ -1221,12 +1223,15 @@ describe('consensus source baseline', () => {
           cargoLockBlob: blob, rustToolchainBlob: blob,
           nodeManifestBlob: blob, runtimeManifestBlob: blob,
         } }));
-      const inspect = (frontierCheckoutBytePolicy?: string) =>
-        baseline.inspectConsensusSourceBaseline({
+      const inspect = (frontierCheckoutBytePolicy?: string) => {
+        const args = cli.parseConsensusSourceBaselineArgs(frontierCheckoutBytePolicy === undefined
+          ? [] : ['--frontier-byte-policy', frontierCheckoutBytePolicy]);
+        return baseline.inspectConsensusSourceBaseline({
           worktreeRoot: bridge, bridgeRoot: bridge, frontierSourcePath: source,
           requireFrontierCheckout: true, requireErgoCheckout: false,
-          frontierCheckoutBytePolicy,
+          frontierCheckoutBytePolicy: args.frontierCheckoutBytePolicy,
         });
+      };
       // This fixture isolates checkout validation; release inputs are absent.
       const exactLf = inspect('raw');
       expect(exactLf.checks.lockBindingsValidated).toBe(false);
@@ -1349,6 +1354,49 @@ describe('consensus source baseline', () => {
       '75329a2df49e2cc7981485392c31160929d1bd48',
     );
     expect(report.boundaries.gate5Closed).toBe(false);
+  });
+
+  it.each(['raw', 'controlled-crlf'])('selects the explicit Frontier CLI byte policy %s', async policy => {
+    const cli = await loadCliModule();
+    expect(cli).toBeDefined();
+    const args = cli.parseConsensusSourceBaselineArgs([
+      '--frontier-source', 'frontier-checkout', '--ergo-source', 'ergo-checkout',
+      '--frontier-byte-policy', policy,
+    ]);
+    expect(args.frontierCheckoutBytePolicy).toBe(policy);
+    expect(args.checkoutMode).toBe('full');
+    expect(args.requireFrontierCheckout).toBe(true);
+    expect(args.requireErgoCheckout).toBe(true);
+    expect(args.frontierSourcePath).toBe('frontier-checkout');
+    expect(args.ergoSourcePath).toBe('ergo-checkout');
+  });
+
+  it('preserves the omitted Frontier CLI byte-policy default', async () => {
+    const cli = await loadCliModule();
+    expect(cli).toBeDefined();
+    expect(cli.parseConsensusSourceBaselineArgs([]).frontierCheckoutBytePolicy).toBeUndefined();
+  });
+
+  it.each([
+    { name: 'missing value', argv: ['--frontier-byte-policy'], error: /requires a value/ },
+    { name: 'empty value', argv: ['--frontier-byte-policy', ''], error: /requires a value/ },
+    { name: 'next option', argv: ['--frontier-byte-policy', '--frontier-source', 'source'], error: /requires a value/ },
+    { name: 'unknown value', argv: ['--frontier-byte-policy', 'other'], error: /must be raw or controlled-crlf/ },
+    { name: 'case alias', argv: ['--frontier-byte-policy', 'RAW'], error: /must be raw or controlled-crlf/ },
+    { name: 'Boolean alias', argv: ['--frontier-byte-policy', 'true'], error: /must be raw or controlled-crlf/ },
+    { name: 'option alias', argv: ['--frontier-byte-policy=raw'], error: /Unknown argument/ },
+    { name: 'duplicate value', argv: ['--frontier-byte-policy', 'raw', '--frontier-byte-policy', 'raw'], error: /may be supplied only once/ },
+    { name: 'conflicting value', argv: ['--frontier-byte-policy', 'raw', '--frontier-byte-policy', 'controlled-crlf'], error: /may be supplied only once/ },
+    { name: 'raw before lock-only', argv: ['--frontier-byte-policy', 'raw', '--lock-only'], error: /requires full checkout mode/ },
+    { name: 'raw after lock-only', argv: ['--lock-only', '--frontier-byte-policy', 'raw'], error: /requires full checkout mode/ },
+    { name: 'raw before Ergo-only', argv: ['--frontier-byte-policy', 'raw', '--ergo-only', '--ergo-source', 'source'], error: /requires full checkout mode/ },
+    { name: 'raw after Ergo-only', argv: ['--ergo-only', '--ergo-source', 'source', '--frontier-byte-policy', 'raw'], error: /requires full checkout mode/ },
+    { name: 'controlled before lock-only', argv: ['--frontier-byte-policy', 'controlled-crlf', '--lock-only'], error: /requires full checkout mode/ },
+    { name: 'controlled after Ergo-only', argv: ['--ergo-only', '--ergo-source', 'source', '--frontier-byte-policy', 'controlled-crlf'], error: /requires full checkout mode/ },
+  ])('rejects the isolated Frontier CLI byte-policy fault: $name', async ({ argv, error }) => {
+    const cli = await loadCliModule();
+    expect(cli).toBeDefined();
+    expect(() => cli.parseConsensusSourceBaselineArgs(argv)).toThrow(error);
   });
 
   it('exposes lock-only and full-checkout CLI modes with explicit boundaries', async () => {

@@ -171,7 +171,37 @@ to the configuration.
 
 ## Check Prerequisites Without Starting A Campaign
 
-From `relayer/`, in the same pinned Node and Visual Studio shell described above:
+Complete the dependency, compiler-runtime and tool/cache preparation above,
+then follow the [fresh source-checkout recipe](consensus-source-baseline.md#fresh-checkout)
+for the exact base commits and locked patches. Use the configured absolute
+source paths. Keep the Frontier checkout LF-only with just patch 0001 applied;
+apply the cumulative Ergo patch to its pinned base. Apply both patches plainly
+to the working tree, without `--index` or staging: the source validator requires
+an empty index diff and the declared unstaged modified/added files.
+
+The [FED build owner](federated-genesis-runtime.md#fresh-federation-build)
+constructs the configured Frontier tree with overlays 0004, 0005 and 0006 in
+its own separate index and fresh export. Do not apply those overlays to
+`frontierSourcePath` or substitute an earlier build export for that checkout.
+
+From `relayer/`, use the pinned Node 24.14.0 and Visual Studio shell described
+above. First validate both configured source checkouts:
+
+```powershell
+npm run sources:verify -- --frontier-byte-policy raw --frontier-source <absolute-frontier-source-path> --ergo-source <absolute-ergo-source-path>
+```
+
+Require exit code zero and the Markdown report's `Result` to be `PASS`, with no
+`Blockers` section. All six check rows must say `yes`: source lock bindings,
+Solidity build closure artifacts, Frontier checkout required and validated,
+and Ergo checkout required and validated. These rows correspond to strict true
+checks; no blockers means the underlying errors list is empty. Lock-only or
+Ergo-only validation cannot replace this step. The explicit `raw` policy
+applies to Frontier only; Ergo retains the canonical validator's controlled
+line-ending policy. Omitting the option uses the compatibility policy and does
+not establish raw Frontier equality.
+
+Then check the same invocation configuration:
 
 ```powershell
 npm run --silent federated:native:two-cycle:preflight -- --config <absolute-config-path>
@@ -184,14 +214,22 @@ tool identity probes. It stops before the WASM build, attempt creation, worker,
 node startup, custody or signing. It neither submits a transaction nor reserves
 the configured attempt name.
 
-A passing report has `executionAuthorized: false` and `campaignStarted: false`.
+A passing JSON report has `status: "local-preflight-passed"` and all fourteen
+of these fields set to Boolean `false`: `executionAuthorized`,
+`campaignStarted`, `wasmBuildStarted`, `attemptDirectoryCreated`, `nodeStarted`,
+`custodyEstablished`, `signingAuthorized`, `transportStarted`,
+`fullErgoBaselineEstablished`, `emptyFrontierOutputEstablished`,
+`processPortsValidated`, `custodyAndFeesReady`, `finalShellReady` and
+`admissionReviewed`.
 It describes only the checks completed by this command. It is not a start,
 terminal or admission receipt, and later execution repeats its own checks.
 Full source-baseline validation, process/port exclusivity, available space,
 fresh custody and confirmed fee inputs still need their respective admission
 checks. Cache content and independent operator custody are not attested here.
 Correct a failed prerequisite before selecting a fresh invocation; preserve any
-already occupied, consumed or ambiguous attempt.
+already occupied, consumed or ambiguous attempt. Stop preparation here. Running
+the campaign requires separate selection and admission against the exact inputs;
+neither report authorizes dispatch or reuse of earlier builds or custody.
 
 ## Run Once
 
