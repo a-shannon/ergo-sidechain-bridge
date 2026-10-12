@@ -1024,6 +1024,12 @@ describe('layer import rules', () => {
   });
 
   it.each([
+    ['substrate-federated-two-cycle-copied-ergo-selection-v1.ts',
+      'prepareSubstrateFederatedTwoCycleCopiedErgoSelectionV1',
+      'substrate-federated-two-cycle-copied-ergo-selection-v1.test.ts'],
+    ['test-support/substrate-federated-native-two-cycle-root-result.ts',
+      'extendedRootResult',
+      'substrate-federated-two-cycle-copied-ergo-selection-v1.test.ts'],
     ['substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
       'withSubstrateFederatedCopiedNonMiningErgoNodePairV1',
       'substrate-federated-copied-non-mining-ergo-node-process-v1.test.ts'],

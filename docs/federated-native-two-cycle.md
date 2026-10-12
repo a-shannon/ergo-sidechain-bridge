@@ -479,6 +479,31 @@ connecting an operational caller requires a separate recovery admission and
 exact architecture binding. A successful lifecycle capture, its expected
 public tip and an admitted fresh recovery execution are still missing.
 
+`prepareSubstrateFederatedTwoCycleCopiedErgoSelectionV1` prepares the observation
+inputs from bounded strict JSON for a separately selected successful root
+result and its aggregate capture manifest. The caller supplies the exact raw
+root SHA-256, a controlled local build parent and the quiescence callback. The
+function validates the two-cycle result, relative capture names, aggregate
+hash, fixed component roles and the second confirmation's exact indexed devnet
+snapshot. It derives the two Ergo roots and selects the Ergo component pin for
+the copied owner; the aggregate pin is a different hash. The canonical capture
+is beneath the build's fixed `target` directory, followed by the capture name
+and `ergo/primary` or `ergo/witness`.
+
+This function reads no files and does not authenticate success or admit
+recovery. Its selected raw root hash covers the recovery pointer and snapshot;
+the legacy projected receipt is retained separately and cannot bind those
+omitted fields. The confirmation snapshot precedes capture and remains an
+expected observation. Actual component bytes, stopped-state ownership,
+canonical paths and paired restart observations remain separate checks.
+Selection does not prove payout persistence at that tip.
+
+The current packaged public result does not expose the complete root data
+needed by this preparation function. A separately admitted source caller must
+receive it from a genuine successful in-memory root return. Synthetic fixture
+composition with the copied owner does not establish that producer or actual
+recovery acceptance.
+
 ## Observed campaign status
 
 Campaign 24 invoked this command at

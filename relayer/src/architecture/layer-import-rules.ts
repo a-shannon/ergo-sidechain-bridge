@@ -1926,6 +1926,24 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
   string,
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
+  ['substrate-federated-two-cycle-copied-ergo-selection-v1.ts', new Map([
+    ['prepareSubstrateFederatedTwoCycleCopiedErgoSelectionV1', new Set([
+      'substrate-federated-two-cycle-copied-ergo-selection-v1.test.ts',
+      'substrate-federated-copied-non-mining-ergo-node-process-v1.test.ts',
+    ])],
+  ])],
+  ['test-support/substrate-federated-native-two-cycle-root-result.ts', new Map([
+    ['rootResult', new Set([
+      'substrate-federated-native-two-cycle-invocation-v1.test.ts',
+    ])],
+    ['extendedRootResult', new Set([
+      'substrate-federated-native-two-cycle-invocation-v1.test.ts',
+      'substrate-federated-two-cycle-copied-ergo-selection-v1.test.ts',
+      'substrate-federated-copied-non-mining-ergo-node-process-v1.test.ts',
+    ])],
+    ['fee', new Set(['substrate-federated-native-two-cycle-invocation-v1.test.ts'])],
+    ['hex', new Set(['substrate-federated-native-two-cycle-invocation-v1.test.ts'])],
+  ])],
   ['substrate-federated-two-cycle-node-state-copy-v1.ts', new Map([
     ['assertSubstrateFederatedCapturedNodeStateV1', new Set([
       'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',

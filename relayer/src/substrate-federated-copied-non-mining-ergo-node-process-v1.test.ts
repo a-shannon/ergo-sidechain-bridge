@@ -24,6 +24,8 @@ import {
 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import { copySubstrateFederatedTwoCycleNodeStateV1 as copy } from './substrate-federated-two-cycle-node-state-copy-v1.js';
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
+import { prepareSubstrateFederatedTwoCycleCopiedErgoSelectionV1 } from './substrate-federated-two-cycle-copied-ergo-selection-v1.js';
+import { extendedRootResult } from './test-support/substrate-federated-native-two-cycle-root-result.js';
 
 class FakeChild extends EventEmitter {
   exitCode: number | null = null;
@@ -49,7 +51,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-async function fixture() {
+async function fixture(initialHeight = 20) {
   const root = realpathSync.native(mkdtempSync(join(realpathSync.native(tmpdir()), 'copied-ergo-owner-test-')));
   fixtures.push(root);
   vi.stubEnv('TEMP', root); vi.stubEnv('TMP', root);
@@ -72,7 +74,7 @@ async function fixture() {
     rewardInputErgoTrees: { delay1: deriveDevnetRewardErgoTreeHexForDelay(key, 1), delay720: deriveDevnetRewardErgoTreeHexForDelay(key, 720) },
     networkPrefix: 16 as const, primaryNodeOrigin: 'http://127.0.0.1:9051' as const,
     witnessNodeOrigin: 'http://127.0.0.1:9052' as const };
-  const expected = { network: 'devnet' as const, fullHeight: 20, indexedHeight: 20, headerIdHex: '23'.repeat(32) };
+  const expected = { network: 'devnet' as const, fullHeight: initialHeight, indexedHeight: initialHeight, headerIdHex: '23'.repeat(32) };
   const input: CopyInput = { primaryRoot: join(captured, 'primary'), witnessRoot: join(captured, 'witness'),
     capturedManifestSha256Hex: sha(readFileSync(manifest)), expectedSnapshot: expected,
     assertSourcesQuiescent: vi.fn() };
@@ -110,9 +112,9 @@ async function fixture() {
       return new Response('', { status: 200 });
     }
     expect(init?.method).toBe('GET');
-    const data = url.pathname === '/info' ? { network: 'devnet', fullHeight: 20 }
-      : url.pathname === '/blocks/lastHeaders/1' ? [{ id: expected.headerIdHex, height: 20 }]
-      : url.pathname === '/blockchain/indexedHeight' ? { fullHeight: 20, indexedHeight: 20 } : undefined;
+    const data = url.pathname === '/info' ? { network: 'devnet', fullHeight: expected.fullHeight }
+      : url.pathname === '/blocks/lastHeaders/1' ? [{ id: expected.headerIdHex, height: expected.fullHeight }]
+      : url.pathname === '/blockchain/indexedHeight' ? { fullHeight: expected.fullHeight, indexedHeight: expected.indexedHeight } : undefined;
     if (!data) throw new Error('unexpected synthetic HTTP path');
     return new Response(JSON.stringify(data));
   });
@@ -124,6 +126,48 @@ async function fixture() {
 }
 
 describe('copied non-mining Ergo owner with synthetic process boundaries', () => {
+  it('consumes a separately selected successful-root capture with the exact Ergo pin and expected tip', async () => {
+    const f = await fixture(220);
+    const root = extendedRootResult();
+    const captureRoot = join(f.root, root.recoveryEvidence.buildDirectoryName, 'target',
+      root.recoveryEvidence.directoryName);
+    mkdirSync(captureRoot, { recursive: true });
+    const ergoRoot = join(captureRoot, 'ergo');
+    const copied = await copy({ kind: 'ergo', primaryRoot: f.input.primaryRoot,
+      witnessRoot: f.input.witnessRoot, capturedManifestSha256Hex: f.input.capturedManifestSha256Hex,
+      destinationDirectory: ergoRoot, assertSourcesQuiescent: f.input.assertSourcesQuiescent });
+    const manifestText = JSON.stringify({
+      schema: 'e2s.substrate-federated-two-cycle-recovery-capture.v1',
+      kind: 'stopped-node-copy-and-sqlite-evidence',
+      components: {
+        ergo: { file: 'ergo/manifest.json', bytes: readFileSync(join(ergoRoot, 'manifest.json')).length,
+          sha256Hex: sha(readFileSync(join(ergoRoot, 'manifest.json'))) },
+        frontier: { file: 'frontier/manifest.json', bytes: 1, sha256Hex: '34'.repeat(32) },
+        sqlite: { file: 'sqlite/manifest.json', bytes: 1, sha256Hex: '45'.repeat(32) },
+      },
+      summary: { ergoFiles: copied.files.length, frontierFiles: 1,
+        nodeDatabaseBytes: copied.totalBytes + 1, sqliteDatabaseBytes: 1, trackerAdmissionAttempts: 2 },
+      nodeConsistencyEstablished: false, freshRestartValidated: false, executionAuthorityRestored: false,
+    });
+    root.recoveryEvidence.manifestSha256Hex = sha(manifestText);
+    Object.assign(root.secondCycle.confirmationExecution, { finalSnapshot: f.expected });
+    const rootText = JSON.stringify(root);
+    const selection = prepareSubstrateFederatedTwoCycleCopiedErgoSelectionV1({
+      rootResultText: rootText, expectedRootResultSha256Hex: sha(rootText), captureManifestText: manifestText,
+      buildParentDirectory: f.root, assertSourcesQuiescent: f.input.assertSourcesQuiescent,
+    });
+    expect(selection.ownerInput.capturedManifestSha256Hex).not.toBe(selection.aggregateManifestSha256Hex);
+    const observed = await f.run(async lease => {
+      expect(await lease.readExactSnapshots()).toEqual({ primary: f.expected, witness: f.expected });
+      return 'selected synthetic tip';
+    }, selection.ownerInput);
+    expect(observed.value).toBe('selected synthetic tip');
+    expect(observed.finalSnapshot).toEqual(f.expected);
+    expect(f.live()).toHaveLength(0);
+    expect(selection.successAuthenticated).toBe(false);
+    expect(selection.recoveryAdmitted).toBe(false);
+  });
+
   it('copies before launch, observes exactly, revokes its lease and stops both peers without deleting copies', async () => {
     const f = await fixture();
     const sourceBytes = readFileSync(f.manifest);
