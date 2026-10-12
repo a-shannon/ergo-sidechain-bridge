@@ -39,6 +39,18 @@ unknown. The detail identifies the last operation entered only. Neither new
 diagnostics nor passing tests may reclassify C62 or any earlier hold. Matching
 C61 and C62 operation labels do not establish the same cause.
 
+The current local batch joins source-owned native input refusals to separate
+optional worker/parent companions. Public-source REST and packet-producer
+checks found no contradiction that justifies changing the revalidator.
+The new detail names existing explicit predicate errors and exact node roles;
+it does not classify dependency exceptions. It preserves original predicates,
+errors, scheduling and budgets. The exhaustive parent/worker selection passes
+476 cases with each name once; architecture and generic consumers pass475.
+TypeScript/import checks pass for137 layered modules/929 sources. Actual native
+predicate fixtures and metadata/codecs pass in their separate scopes. Source
+review finds no actionable defect; exact final review and guarded local
+promotion close this checkpoint. No new campaign, push or CI is selected.
+
 The paired precheck falsifier confirms the existing selection of a permanent
 witness-read error after all paired reads settle, including replacement by the
 final custody guard. It establishes no runtime defect or historical cause.
@@ -2005,7 +2017,8 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Accumulated-state recovery admission (next result) | Admit a copied-Ergo observation caller against a genuine successful lifecycle capture and its selected public parent companion | The pure selector, optional packaged producer and public-parent owner-input preparation bind component-pin roles, expected snapshot and result/locator ancestry. Synthetic owner composition is closed; actual successful capture, stopped-state ownership and fresh recovery execution admission remain missing. No historical runtime reads, reused custody or automatic C63 |
+| Native input-refusal attribution (current local batch) | Join actual source-owned predicate errors and node roles to the exact existing operation graph without changing throws, predicates or budgets | Real native predicate fixtures, isolated codec/graph refusals and composed worker/parent failure preservation and success contradiction checks; exact independent review and guarded local promotion. Paired disagreement is a defensive predicate with malformed-normalizer fixture scope. No historical cause, lifecycle correction or C63 authority |
+| Accumulated-state recovery admission (requires successful lifecycle capture) | Admit a copied-Ergo observation caller against a genuine successful lifecycle capture and its selected public parent companion | The pure selector, optional packaged producer and public-parent owner-input preparation bind component-pin roles, expected snapshot and result/locator ancestry. Synthetic owner composition is closed; actual successful capture, stopped-state ownership and fresh recovery execution admission remain missing. No historical runtime reads, reused custody or automatic C63 |
 | Copied non-mining Ergo owner (locally validated) | Verified captured-node copies reach fresh non-mining owned processes, exact expected paired snapshot observations and verified termination without issuing old target or custody authority | 34 synthetic owner cases,128 copy cases and362 architecture cases pass. Existing owner/mining-pause/capture consumers pass96 cases with11 unchanged actual-runtime guards inapplicable. TypeScript/imports and independent source review pass. Exact final claims and guarded local promotion bind this checkpoint; no actual JVM restart or restored execution authority |
 | Pinned captured-node materialization (locally closed atdda85577) | An existing fixed-subtree capture and separately admitted manifest pin produce another disposable copy without changing the default owner-source path or adding restart authority | 113 whole-file cases,21 capture consumers and95 generic consumers pass with exact independent review and guarded local promotion. Files define allowed directory ancestors; unbound empty directories reject. This is byte correspondence on synthetic captures, not actual node consistency or restart |
 | Test-framework dependency closure (validated locally) | Supported Vitest 4.1.11 closes the three development advisories while preserving assertions, source inventory and runtime capability boundaries | Fresh locked installation and full audit zero; Vite7.3.6/Rollup4.62.4 retained. Exact CLI listing/selection, all638 source files with23131 passing cases and26 existing guarded cases, TypeScript and affected provenance/JVM checks pass. Exact independent review and guarded local promotion bind the candidate. No override, suppressed error or runtime budget change |

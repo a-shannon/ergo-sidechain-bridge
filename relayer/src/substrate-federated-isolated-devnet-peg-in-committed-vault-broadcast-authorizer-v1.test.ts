@@ -372,6 +372,230 @@ describe('native committed-vault observation scheduling (mocked provenance and n
     return operations.projectNativeCommittedReserveRevalidationOperationV1(error);
   }
 
+  function projectEscapingRefusal(error: unknown) {
+    projectEscapingOperation(error);
+    return operations.projectNativeCommittedReserveInputRefusalV1(error);
+  }
+  function captureRefusals() {
+    const captured: Array<{ value: unknown; detail: Readonly<operations.NativeCommittedReserveInputRefusalV1> }> = [];
+    const factory = operations.createNativeCommittedReserveInputRefusalTaggerV1;
+    const spy = vi.spyOn(operations, 'createNativeCommittedReserveInputRefusalTaggerV1').mockImplementation(() => {
+      const tag = factory();
+      return <T>(value: T, detail: Readonly<operations.NativeCommittedReserveInputRefusalV1>): T => {
+        captured.push({ value, detail }); return tag(value, detail);
+      };
+    });
+    return { captured, spy };
+  }
+
+  describe('actual explicit native input refusal predicates', () => {
+    const phases = ['before', 'after'] as const;
+    const roles = ['primary', 'witness'] as const;
+    const boxCodes = ['source-funding-present', 'transition-input-unavailable', 'transition-input-bytes-changed'] as const;
+    it.each(boxCodes.flatMap(code => roles.flatMap(role => phases.map(phase => ({ code, role, phase }))))) (
+      'projects $code/$role/$phase from the exact escaping Error', async ({ code, role, phase }) => {
+        const f = nativeFixture(); const origin = role === 'primary' ? PRIMARY : WITNESS;
+        let active = phase === 'before';
+        mocks.checkSignedTransaction.mockImplementation(async () => { active = true; return f.freshCheck; });
+        mocks.readBox.mockImplementation(async (node, id) => {
+          if (active && node === origin) {
+            if (code === 'source-funding-present' && id === f.input.packet.boxes.sourceFundingInput.boxId) return f.input.packet.boxes.sourceFundingInput;
+            if (id === f.input.packet.boxes.sourceLock.boxId) {
+              if (code === 'transition-input-unavailable') return null;
+              if (code === 'transition-input-bytes-changed') return { ...f.input.packet.boxes.sourceLock, value: '1' };
+            }
+          }
+          return mocks.boxes.get(id) ?? null;
+        });
+        const capture = captureRefusals(); const session = create(f.input as never);
+        try {
+          const error = await session.revalidator.revalidate(f.checked as never).then(() => undefined, error => error);
+          expect(error).toBeInstanceOf(Error); expect(capture.captured).toHaveLength(1);
+          expect(error).toBe(capture.captured[0]!.value);
+          expect(projectEscapingRefusal(error)).toEqual({ refusalCode: code, nodeRole: role });
+          expect(projectEscapingOperation(error)).toBe(`input-observation-${phase}-check`);
+          expect(mocks.checkSignedTransaction).toHaveBeenCalledTimes(phase === 'before' ? 0 : 1);
+          expect(mocks.readBox).toHaveBeenCalledTimes(phase === 'before' ? 8 : 16);
+          expect(() => session.takePreTransportObservation()).toThrow(/unavailable or consumed/);
+          expect(() => session.broadcastAuthorizer.authorize({ checked: f.checked, revalidationDigestHex: hex('99') } as never)).toThrow();
+        } finally { capture.spy.mockRestore(); }
+      });
+
+    it.each(['source-refund-timeout', 'successor-creation-height-window'].flatMap(code => roles.flatMap(role =>
+      phases.map(phase => ({ code, role, phase })))))('projects height $code/$role/$phase', async ({ code, role, phase }) => {
+      const refund = code === 'source-refund-timeout';
+      const f = nativeFixture({ source: 90, successor: refund ? 10_000 : 100 });
+      const base = refund ? 10_080 : 150; const invalid = refund ? 10_089 : 200;
+      mocks.tipHeight = base; mocks.tipIdHex = tipId(base);
+      const configure = () => mocks.tipResponses.set(role === 'primary' ? PRIMARY : WITNESS,
+        (phase === 'before' ? [invalid, invalid] : [base, base, invalid, invalid]).map(height => ({ height, id: tipId(height) })));
+      if (phase === 'before') configure();
+      else mocks.checkSignedTransaction.mockImplementation(async () => { configure(); return f.freshCheck; });
+      const capture = captureRefusals();
+      try {
+        const error = await create(f.input as never).revalidator.revalidate(f.checked as never).then(() => undefined, error => error);
+        expect(capture.captured).toHaveLength(1); expect(error).toBe(capture.captured[0]!.value);
+        expect(projectEscapingRefusal(error)).toEqual({ refusalCode: code, nodeRole: role });
+        expect(projectEscapingOperation(error)).toBe(`input-observation-${phase}-check`);
+        expect(mocks.checkSignedTransaction).toHaveBeenCalledTimes(phase === 'before' ? 0 : 1);
+      } finally { capture.spy.mockRestore(); }
+    });
+
+    it.each(roles)('projects after-check ancestry bound for %s before ancestry HTTP reads', async role => {
+      const f = nativeFixture(); mocks.checkSignedTransaction.mockImplementation(async () => {
+        mocks.tipResponses.set(role === 'primary' ? PRIMARY : WITNESS,
+          [101, 101, 166, 166].map(height => ({ height, id: tipId(height) })));
+        return f.freshCheck;
+      });
+      const capture = captureRefusals();
+      try {
+        const error = await create(f.input as never).revalidator.revalidate(f.checked as never).then(() => undefined, error => error);
+        expect(capture.captured).toHaveLength(1); expect(error).toBe(capture.captured[0]!.value);
+        expect(projectEscapingRefusal(error)).toEqual({ refusalCode: 'check-ancestry-window-exceeded', nodeRole: role });
+        expect(projectEscapingOperation(error)).toBe('input-observation-after-check');
+        expect(mocks.checkSignedTransaction).toHaveBeenCalledOnce(); expect(mocks.readHeader).not.toHaveBeenCalled();
+      } finally { capture.spy.mockRestore(); }
+    });
+
+    it.each(phases)('projects exactly one pair exhaustion in %s-check', async phase => {
+      const f = nativeFixture(); const configure = () => {
+        for (const origin of [PRIMARY, WITNESS]) mocks.tipResponses.set(origin,
+          (phase === 'before' ? [101, 102, 103, 104, 105, 106] : [101, 101, 102, 103, 104, 105, 106, 107])
+            .map(height => ({ height, id: tipId(height) })));
+      };
+      if (phase === 'before') configure(); else mocks.checkSignedTransaction.mockImplementation(async () => { configure(); return f.freshCheck; });
+      const capture = captureRefusals();
+      try {
+        const error = await create(f.input as never).revalidator.revalidate(f.checked as never).then(() => undefined, error => error);
+        expect(capture.captured).toHaveLength(1); expect(error).toBe(capture.captured[0]!.value);
+        expect(projectEscapingRefusal(error)).toEqual({ refusalCode: 'input-observation-convergence-exhausted', nodeRole: 'pair' });
+        expect(projectEscapingOperation(error)).toBe(`input-observation-${phase}-check`);
+        expect(mocks.readBox).toHaveBeenCalledTimes(phase === 'before' ? 24 : 32);
+        expect(mocks.checkSignedTransaction).toHaveBeenCalledTimes(phase === 'before' ? 0 : 1);
+      } finally { capture.spy.mockRestore(); }
+    });
+
+    it('does not tag a transient paired lag followed by convergence', async () => {
+      const f = nativeFixture();
+      mocks.tipResponses.set(PRIMARY, [102, 102, 102, 102].map(height => ({ height, id: tipId(height) })));
+      mocks.tipResponses.set(WITNESS, [101, 101, 102, 102].map(height => ({ height, id: tipId(height) })));
+      const capture = captureRefusals();
+      try {
+        await expect(create(f.input as never).revalidator.revalidate(f.checked as never)).resolves.toBeDefined();
+        expect(capture.captured).toEqual([]); expect(mocks.readBox).toHaveBeenCalledTimes(24);
+        expect(mocks.checkSignedTransaction).toHaveBeenCalledOnce();
+      } finally { capture.spy.mockRestore(); }
+    });
+
+    it.each([PRIMARY, WITNESS])('selects primary explicit Error after both read groups settle, %s finishes first', async first => {
+      const f = nativeFixture(); const releases = new Map<string, () => void>(); const started: string[] = [];
+      mocks.readBox.mockImplementation(async (origin, id) => {
+        if (id === f.input.packet.boxes.sourceFundingInput.boxId) {
+          await new Promise<void>(resolve => { releases.set(origin, resolve); started.push(origin); });
+          return origin === PRIMARY ? f.input.packet.boxes.sourceFundingInput : null;
+        }
+        if (origin === WITNESS && id === f.input.packet.boxes.sourceLock.boxId) return null;
+        return mocks.boxes.get(id) ?? null;
+      });
+      const capture = captureRefusals(); let settled = false;
+      try {
+        const result = create(f.input as never).revalidator.revalidate(f.checked as never)
+          .then(() => { settled = true; return undefined; }, error => { settled = true; return error; });
+        await new Promise(resolve => setImmediate(resolve)); expect(started.sort()).toEqual([PRIMARY, WITNESS]);
+        releases.get(first)!(); await new Promise(resolve => setImmediate(resolve)); expect(settled).toBe(false);
+        releases.get(first === PRIMARY ? WITNESS : PRIMARY)!(); const error = await result;
+        expect(capture.captured).toHaveLength(2);
+        const primary = capture.captured.find(entry => entry.detail.nodeRole === 'primary')!;
+        const witness = capture.captured.find(entry => entry.detail.nodeRole === 'witness')!;
+        expect(error).toBe(primary.value); expect(projectEscapingRefusal(error)).toEqual({ refusalCode: 'source-funding-present', nodeRole: 'primary' });
+        expect(projectEscapingRefusal(witness.value)).toBeNull(); expect(mocks.readBox).toHaveBeenCalledTimes(8);
+        expect(mocks.checkSignedTransaction).not.toHaveBeenCalled();
+      } finally { for (const release of releases.values()) release(); capture.spy.mockRestore(); }
+    });
+
+    it.each([new Error('native committed-vault observation reached the source refund timeout'), 'source-funding-present', null])(
+      'does not classify dependency lookalike %#', async dependency => {
+        const f = nativeFixture(); mocks.readBox.mockImplementation(async () => { throw dependency; });
+        const capture = captureRefusals();
+        try {
+          await expect(create(f.input as never).revalidator.revalidate(f.checked as never)).rejects.toBe(dependency);
+          expect(capture.captured).toEqual([]); expect(projectEscapingRefusal(dependency)).toBeNull();
+          expect(mocks.checkSignedTransaction).not.toHaveBeenCalled();
+        } finally { capture.spy.mockRestore(); }
+      });
+
+    it.each(['factory', 'tag'] as const)('preserves the existing predicate error when optional refusal %s throws', async fault => {
+      const f = nativeFixture(); mocks.boxes.set(f.input.packet.boxes.sourceFundingInput.boxId, f.input.packet.boxes.sourceFundingInput);
+      const seen: unknown[] = []; const factory = operations.createNativeCommittedReserveRevalidationOperationTaggerV1;
+      const operationSpy = vi.spyOn(operations, 'createNativeCommittedReserveRevalidationOperationTaggerV1').mockImplementation(() => {
+        const tag = factory(); return <T>(value: T, operation: operations.NativeCommittedReserveRevalidationOperationV1): T => {
+          seen.push(value); return tag(value, operation);
+        };
+      });
+      const tagInputs: unknown[] = [];
+      const refusalSpy = vi.spyOn(operations, 'createNativeCommittedReserveInputRefusalTaggerV1').mockImplementation(() => {
+        if (fault === 'factory') throw new Error('optional factory');
+        return <T>(value: T): T => { tagInputs.push(value); throw new Error('optional tag'); };
+      });
+      try {
+        const error = await create(f.input as never).revalidator.revalidate(f.checked as never).then(() => undefined, error => error);
+        expect(error).toBeInstanceOf(Error); expect(error.message).toBe('isolated committed-vault primary reports original source funding');
+        expect(seen).toEqual([error]); if (fault === 'tag') expect(tagInputs).toContain(error);
+        expect(projectEscapingRefusal(error)).toBeNull(); expect(projectEscapingOperation(error)).toBe('input-observation-before-check');
+        expect(mocks.checkSignedTransaction).not.toHaveBeenCalled();
+      } finally { refusalSpy.mockRestore(); operationSpy.mockRestore(); }
+    });
+
+    it('does not project a tagged predicate masked by the final custody guard', async () => {
+      const f = nativeFixture();
+      const custody = new Error('fixture final target custody refusal');
+      mocks.readBox.mockImplementation(async (origin, id) => {
+        if (origin === PRIMARY && id === f.input.packet.boxes.sourceFundingInput.boxId) {
+          return f.input.packet.boxes.sourceFundingInput;
+        }
+        return mocks.boxes.get(id) ?? null;
+      });
+      const capture = captureRefusals();
+      const session = create(f.input as never);
+      const assertTarget = mocks.assertTarget.getMockImplementation()!;
+      mocks.assertTarget.mockImplementation(value => {
+        if (capture.captured.length > 0) throw custody;
+        return assertTarget(value);
+      });
+      try {
+        await expect(session.revalidator.revalidate(f.checked as never)).rejects.toBe(custody);
+        expect(capture.captured).toHaveLength(1);
+        expect(capture.captured[0]!.value).not.toBe(custody);
+        expect(capture.captured[0]!.detail).toEqual({ refusalCode: 'source-funding-present', nodeRole: 'primary' });
+        expect(projectEscapingOperation(custody)).toBe('input-observation-before-check');
+        expect(projectEscapingRefusal(custody)).toBeNull();
+        expect(projectEscapingRefusal(capture.captured[0]!.value)).toBeNull();
+        expect(mocks.readBox).toHaveBeenCalledTimes(8);
+        expect(mocks.checkSignedTransaction).not.toHaveBeenCalled();
+      } finally { mocks.assertTarget.mockImplementation(assertTarget); capture.spy.mockRestore(); }
+    });
+
+    it('exercises pair disagreement only with a deliberately unstable mocked normalizer result', async () => {
+      const f = nativeFixture();
+      mocks.normalizeEip12Box.mockImplementation(async (value, label) => {
+        if (!String(label).includes('primary reserve predecessor')) return value;
+        let reads = 0;
+        // The real WASM normalizer returns ordinary canonical data. This getter
+        // violates that port contract to reach a defensive pair predicate; it
+        // is not evidence of reachability with valid native observations.
+        return { ...value, get value() { return ++reads <= 2 ? value.value : '1'; } };
+      });
+      const capture = captureRefusals();
+      try {
+        const error = await create(f.input as never).revalidator.revalidate(f.checked as never).then(() => undefined, error => error);
+        expect(capture.captured).toHaveLength(1); expect(error).toBe(capture.captured[0]!.value);
+        expect(projectEscapingRefusal(error)).toEqual({ refusalCode: 'paired-observations-disagree', nodeRole: 'pair' });
+        expect(projectEscapingOperation(error)).toBe('input-observation-before-check');
+        expect(mocks.checkSignedTransaction).not.toHaveBeenCalled();
+      } finally { capture.spy.mockRestore(); }
+    });
+  });
+
   it.each(operations.NATIVE_COMMITTED_RESERVE_REVALIDATION_OPERATIONS_V1)
     ('attributes the actual native escaping %s operation without changing its error', async operation => {
       const f = nativeFixture();

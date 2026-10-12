@@ -59,6 +59,8 @@ import {
 } from './unsigned-ergo-transaction.js';
 import {
   createNativeCommittedReserveRevalidationOperationTaggerV1,
+  createNativeCommittedReserveInputRefusalTaggerV1,
+  type NativeCommittedReserveInputRefusalV1,
   type NativeCommittedReserveRevalidationOperationV1,
 } from './substrate-federated-native-committed-reserve-revalidation-operation-v1.js';
 
@@ -84,7 +86,16 @@ const JVM_REVALIDATION_MAX_ATTEMPTS = 3;
 const NATIVE_CHECK_MAX_TIP_ADVANCE = 64;
 
 type ObservedTip = Readonly<{ height: number; idHex: string }>;
+type InputRefusalTagger = ReturnType<typeof createNativeCommittedReserveInputRefusalTaggerV1>;
+type InputNodeRole = 'primary' | 'witness';
 class NativeTipAdvance extends Error {}
+
+function tagInputRefusal<T>(value: T, refusalCode: NativeCommittedReserveInputRefusalV1['refusalCode'],
+  nodeRole: NativeCommittedReserveInputRefusalV1['nodeRole'], tagger?: InputRefusalTagger): T {
+  try { tagger?.(value, { refusalCode, nodeRole }); }
+  catch { /* Optional attribution cannot replace the original thrown value. */ }
+  return value;
+}
 
 async function settleNativeReads<T>(reads: readonly Promise<T>[]): Promise<T[]> {
   const results = await Promise.allSettled(reads);
@@ -331,9 +342,12 @@ function createAuthorizationSession(
     revalidate: async checked => {
       let operation: NativeCommittedReserveRevalidationOperationV1 = 'ingress-binding';
       let tagOperation: ReturnType<typeof createNativeCommittedReserveRevalidationOperationTaggerV1> | undefined;
+      let tagRefusal: InputRefusalTagger | undefined;
       if (input.authorizationScope === NATIVE_AUTHORIZATION_SCOPE) {
         try { tagOperation = createNativeCommittedReserveRevalidationOperationTaggerV1(); }
         catch { /* Optional attribution must preserve the original operation. */ }
+        try { tagRefusal = createNativeCommittedReserveInputRefusalTaggerV1(); }
+        catch { /* Preserve the existing observation and escaping value. */ }
       }
       try {
         const material = assertAuthorizer(authorizer, input.target);
@@ -348,7 +362,7 @@ function createAuthorizationSession(
             freshJvmCheckResponseDigestHex,
           } = await recheckAgainstStableTransitionInputs(material, packet,
             input.authorizationScope === NATIVE_AUTHORIZATION_SCOPE
-              ? entered => { operation = entered; } : undefined);
+              ? entered => { operation = entered; } : undefined, tagRefusal);
           operation = 'final-authorizer-binding';
           assertAuthorizer(authorizer, input.target);
           const revalidationDigestHex = sha256CanonicalJson({
@@ -632,12 +646,14 @@ async function observeExactTransitionInputs(
   material: AuthorizerMaterialV1,
   packet: DepositPacket,
   nativeAncestor?: ObservedTip,
+  tagRefusal?: InputRefusalTagger,
 ): Promise<Readonly<
   SubstrateFederatedIsolatedDevnetPegInCommittedVaultPreTransportObservationV1
 >> {
-  const [primaryState, witnessState] = await observeInputPair(material, packet, nativeAncestor);
+  const [primaryState, witnessState] = await observeInputPair(material, packet, nativeAncestor, tagRefusal);
   if (canonicalJson(primaryState) !== canonicalJson(witnessState)) {
-    throw new Error('isolated committed-vault input observations disagree');
+    throw tagInputRefusal(new Error('isolated committed-vault input observations disagree'),
+      'paired-observations-disagree', 'pair', tagRefusal);
   }
   const current =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(material.target);
@@ -694,6 +710,7 @@ async function observeInputPair(
   material: AuthorizerMaterialV1,
   packet: DepositPacket,
   nativeAncestor?: ObservedTip,
+  tagRefusal?: InputRefusalTagger,
 ): Promise<readonly [Awaited<ReturnType<typeof observeNodeInputs>>, Awaited<ReturnType<typeof observeNodeInputs>>]> {
   const native = material.nativeTips !== undefined;
   for (let attempt = 0; attempt < (native ? NODE_STATE_OBSERVATION_MAX_ATTEMPTS : 1); attempt += 1) {
@@ -704,7 +721,7 @@ async function observeInputPair(
           new AuthenticatedSpvTrackerReadOnlyNodeClient(origin),
           packet.boxes.sourceFundingInput.boxId, packet.boxes.reservePredecessor,
           packet.boxes.sourceLock, packet.boxes.transitionFeeFunding,
-          index === 0 ? 'primary' : 'witness', material, nativeAncestor,
+          index === 0 ? 'primary' : 'witness', material, nativeAncestor, tagRefusal,
         ));
       const states = await (native ? settleNativeReads(reads) : Promise.all(reads));
       if (native && states[0]!.tip.height !== states[1]!.tip.height) {
@@ -717,7 +734,8 @@ async function observeInputPair(
       assertNativeActive(material);
     }
   }
-  throw new Error('native committed-vault tip did not stabilize during input observation');
+  throw tagInputRefusal(new Error('native committed-vault tip did not stabilize during input observation'),
+    'input-observation-convergence-exhausted', 'pair', tagRefusal);
 }
 
 async function observeNodeInputs(
@@ -726,9 +744,10 @@ async function observeNodeInputs(
   expectedReservePredecessor: Eip12Box,
   expectedSourceLock: Eip12Box,
   expectedTransitionFeeFunding: Eip12Box,
-  label: string,
+  label: InputNodeRole,
   material: AuthorizerMaterialV1,
   nativeAncestor?: ObservedTip,
+  tagRefusal?: InputRefusalTagger,
 ): Promise<Readonly<{
   sourceFundingBoxIdHex: string;
   sourceFundingPresent: false;
@@ -741,7 +760,7 @@ async function observeNodeInputs(
   for (let attempt = 0; attempt < (material.nativeTips === undefined ? NODE_STATE_OBSERVATION_MAX_ATTEMPTS : 1); attempt += 1) {
     const tipBefore = await readObservedTip(material, client, label);
     if (nativeAncestor !== undefined) {
-      await assertNativeCheckAncestry(material, client, label, nativeAncestor, tipBefore);
+      await assertNativeCheckAncestry(material, client, label, nativeAncestor, tipBefore, tagRefusal);
     }
     assertNativeReadCustody(material);
     const reads = [
@@ -756,18 +775,18 @@ async function observeNodeInputs(
     const tipAfter = await readObservedTip(material, client, label);
     assertNativeReadCustody(material);
     if (sourceFunding !== null) {
-      throw new Error(
+      throw tagInputRefusal(new Error(
         `isolated committed-vault ${label} reports original source funding`,
-      );
+      ), 'source-funding-present', label, tagRefusal);
     }
     if (
       rawReserve === null
       || rawSourceLock === null
       || rawTransitionFee === null
     ) {
-      throw new Error(
+      throw tagInputRefusal(new Error(
         `isolated committed-vault ${label} transition input is unavailable`,
-      );
+      ), 'transition-input-unavailable', label, tagRefusal);
     }
     const reservePredecessor = await normalizeEip12Box(
       rawReserve,
@@ -791,12 +810,12 @@ async function observeNodeInputs(
       || canonicalJson(transitionFeeFunding)
         !== canonicalJson(expectedTransitionFeeFunding)
     ) {
-      throw new Error(
+      throw tagInputRefusal(new Error(
         `isolated committed-vault ${label} transition input bytes changed`,
-      );
+      ), 'transition-input-bytes-changed', label, tagRefusal);
     }
     if (canonicalJson(tipBefore) === canonicalJson(tipAfter)) {
-      assertNativeCommitHeight(material, tipAfter.height);
+      assertNativeCommitHeight(material, tipAfter.height, label, tagRefusal);
       const body = Object.freeze({
         sourceFundingBoxIdHex,
         sourceFundingPresent: false as const,
@@ -870,6 +889,7 @@ async function recheckAgainstStableTransitionInputs(
   material: AuthorizerMaterialV1,
   packet: DepositPacket,
   enterOperation?: (operation: NativeCommittedReserveRevalidationOperationV1) => void,
+  tagRefusal?: InputRefusalTagger,
 ): Promise<Readonly<{
   observation: Readonly<
     SubstrateFederatedIsolatedDevnetPegInCommittedVaultPreTransportObservationV1
@@ -877,14 +897,14 @@ async function recheckAgainstStableTransitionInputs(
   freshJvmCheckResponseDigestHex: string;
 }>> {
   enterOperation?.('input-observation-before-check');
-  let before = await observeExactTransitionInputs(material, packet);
+  let before = await observeExactTransitionInputs(material, packet, undefined, tagRefusal);
   if (material.nativeTips !== undefined) {
     enterOperation?.('fresh-signed-check');
     const freshJvmCheckResponseDigestHex = await recheckExactSignedCandidate(material, before);
     enterOperation?.('input-observation-after-check');
     const after = await observeExactTransitionInputs(material, packet, {
       height: before.observedTipHeight, idHex: before.observedTipHeaderIdHex,
-    });
+    }, tagRefusal);
     enterOperation?.('post-check-observation-join');
     assertObservationDidNotRegressOrReplace(before, after);
     return Object.freeze({ observation: after, freshJvmCheckResponseDigestHex });
@@ -1001,7 +1021,8 @@ function assertNativeReadCustody(material: AuthorizerMaterialV1): void {
   }
 }
 
-function assertNativeCommitHeight(material: AuthorizerMaterialV1, height: number): void {
+function assertNativeCommitHeight(material: AuthorizerMaterialV1, height: number,
+  nodeRole: InputNodeRole, tagRefusal?: InputRefusalTagger): void {
   if (material.nativeTips === undefined) return;
   // Node admission evaluates the upcoming block, not the last mined header.
   const evaluationHeight = height + 1;
@@ -1010,25 +1031,29 @@ function assertNativeCommitHeight(material: AuthorizerMaterialV1, height: number
   }
   const { sourceLock, reserveSuccessor } = material.packet.boxes;
   if (evaluationHeight >= sourceLock.creationHeight + SUBSTRATE_FEDERATED_SETTLEMENT_SOURCE_REFUND_DELAY_BLOCKS) {
-    throw new Error('native committed-vault observation reached the source refund timeout');
+    throw tagInputRefusal(new Error('native committed-vault observation reached the source refund timeout'),
+      'source-refund-timeout', nodeRole, tagRefusal);
   }
   if (evaluationHeight < reserveSuccessor.creationHeight
     || evaluationHeight > reserveSuccessor.creationHeight + SUBSTRATE_FEDERATED_SETTLEMENT_MAX_SUCCESSOR_HEIGHT_LAG) {
-    throw new Error('native committed-vault observation exceeds the successor creation-height window');
+    throw tagInputRefusal(new Error('native committed-vault observation exceeds the successor creation-height window'),
+      'successor-creation-height-window', nodeRole, tagRefusal);
   }
 }
 
 async function assertNativeCheckAncestry(
   material: AuthorizerMaterialV1,
   client: AuthenticatedSpvTrackerReadOnlyNodeClient,
-  label: string,
+  label: InputNodeRole,
   ancestor: ObservedTip,
   tip: ObservedTip,
+  tagRefusal?: InputRefusalTagger,
 ): Promise<void> {
   if (tip.height === ancestor.height && tip.idHex === ancestor.idHex) return;
   assertTipAdvancedWithoutReplacement(ancestor, tip, label);
   if (tip.height - ancestor.height > NATIVE_CHECK_MAX_TIP_ADVANCE) {
-    throw new Error('native committed-vault check ancestry exceeds the bounded tip window');
+    throw tagInputRefusal(new Error('native committed-vault check ancestry exceeds the bounded tip window'),
+      'check-ancestry-window-exceeded', label, tagRefusal);
   }
   let cursor = tip;
   while (cursor.height >= ancestor.height) {

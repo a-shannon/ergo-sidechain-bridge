@@ -307,6 +307,7 @@ Only the parent's terminal artifact determines the invocation outcome:
 | `worker-committed-reserve-stage.json` / `failure-committed-reserve-stage.json` | Optional worker/parent pair binding a closed native committed-reserve stage and `genesis` or `continuation` kind to the existing cycle-step and terminal failure ancestry. |
 | `worker-committed-reserve-revalidation.json` / `failure-committed-reserve-revalidation.json` | Optional worker/parent pair narrowing `operational-revalidate` to `callback-observation-guard` or `revalidator-call`, with exact committed-reserve-stage ancestry. |
 | `worker-committed-reserve-revalidation-operation.json` / `failure-committed-reserve-revalidation-operation.json` | Optional worker/parent pair identifying the last operation entered by the native revalidator, bound to the complete prior revalidation lineage. |
+| `worker-committed-reserve-input-refusal.json` / `failure-committed-reserve-input-refusal.json` | Optional source-owned predicate refusal and node role, joined to the complete prior operation lineage. |
 | `worker-committed-reserve-confirmation-progress.json` / `failure-committed-reserve-confirmation-progress.json` | Optional opt-in worker/parent pair binding the latest completed paired-node index and exact-ID pool observations to the original confirmation failure, reserve kind and complete legacy ancestry. |
 
 Confirmation progress retains each node's full height before and after the
@@ -362,6 +363,34 @@ commit, path and exact legacy worker/parent receipt digests. Missing, invalid
 or occupied optional files preserve the terminal failure and older receipts.
 Either operation file contradicts success. Completion, cleanup and raw-cause
 claims remain false. The companion grants no execution or retry authority.
+
+The input-refusal companion names only an explicit predicate thrown by the
+native input observer. It attaches private metadata to that exact Error,
+using a separate invocation token; concurrent reads share no mutable current
+node label. The closed codes are `source-funding-present`,
+`transition-input-unavailable`, `transition-input-bytes-changed`,
+`source-refund-timeout`, `successor-creation-height-window`,
+`paired-observations-disagree`, `check-ancestry-window-exceeded` and
+`input-observation-convergence-exhausted`. Node predicates identify `primary`
+or `witness`; paired disagreement and convergence exhaustion identify `pair`.
+The old operation identifies before-check or after-check observation. Ancestry
+window refusal applies only after the check. Grouped input predicates do not
+identify which individual input failed. Paired disagreement retains an existing
+defensive predicate; malformed-normalizer tests do not establish its reachability
+with genuine exact native reads.
+
+HTTP, normalization and custody exceptions are not classified by message or
+catch location. Transient tip advancement has no refusal tag. Only its existing
+bounded retry exhaustion has a code. The projector requires the same unique
+native primary Error to own the refusal and operation in a safe graph of at
+most 64 errors. Conflicts, cross-invocation reuse, unsafe graphs and cleanup
+attribution refuse detail; an independent untagged cleanup sibling retains the
+old primary-selection semantics. Each canonical create-only file is bounded to
+16 KiB and binds the exact old worker/parent operation ancestry. Missing,
+invalid or occupied detail preserves the old failure. Either file, including
+a dangling filesystem entry, contradicts success. Completion, root cleanup,
+raw-cause publication and restored execution authority remain false. This
+prospective detail cannot classify a historical attempt or admit another run.
 
 The setup-stage companion narrows a future native setup failure to retained
 session or compiler validation, request construction, observation, signing,

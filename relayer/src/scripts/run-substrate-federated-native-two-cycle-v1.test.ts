@@ -82,8 +82,12 @@ import { tagNativeCommittedReserveRevalidationOriginV1,
   from '../substrate-federated-native-committed-reserve-revalidation-v1.js';
 import { NATIVE_COMMITTED_RESERVE_REVALIDATION_OPERATIONS_V1,
   createNativeCommittedReserveRevalidationOperationTaggerV1,
+  createNativeCommittedReserveInputRefusalTaggerV1,
+  NATIVE_COMMITTED_RESERVE_INPUT_REFUSAL_ROLES_V1,
   parseNativeTwoCycleParentCommittedReserveRevalidationOperationV1 }
   from '../substrate-federated-native-committed-reserve-revalidation-operation-v1.js';
+import { parseNativeTwoCycleParentCommittedReserveInputRefusalV1 }
+  from '../substrate-federated-native-committed-reserve-input-refusal-v1.js';
 import { tagNativeCommittedReserveConfirmationOriginV1,
   parseNativeTwoCycleParentCommittedReserveConfirmationV1 }
   from '../substrate-federated-native-committed-reserve-confirmation-v1.js';
@@ -1074,6 +1078,7 @@ describe('native two-cycle parent and worker V1', () => {
     'worker-committed-reserve-stage.json', 'failure-committed-reserve-stage.json',
     'worker-committed-reserve-revalidation.json', 'failure-committed-reserve-revalidation.json',
     'worker-committed-reserve-revalidation-operation.json', 'failure-committed-reserve-revalidation-operation.json',
+    'worker-committed-reserve-input-refusal.json', 'failure-committed-reserve-input-refusal.json',
     'worker-committed-reserve-confirmation.json', 'failure-committed-reserve-confirmation.json',
     'worker-committed-reserve-confirmation-progress.json', 'failure-committed-reserve-confirmation-progress.json',
     'worker-callback-timing-v1.json', 'failure-callback-timing-v1.json'] as const)(
@@ -1847,6 +1852,124 @@ describe('native two-cycle parent and worker V1', () => {
         + read('failure-committed-reserve-revalidation-operation.json')).not.toContain('private');
       expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
     });
+
+  it.each((['genesis', 'continuation'] as const).flatMap(kind =>
+    Object.entries(NATIVE_COMMITTED_RESERVE_INPUT_REFUSAL_ROLES_V1).map(([refusalCode, roles], index) => ({
+      kind, refusalCode: refusalCode as keyof typeof NATIVE_COMMITTED_RESERVE_INPUT_REFUSAL_ROLES_V1,
+      nodeRole: roles[index % roles.length]!,
+      operation: refusalCode !== 'check-ancestry-window-exceeded' && index % 2 === 0
+        ? 'input-observation-before-check' as const : 'input-observation-after-check' as const,
+    }))))('joins source refusal $refusalCode for $kind through the actual worker and parent', async detail => {
+      const fixture = commandFixture(); configureParent(fixture, projectedResult());
+      const primary = new Error('synthetic private refusal payload');
+      tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(primary, 'cycle-1');
+      tagNativeTwoCycleCycleStepFailureV1(primary, 'cycle-1', 'committed-reserve');
+      tagSubstrateFederatedNativeCommittedReserveFailureStageV1(primary, 'operational-revalidate', detail.kind);
+      tagNativeCommittedReserveRevalidationOriginV1(primary, 'revalidator-call');
+      createNativeCommittedReserveRevalidationOperationTaggerV1()(primary, detail.operation);
+      expect(createNativeCommittedReserveInputRefusalTaggerV1()(primary,
+        { refusalCode: detail.refusalCode, nodeRole: detail.nodeRole })).toBe(primary);
+      mocked.root.mockRejectedValueOnce(primary);
+      mocked.process.mockImplementationOnce(async input => {
+        await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(input.args.slice(input.args.indexOf('--config')));
+        throw new Error('unexpected worker success');
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments(['--config', fixture.configSourcePath])).rejects.toBe(primary);
+      const read = (name: string) => readFileSync(join(fixture.attemptPath, name), 'utf8');
+      expect(read('failure.json')).toBe(expectedTerminalFailure(fixture));
+      const failure = JSON.parse(read('failure.json'));
+      const companion = parseNativeTwoCycleParentCommittedReserveInputRefusalV1(
+        read('failure-committed-reserve-input-refusal.json'), failureBindings(fixture), failure.receiptDigestHex, {
+          workerFailureText: read('worker-failure.json'),
+          workerRootPhaseV2Text: read('worker-root-phase-v2.json'),
+          workerCycleStepText: read('worker-cycle-step.json'),
+          workerCommittedReserveStageText: read('worker-committed-reserve-stage.json'),
+          parentCycleStepText: read('failure-cycle-step.json'),
+          parentCommittedReserveStageText: read('failure-committed-reserve-stage.json'),
+          workerRevalidationText: read('worker-committed-reserve-revalidation.json'),
+          parentRevalidationText: read('failure-committed-reserve-revalidation.json'),
+          workerRevalidationOperationText: read('worker-committed-reserve-revalidation-operation.json'),
+          parentRevalidationOperationText: read('failure-committed-reserve-revalidation-operation.json'),
+          workerInputRefusalText: read('worker-committed-reserve-input-refusal.json'),
+        });
+      expect(companion).toMatchObject({ refusalCode: detail.refusalCode, nodeRole: detail.nodeRole,
+        committedReserveKind: detail.kind, revalidationOperation: detail.operation,
+        operationCompletionEstablished: false, rootCleanupEstablished: false,
+        rawCausePublished: false, executionAuthorityRestored: false });
+      expect(read('worker-committed-reserve-input-refusal.json')
+        + read('failure-committed-reserve-input-refusal.json')).not.toContain('private');
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+    });
+
+  it.each(['missing tag', 'conflicting tag', 'reused tag', 'wrong operation', 'missing worker',
+    'invalid worker', 'BOM worker', 'invalid operation ancestor', 'occupied worker', 'worker directory',
+    'occupied parent', 'parent directory'] as const)(
+    'preserves terminal failure and prior receipts when input refusal has %s', async fault => {
+      const fixture = commandFixture(); configureParent(fixture, projectedResult());
+      const primary = new Error('synthetic private refusal payload');
+      tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(primary, 'cycle-1');
+      tagNativeTwoCycleCycleStepFailureV1(primary, 'cycle-1', 'committed-reserve');
+      tagSubstrateFederatedNativeCommittedReserveFailureStageV1(primary, 'operational-revalidate', 'continuation');
+      tagNativeCommittedReserveRevalidationOriginV1(primary, 'revalidator-call');
+      createNativeCommittedReserveRevalidationOperationTaggerV1()(primary,
+        fault === 'wrong operation' ? 'fresh-signed-check' : 'input-observation-before-check');
+      const detail = { refusalCode: 'transition-input-unavailable', nodeRole: 'witness' } as const;
+      const tag = createNativeCommittedReserveInputRefusalTaggerV1();
+      if (fault !== 'missing tag') tag(primary, detail);
+      if (fault === 'conflicting tag') tag(primary, { ...detail, nodeRole: 'primary' });
+      if (fault === 'reused tag') createNativeCommittedReserveInputRefusalTaggerV1()(primary, detail);
+      mocked.root.mockRejectedValueOnce(primary);
+      const workerPath = join(fixture.attemptPath, 'worker-committed-reserve-input-refusal.json');
+      const parentPath = join(fixture.attemptPath, 'failure-committed-reserve-input-refusal.json');
+      let retained: Record<string, string> = {};
+      mocked.process.mockImplementationOnce(async input => {
+        if (fault === 'occupied worker') writeFileSync(workerPath, 'retained refusal worker');
+        if (fault === 'worker directory') mkdirSync(workerPath);
+        try {
+          await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(input.args.slice(input.args.indexOf('--config')));
+          throw new Error('unexpected worker success');
+        } catch (cause) {
+          expect(cause).toBe(primary);
+          const names = ['worker-failure.json', 'worker-root-phase-v2.json', 'worker-cycle-step.json',
+            'worker-committed-reserve-stage.json', 'worker-committed-reserve-revalidation.json',
+            'worker-committed-reserve-revalidation-operation.json'];
+          retained = Object.fromEntries(names.map(name => [name, readFileSync(join(fixture.attemptPath, name), 'utf8')]));
+          if (fault === 'missing worker') rmSync(workerPath);
+          if (fault === 'invalid worker') writeFileSync(workerPath, '{}\n');
+          if (fault === 'BOM worker') writeFileSync(workerPath, '\ufeff' + readFileSync(workerPath, 'utf8'));
+          if (fault === 'invalid operation ancestor') {
+            retained['worker-committed-reserve-revalidation-operation.json'] = '{}\n';
+            writeFileSync(join(fixture.attemptPath, 'worker-committed-reserve-revalidation-operation.json'), '{}\n');
+          }
+          if (fault === 'occupied parent') writeFileSync(parentPath, 'retained refusal parent');
+          if (fault === 'parent directory') mkdirSync(parentPath);
+          throw cause;
+        }
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments(['--config', fixture.configSourcePath])).rejects.toBe(primary);
+      const read = (name: string) => readFileSync(join(fixture.attemptPath, name), 'utf8');
+      expect(read('failure.json')).toBe(expectedTerminalFailure(fixture));
+      for (const [name, bytes] of Object.entries(retained)) expect(read(name)).toBe(bytes);
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+      if (fault === 'occupied worker') expect(read('worker-committed-reserve-input-refusal.json')).toBe('retained refusal worker');
+      if (fault === 'occupied parent') expect(read('failure-committed-reserve-input-refusal.json')).toBe('retained refusal parent');
+      else if (fault === 'parent directory') expect(lstatSync(parentPath).isDirectory()).toBe(true);
+      else expect(existsSync(parentPath)).toBe(false);
+    });
+
+  it.each(['worker', 'failure'] as const)('refuses a dangling %s input refusal companion alongside success', async side => {
+    const fixture = commandFixture(); const result = projectedResult(); configureParent(fixture, result);
+    mocked.process.mockImplementationOnce(async input => {
+      writeWorkerTransport(fixture, result);
+      symlinkSync(join(fixture.attemptPath, 'absent-refusal-target'),
+        join(fixture.attemptPath, `${side}-committed-reserve-input-refusal.json`),
+        process.platform === 'win32' ? 'junction' : 'dir');
+      return cleanProcessResult(input);
+    });
+    await expect(runSubstrateFederatedNativeTwoCycleFromArguments(['--config', fixture.configSourcePath]))
+      .rejects.toThrow(/contradictory failure evidence/);
+    expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+  });
 
   it.each(['missing operation', 'conflicting operation', 'reused invocation', 'missing worker',
     'invalid worker', 'invalid origin ancestor', 'occupied worker', 'worker directory',

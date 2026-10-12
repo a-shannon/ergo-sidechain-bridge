@@ -51,6 +51,8 @@ import { createNativeTwoCycleParentCommittedReserveRevalidationV1 }
   from '../substrate-federated-native-committed-reserve-revalidation-v1.js';
 import { createNativeTwoCycleParentCommittedReserveRevalidationOperationV1 }
   from '../substrate-federated-native-committed-reserve-revalidation-operation-v1.js';
+import { createNativeTwoCycleParentCommittedReserveInputRefusalV1 }
+  from '../substrate-federated-native-committed-reserve-input-refusal-v1.js';
 import { createNativeTwoCycleParentCommittedReserveConfirmationV1 }
   from '../substrate-federated-native-committed-reserve-confirmation-v1.js';
 import { createNativeTwoCycleParentCommittedReserveConfirmationProgressV1 }
@@ -262,6 +264,8 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
       || existsSync(join(attemptPath, 'failure-committed-reserve-revalidation.json'))
       || existsSync(join(attemptPath, 'worker-committed-reserve-revalidation-operation.json'))
       || existsSync(join(attemptPath, 'failure-committed-reserve-revalidation-operation.json'))
+      || copiedSelectionEntryExists(join(attemptPath, 'worker-committed-reserve-input-refusal.json'))
+      || copiedSelectionEntryExists(join(attemptPath, 'failure-committed-reserve-input-refusal.json'))
       || existsSync(join(attemptPath, 'worker-committed-reserve-confirmation.json'))
       || existsSync(join(attemptPath, 'failure-committed-reserve-confirmation.json'))
       || existsSync(join(attemptPath, 'worker-committed-reserve-confirmation-progress.json'))
@@ -640,6 +644,35 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
             'native committed reserve revalidation operation companion');
         } catch {
           // Missing, invalid or occupied operation detail preserves all older evidence.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const readRefusal = (name: string) => new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+            readBoundedRegularFile(join(attemptPath, name),
+              'native committed reserve input refusal lineage', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleParentCommittedReserveInputRefusalV1(bindings,
+            failure.receiptDigestHex, {
+              workerFailureText: readRefusal('worker-failure.json'),
+              workerRootPhaseV2Text: readRefusal('worker-root-phase-v2.json'),
+              workerCycleStepText: readRefusal('worker-cycle-step.json'),
+              workerCommittedReserveStageText: readRefusal('worker-committed-reserve-stage.json'),
+              parentCycleStepText: readRefusal('failure-cycle-step.json'),
+              parentCommittedReserveStageText: readRefusal('failure-committed-reserve-stage.json'),
+              workerRevalidationText: readRefusal('worker-committed-reserve-revalidation.json'),
+              parentRevalidationText: readRefusal('failure-committed-reserve-revalidation.json'),
+              workerRevalidationOperationText: readRefusal('worker-committed-reserve-revalidation-operation.json'),
+              parentRevalidationOperationText: readRefusal('failure-committed-reserve-revalidation-operation.json'),
+              workerInputRefusalText: readRefusal('worker-committed-reserve-input-refusal.json'),
+            });
+          writeNewFile(join(attemptPath, 'failure-committed-reserve-input-refusal.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native committed reserve input refusal parent companion');
+        } catch {
+          // Missing, invalid or occupied refusal detail preserves the terminal failure.
         }
         try {
           const bindings = {

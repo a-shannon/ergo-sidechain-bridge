@@ -21,6 +21,10 @@ import { tagNativeCommittedReserveRevalidationOriginV1 as originTag,
   type NativeCommittedReserveRevalidationOriginV1 as Origin }
   from './substrate-federated-native-committed-reserve-revalidation-v1.js';
 import { NATIVE_COMMITTED_RESERVE_REVALIDATION_OPERATIONS_V1 as operations,
+  NATIVE_COMMITTED_RESERVE_INPUT_REFUSAL_ROLES_V1,
+  createNativeCommittedReserveInputRefusalTaggerV1,
+  projectNativeCommittedReserveInputRefusalV1,
+  type NativeCommittedReserveInputRefusalV1,
   createNativeCommittedReserveRevalidationOperationTaggerV1 as factory,
   projectNativeCommittedReserveRevalidationOperationV1 as project,
   createNativeTwoCycleWorkerCommittedReserveRevalidationOperationV1 as createWorker,
@@ -37,6 +41,122 @@ const terminal = 'd'.repeat(64);
 const workerDomain = 'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_WORKER_COMMITTED_RESERVE_REVALIDATION_OPERATION_V1';
 const parentDomain = 'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_PARENT_COMMITTED_RESERVE_REVALIDATION_OPERATION_V1';
 const text = (value: unknown) => `${json.canonicalJson(value)}\n`;
+
+describe('source-owned input refusal metadata', () => {
+  const detail = { refusalCode: 'source-funding-present', nodeRole: 'primary' } as const;
+  const allowed = Object.entries(NATIVE_COMMITTED_RESERVE_INPUT_REFUSAL_ROLES_V1)
+    .flatMap(([refusalCode, roles]) => roles.map(nodeRole => ({ refusalCode, nodeRole } as NativeCommittedReserveInputRefusalV1)));
+  it('closes exactly eight source predicates and three roles', () => {
+    expect(Object.keys(NATIVE_COMMITTED_RESERVE_INPUT_REFUSAL_ROLES_V1)).toEqual([
+      'source-funding-present', 'transition-input-unavailable', 'transition-input-bytes-changed', 'source-refund-timeout',
+      'successor-creation-height-window', 'paired-observations-disagree', 'check-ancestry-window-exceeded',
+      'input-observation-convergence-exhausted']);
+    expect(Object.isFrozen(NATIVE_COMMITTED_RESERVE_INPUT_REFUSAL_ROLES_V1)).toBe(true);
+  });
+  it.each(allowed)('preserves exact error for $refusalCode/$nodeRole in both observation phases', d => {
+    for (const operation of ['input-observation-before-check', 'input-observation-after-check'] as const) {
+      if (d.refusalCode === 'check-ancestry-window-exceeded' && operation === 'input-observation-before-check') continue;
+      const error = primary(); const keys = Reflect.ownKeys(error); factory()(error, operation);
+      const tag = createNativeCommittedReserveInputRefusalTaggerV1();
+      expect(tag(error, d)).toBe(error); expect(tag(error, d)).toBe(error);
+      expect(Reflect.ownKeys(error)).toEqual(keys); expect(error.message).toBe('opaque');
+      expect(projectNativeCommittedReserveInputRefusalV1(new AggregateError([error, error]))).toEqual(d);
+      expect(Object.isFrozen(projectNativeCommittedReserveInputRefusalV1(error))).toBe(true);
+      expect(project(error)).toBe(operation);
+    }
+  });
+  it.each(allowed.flatMap(d => ['primary', 'witness', 'pair', 'session'].filter(role =>
+    !(NATIVE_COMMITTED_RESERVE_INPUT_REFUSAL_ROLES_V1[d.refusalCode] as readonly string[]).includes(role))
+    .map(nodeRole => [d.refusalCode, nodeRole] as const)))('refuses invalid code-role %s/%s', (refusalCode, nodeRole) => {
+    const error = tagged('input-observation-before-check');
+    expect(createNativeCommittedReserveInputRefusalTaggerV1()(error, { refusalCode, nodeRole } as NativeCommittedReserveInputRefusalV1)).toBe(error);
+    expect(projectNativeCommittedReserveInputRefusalV1(error)).toBeNull();
+    expect(project(error)).toBe('input-observation-before-check');
+  });
+  it.each(['cross-token', 'code', 'role', 'invalid'] as const)('permanently poisons %s reuse without changing operation', fault => {
+    const error = tagged('input-observation-before-check'); const tag = createNativeCommittedReserveInputRefusalTaggerV1(); tag(error, detail);
+    if (fault === 'cross-token') createNativeCommittedReserveInputRefusalTaggerV1()(error, detail);
+    else tag(error, fault === 'code' ? { ...detail, refusalCode: 'transition-input-unavailable' }
+      : fault === 'role' ? { ...detail, nodeRole: 'witness' } : {} as NativeCommittedReserveInputRefusalV1);
+    tag(error, detail); expect(projectNativeCommittedReserveInputRefusalV1(error)).toBeNull();
+    expect(project(error)).toBe('input-observation-before-check');
+  });
+  it.each(['primary', 'witness'] as const)('refuses before-check ancestry metadata for %s', nodeRole => {
+    const error = tagged('input-observation-before-check');
+    createNativeCommittedReserveInputRefusalTaggerV1()(error, { refusalCode: 'check-ancestry-window-exceeded', nodeRole });
+    expect(projectNativeCommittedReserveInputRefusalV1(error)).toBeNull();
+    expect(project(error)).toBe('input-observation-before-check');
+  });
+  it.each(operations.filter(operation => !operation.startsWith('input-observation-')))('refuses operation %s', operation => {
+    const error = tagged(operation); createNativeCommittedReserveInputRefusalTaggerV1()(error, detail);
+    expect(projectNativeCommittedReserveInputRefusalV1(error)).toBeNull();
+  });
+  it.each(['missing-operation', 'different-error', 'two-primary', 'cleanup-ancestor', 'cycle', 'stage', 'origin', 'step'] as const)(
+    'requires exact own primary association %s', fault => {
+      const error = primary(); if (fault !== 'missing-operation') factory()(error, 'input-observation-before-check');
+      const sibling = new Error(); createNativeCommittedReserveInputRefusalTaggerV1()(fault === 'different-error' ? sibling : error, detail);
+      if (fault === 'cycle') stepTag(error, 'cycle-2', 'committed-reserve');
+      if (fault === 'stage') stageTag(error, 'operational-sign', 'continuation');
+      if (fault === 'origin') originTag(error, 'callback-observation-guard');
+      if (fault === 'step') stepTag(error, 'cycle-1', 'source-lock');
+      const graph = new AggregateError([error, sibling]);
+      if (fault === 'two-primary') graph.errors.push(primary());
+      if (fault === 'cleanup-ancestor') rootTag(graph, 'cleanup');
+      expect(projectNativeCommittedReserveInputRefusalV1(graph)).toBeNull();
+    });
+  it.each(['error-proxy', 'prototype-proxy', 'array-proxy', 'array-prototype-proxy', 'child-getter', 'detail-proxy', 'detail-getter'] as const)(
+    'rejects hostile %s without effects', fault => {
+      let effects = 0; const traps = { get() { effects++; throw Error(); }, getPrototypeOf() { effects++; throw Error(); },
+        ownKeys() { effects++; throw Error(); }, getOwnPropertyDescriptor() { effects++; throw Error(); } };
+      const error = tagged('input-observation-before-check'); const graph = new AggregateError([error]); let value: unknown = graph;
+      let selected: object = detail;
+      if (fault === 'error-proxy') value = new Proxy(error, traps);
+      if (fault === 'prototype-proxy') Object.setPrototypeOf(error, new Proxy(Error.prototype, traps));
+      if (fault === 'array-proxy') graph.errors = new Proxy(graph.errors, traps);
+      if (fault === 'array-prototype-proxy') Object.setPrototypeOf(graph.errors, new Proxy(Array.prototype, traps));
+      if (fault === 'child-getter') Object.defineProperty(graph.errors, '0', { get() { effects++; throw Error(); } });
+      if (fault === 'detail-proxy') selected = new Proxy(detail, traps);
+      if (fault === 'detail-getter') { selected = { ...detail }; Object.defineProperty(selected, 'refusalCode', { get() { effects++; throw Error(); } }); }
+      expect(createNativeCommittedReserveInputRefusalTaggerV1()(error, selected as NativeCommittedReserveInputRefusalV1)).toBe(error);
+      expect(projectNativeCommittedReserveInputRefusalV1(value)).toBeNull(); expect(effects).toBe(0);
+    });
+  it.each([null, undefined, 'source-funding-present', 1, {}, Object.create(Error.prototype)])('refuses non-native %#', value => {
+    expect(createNativeCommittedReserveInputRefusalTaggerV1()(value, detail)).toBe(value);
+    expect(projectNativeCommittedReserveInputRefusalV1(value)).toBeNull();
+  });
+  it('does not infer predicate from messages, fields or cause', () => {
+    const error = tagged('input-observation-before-check'); error.message = detail.refusalCode;
+    Object.assign(error, detail, { cause: primary() }); expect(projectNativeCommittedReserveInputRefusalV1(error)).toBeNull();
+  });
+  it('preserves the primary with an independent untagged cleanup sibling but refuses cleanup attribution', () => {
+    const error = tagged('input-observation-before-check'); createNativeCommittedReserveInputRefusalTaggerV1()(error, detail);
+    const cleanup = rootTag(new Error('cleanup'), 'cleanup'); const graph = new AggregateError([error, cleanup]);
+    expect(projectNativeCommittedReserveInputRefusalV1(graph)).toEqual(detail);
+    expect(project(graph)).toBe('input-observation-before-check');
+    createNativeCommittedReserveInputRefusalTaggerV1()(cleanup, detail);
+    expect(projectNativeCommittedReserveInputRefusalV1(graph)).toBeNull();
+    expect(project(graph)).toBe('input-observation-before-check');
+  });
+  it('refuses a primary also reachable through cleanup ancestry', () => {
+    const error = tagged('input-observation-after-check'); createNativeCommittedReserveInputRefusalTaggerV1()(error, detail);
+    expect(projectNativeCommittedReserveInputRefusalV1(new AggregateError([error,
+      rootTag(new AggregateError([error]), 'cleanup')]))).toBeNull();
+  });
+  it('does not revive a prior refusal after cross-invocation reuse on a temporarily hostile error', () => {
+    const error = tagged('input-observation-before-check'); const first = createNativeCommittedReserveInputRefusalTaggerV1();
+    first(error, detail); Object.defineProperty(error, 'cause', { configurable: true, get() { throw Error('unread'); } });
+    createNativeCommittedReserveInputRefusalTaggerV1()(error, detail); Reflect.deleteProperty(error, 'cause'); first(error, detail);
+    expect(projectNativeCommittedReserveInputRefusalV1(error)).toBeNull(); expect(project(error)).toBe('input-observation-before-check');
+  });
+  it('retains the complete graph bound and refuses masked AggregateErrors', () => {
+    const error = tagged('input-observation-before-check'); createNativeCommittedReserveInputRefusalTaggerV1()(error, detail);
+    const graph = new AggregateError([error, ...Array.from({ length: 62 }, () => new Error())]);
+    expect(projectNativeCommittedReserveInputRefusalV1(graph)).toEqual(detail);
+    graph.errors.push(new Error()); expect(projectNativeCommittedReserveInputRefusalV1(graph)).toBeNull();
+    const masked = new AggregateError([error]); Object.setPrototypeOf(masked, Error.prototype);
+    expect(projectNativeCommittedReserveInputRefusalV1(masked)).toBeNull();
+  });
+});
 const resign = (record: object, domain: string) => {
   const { receiptDigestHex: ignored, ...body } = record as Record<string, unknown>; void ignored;
   return { ...body, receiptDigestHex: json.sha256CanonicalJson(body, domain) };

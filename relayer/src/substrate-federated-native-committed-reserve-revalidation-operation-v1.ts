@@ -25,6 +25,22 @@ export const NATIVE_COMMITTED_RESERVE_REVALIDATION_OPERATIONS_V1 = Object.freeze
 export type NativeCommittedReserveRevalidationOperationV1 =
   typeof NATIVE_COMMITTED_RESERVE_REVALIDATION_OPERATIONS_V1[number];
 type Operation = NativeCommittedReserveRevalidationOperationV1;
+export const NATIVE_COMMITTED_RESERVE_INPUT_REFUSAL_ROLES_V1 = Object.freeze({
+  'source-funding-present': Object.freeze(['primary', 'witness'] as const),
+  'transition-input-unavailable': Object.freeze(['primary', 'witness'] as const),
+  'transition-input-bytes-changed': Object.freeze(['primary', 'witness'] as const),
+  'source-refund-timeout': Object.freeze(['primary', 'witness'] as const),
+  'successor-creation-height-window': Object.freeze(['primary', 'witness'] as const),
+  'paired-observations-disagree': Object.freeze(['pair'] as const),
+  'check-ancestry-window-exceeded': Object.freeze(['primary', 'witness'] as const),
+  'input-observation-convergence-exhausted': Object.freeze(['pair'] as const),
+});
+export interface NativeCommittedReserveInputRefusalV1 {
+  readonly refusalCode: keyof typeof NATIVE_COMMITTED_RESERVE_INPUT_REFUSAL_ROLES_V1;
+  readonly nodeRole: 'primary' | 'witness' | 'pair';
+}
+const INPUT_REFUSALS = new WeakMap<Error, Readonly<{ token: object; detail: Readonly<NativeCommittedReserveInputRefusalV1> }>>();
+const INPUT_REFUSAL_CONFLICTS = new WeakSet<Error>();
 const OPERATIONS = new WeakMap<Error, Readonly<{ token: object; operation: Operation }>>();
 const CONFLICTS = new WeakSet<Error>();
 const MAX_GRAPH = 64;
@@ -93,6 +109,68 @@ export function projectNativeCommittedReserveRevalidationOperationV1(value: unkn
     }
     return selected !== undefined && primaryErrors.has(selected) ? operation : null;
   } catch { return null; }
+}
+
+/** Tags only a source-selected predicate; never classifies messages or dependency errors. */
+export function createNativeCommittedReserveInputRefusalTaggerV1():
+  <T>(value: T, detail: Readonly<NativeCommittedReserveInputRefusalV1>) => T {
+  const token = Object.freeze({});
+  return <T>(value: T, detail: Readonly<NativeCommittedReserveInputRefusalV1>): T => {
+    try {
+      if (types.isProxy(value) || !types.isNativeError(value)) return value;
+      const error = value as Error;
+      const previous = INPUT_REFUSALS.get(error);
+      if (previous !== undefined && previous.token !== token) INPUT_REFUSAL_CONFLICTS.add(error);
+      try {
+        const captured = normalizeNativeCommittedReserveInputRefusalV1(detail);
+        if (previous !== undefined && (previous.detail.refusalCode !== captured.refusalCode
+          || previous.detail.nodeRole !== captured.nodeRole)) INPUT_REFUSAL_CONFLICTS.add(error);
+        else if (previous === undefined && safeError(error) !== null) {
+          INPUT_REFUSALS.set(error, Object.freeze({ token, detail: captured }));
+        }
+      } catch { INPUT_REFUSAL_CONFLICTS.add(error); }
+    } catch { /* Optional metadata never replaces the original thrown value. */ }
+    return value;
+  };
+}
+
+/** Requires the same unique primary Error to own both source tags. */
+export function projectNativeCommittedReserveInputRefusalV1(value: unknown): Readonly<NativeCommittedReserveInputRefusalV1> | null {
+  try {
+    const graph = safeGraph(value);
+    if (graph === null) return null;
+    const operation = projectNativeCommittedReserveRevalidationOperationV1(value);
+    if (operation !== 'input-observation-before-check' && operation !== 'input-observation-after-check') return null;
+    let selected: Readonly<NativeCommittedReserveInputRefusalV1> | null = null;
+    for (const error of graph.keys()) {
+      if (INPUT_REFUSAL_CONFLICTS.has(error)) return null;
+      const refusal = INPUT_REFUSALS.get(error);
+      if (refusal === undefined) continue;
+      // The existing projector has already established the single own primary,
+      // matching cycle/step/kind/origin and absence of cleanup ancestry.
+      if (selected !== null || OPERATIONS.get(error)?.operation !== operation) return null;
+      if (refusal.detail.refusalCode === 'check-ancestry-window-exceeded'
+        && operation !== 'input-observation-after-check') return null;
+      selected = refusal.detail;
+    }
+    return selected;
+  } catch { return null; }
+}
+
+export function normalizeNativeCommittedReserveInputRefusalV1(value: unknown): Readonly<NativeCommittedReserveInputRefusalV1> {
+  if (types.isProxy(value) || value === null || typeof value !== 'object'
+    || Object.getPrototypeOf(value) !== Object.prototype) throw new Error('input refusal detail must be plain own data');
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== 2 || !keys.includes('refusalCode') || !keys.includes('nodeRole')) throw new Error('input refusal fields differ');
+  const code = Object.getOwnPropertyDescriptor(value, 'refusalCode')!;
+  const role = Object.getOwnPropertyDescriptor(value, 'nodeRole')!;
+  if (!('value' in code) || !('value' in role) || !code.enumerable || !role.enumerable
+    || typeof code.value !== 'string' || typeof role.value !== 'string'
+    || !Object.hasOwn(NATIVE_COMMITTED_RESERVE_INPUT_REFUSAL_ROLES_V1, code.value)) throw new Error('input refusal detail differs');
+  const refusalCode = code.value as NativeCommittedReserveInputRefusalV1['refusalCode'];
+  const allowed: readonly string[] = NATIVE_COMMITTED_RESERVE_INPUT_REFUSAL_ROLES_V1[refusalCode];
+  if (!allowed.includes(role.value)) throw new Error('input refusal role differs');
+  return Object.freeze({ refusalCode, nodeRole: role.value as NativeCommittedReserveInputRefusalV1['nodeRole'] });
 }
 
 function safeError(value: unknown): Error | null {

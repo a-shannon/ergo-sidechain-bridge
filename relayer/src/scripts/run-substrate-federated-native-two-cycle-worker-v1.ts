@@ -37,8 +37,11 @@ import { createNativeTwoCycleWorkerCommittedReserveRevalidationV1,
   projectNativeCommittedReserveRevalidationOriginV1 }
   from '../substrate-federated-native-committed-reserve-revalidation-v1.js';
 import { createNativeTwoCycleWorkerCommittedReserveRevalidationOperationV1,
-  projectNativeCommittedReserveRevalidationOperationV1 }
+  projectNativeCommittedReserveRevalidationOperationV1,
+  projectNativeCommittedReserveInputRefusalV1 }
   from '../substrate-federated-native-committed-reserve-revalidation-operation-v1.js';
+import { createNativeTwoCycleWorkerCommittedReserveInputRefusalV1 }
+  from '../substrate-federated-native-committed-reserve-input-refusal-v1.js';
 import { createNativeTwoCycleWorkerCommittedReserveConfirmationV1,
   projectNativeCommittedReserveConfirmationOriginV1 }
   from '../substrate-federated-native-committed-reserve-confirmation-v1.js';
@@ -405,6 +408,29 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
         }
       } catch {
         // Optional entered-operation detail never replaces failure or older receipts.
+      }
+      try {
+        const detail = projectNativeCommittedReserveInputRefusalV1(primaryFailure);
+        if (detail !== null && workerFailureText !== undefined
+          && workerRootPhaseV2Text !== undefined && workerCycleStepText !== undefined) {
+          const readRefusalAncestor = (name: string) => new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+            readBoundedRegularFile(join(invocation.attemptPath, name),
+              'native committed reserve input refusal ancestry', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleWorkerCommittedReserveInputRefusalV1({
+            configSha256Hex: invocation.configSha256Hex,
+            expectedBridgeCommit: invocation.config.expectedBridgeCommit,
+            pathIdentityDigestHex: invocation.pathIdentityDigestHex,
+          }, { workerFailureText, workerRootPhaseV2Text, workerCycleStepText,
+            workerCommittedReserveStageText: readRefusalAncestor('worker-committed-reserve-stage.json'),
+            workerRevalidationText: readRefusalAncestor('worker-committed-reserve-revalidation.json'),
+            workerRevalidationOperationText: readRefusalAncestor('worker-committed-reserve-revalidation-operation.json'),
+          }, detail);
+          writeNewFile(join(invocation.attemptPath, 'worker-committed-reserve-input-refusal.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native committed reserve input refusal companion');
+        }
+      } catch {
+        // Optional source refusal attribution preserves the exact old terminal failure.
       }
       try {
         const detail = projectNativeCommittedReserveConfirmationOriginV1(primaryFailure);
