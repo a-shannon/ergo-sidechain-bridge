@@ -346,6 +346,9 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
     'beginNativeTwoCycleCallbackTimingV1', 'tagNativeTwoCycleCallbackTimingFailureV1',
     'NativeTwoCycleCallbackTimingTraceV1',
   ])],
+  ['substrate-federated-native-deposit-funding-substage-v1.ts', new Set([
+    'createNativeDepositFundingSubstageTaggerV1', 'NativeDepositFundingSubstageV1',
+  ])],
   ['substrate-federated-authority-safe-devnet-process-v1.ts', new Set([
     'createOwnedFederatedGenesisDevnetProcessSessionV1', 'assertOwnedFederatedGenesisDevnetTargetV1',
     'OwnedFederatedGenesisDevnetProcessSessionV1',

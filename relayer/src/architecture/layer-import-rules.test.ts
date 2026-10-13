@@ -283,6 +283,43 @@ describe('layer import rules', () => {
   });
 
   it.each([
+    ['createNativeDepositFundingSubstageTaggerV1', false],
+    ['NativeDepositFundingSubstageV1', true],
+  ] as const)('admits only the root deposit substage binding %s', (binding, typeOnly) => {
+    const source = `import ${typeOnly ? 'type ' : ''}{ ${binding} } from '../../substrate-federated-native-deposit-funding-substage-v1.js';`;
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, source))).toEqual([]);
+    expect(inspect(staticAppFixture('apps/bridge-daemon/foreign.ts', source))
+      .some(violation => violation.message.includes('unclassified legacy module'))).toBe(true);
+  });
+
+  it.each([
+    ['namespace', "import * as detail from '../../substrate-federated-native-deposit-funding-substage-v1.js';"],
+    ['default', "import detail from '../../substrate-federated-native-deposit-funding-substage-v1.js';"],
+    ['alias', "import { createNativeDepositFundingSubstageTaggerV1 as detail } from '../../substrate-federated-native-deposit-funding-substage-v1.js';"],
+    ['dynamic', "const detail = await import('../../substrate-federated-native-deposit-funding-substage-v1.js');"],
+    ['re-export', "export { createNativeDepositFundingSubstageTaggerV1 } from '../../substrate-federated-native-deposit-funding-substage-v1.js';"],
+    ['projector', "import { projectNativeDepositFundingSubstageV1 } from '../../substrate-federated-native-deposit-funding-substage-v1.js';"],
+    ['worker codec', "import { createNativeTwoCycleWorkerDepositFundingSubstageV1 } from '../../substrate-federated-native-deposit-funding-substage-v1.js';"],
+    ['parent codec', "import { parseNativeTwoCycleParentDepositFundingSubstageV1 } from '../../substrate-federated-native-deposit-funding-substage-v1.js';"],
+    ['extra binding', "import { createNativeDepositFundingSubstageTaggerV1, projectNativeDepositFundingSubstageV1 } from '../../substrate-federated-native-deposit-funding-substage-v1.js';"],
+    ['escape', "import { createNativeDepositFundingSubstageTaggerV1 } from '../../substrate-federated-native-deposit-funding-substage-v1.js'; const escaped = createNativeDepositFundingSubstageTaggerV1;"],
+    ['type query', "import { createNativeDepositFundingSubstageTaggerV1 } from '../../substrate-federated-native-deposit-funding-substage-v1.js'; type Tagger = typeof createNativeDepositFundingSubstageTaggerV1;"],
+  ])('rejects widening the root deposit substage import through %s', (fault, source) => {
+    const files = staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, source);
+    files['substrate-federated-native-deposit-funding-substage-v1.ts'] = 'export {};';
+    const messages = inspect(files).map(violation => violation.message);
+    if (['namespace', 'default', 'dynamic', 're-export'].includes(fault)) {
+      expect(messages).toContain('restricted capability import must use reviewed named bindings: ../../substrate-federated-native-deposit-funding-substage-v1.js');
+    } else if (fault === 'alias') {
+      expect(messages).toContain('restricted capability import binding must not be aliased: ../../substrate-federated-native-deposit-funding-substage-v1.js#createNativeDepositFundingSubstageTaggerV1');
+    } else if (fault === 'escape' || fault === 'type query') {
+      expect(messages.some(message => message.includes('restricted capability binding must not escape its reviewed call'))).toBe(true);
+    } else {
+      expect(messages.some(message => message.includes('restricted capability import binding is not allowlisted'))).toBe(true);
+    }
+  });
+
+  it.each([
     ['substrate-federated-native-two-cycle-root-phase-v1',
       'projectOwnSubstrateFederatedNativeTwoCycleRootFailurePhaseV1'],
     ['substrate-federated-native-two-cycle-cycle-step-v1',

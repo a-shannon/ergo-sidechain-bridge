@@ -62,6 +62,10 @@ import { tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2 } from '../substr
 import { tagNativeTwoCycleCycleStepFailureV1 } from '../substrate-federated-native-two-cycle-cycle-step-v1.js';
 import { createNativeTwoCycleWorkerCycleStepV1, parseNativeTwoCycleParentCycleStepV1 }
   from '../substrate-federated-native-two-cycle-cycle-step-diagnostic-v1.js';
+import { NATIVE_DEPOSIT_FUNDING_SUBSTAGES_V1,
+  createNativeDepositFundingSubstageTaggerV1,
+  parseNativeTwoCycleParentDepositFundingSubstageV1 }
+  from '../substrate-federated-native-deposit-funding-substage-v1.js';
 import { SUBSTRATE_FEDERATED_TRACKER_V2_BUILD_FAILURE_PHASES_V1,
   tagSubstrateFederatedTrackerV2BuildFailurePhaseV1,
   parseNativeTwoCycleParentTrackerContextV1,
@@ -1466,6 +1470,204 @@ describe('native two-cycle parent and worker V1', () => {
         expect(read('failure-owner-stage-v2.json')).toBe('retained parent V2 bytes');
       } else expect(existsSync(join(fixture.attemptPath, 'failure-owner-stage-v2.json'))).toBe(false);
       expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+    });
+
+  it.each((['cycle-1', 'cycle-2'] as const).flatMap(cycle =>
+    NATIVE_DEPOSIT_FUNDING_SUBSTAGES_V1.map(substage => ({ cycle, substage }))))(
+    'joins the actual $cycle deposit-funding substage $substage through the parent', async ({ cycle, substage }) => {
+      const fixture = commandFixture(); configureParent(fixture, projectedResult());
+      const primary = new Error('synthetic private deposit-funding cause');
+      tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(primary, cycle);
+      tagNativeTwoCycleCycleStepFailureV1(primary, cycle, 'deposit-funding');
+      expect(createNativeDepositFundingSubstageTaggerV1()(primary, substage)).toBe(primary);
+      const thrown = new AggregateError([
+        primary,
+        tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(new Error('private cleanup cause'), 'cleanup'),
+      ], 'synthetic private wrapper');
+      mocked.root.mockRejectedValueOnce(thrown);
+      let retained: Record<string, string> = {};
+      mocked.process.mockImplementationOnce(async input => {
+        try {
+          await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
+            input.args.slice(input.args.indexOf('--config')));
+          throw new Error('unexpected worker success');
+        } catch (cause) {
+          expect(cause).toBe(thrown);
+          retained = Object.fromEntries(['worker-failure.json', 'worker-root-phase.json',
+            'worker-root-phase-v2.json', 'worker-cycle-step.json']
+            .map(name => [name, readFileSync(join(fixture.attemptPath, name), 'utf8')]));
+          throw cause;
+        }
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+        '--config', fixture.configSourcePath,
+      ])).rejects.toBe(thrown);
+      const read = (name: string) => readFileSync(join(fixture.attemptPath, name), 'utf8');
+      expect(read('failure.json')).toBe(expectedTerminalFailure(fixture));
+      for (const [name, bytes] of Object.entries(retained)) expect(read(name)).toBe(bytes);
+      const failure = JSON.parse(read('failure.json'));
+      const detail = parseNativeTwoCycleParentDepositFundingSubstageV1(
+        read('failure-deposit-funding-substage.json'), failureBindings(fixture),
+        failure.receiptDigestHex, {
+          workerFailureText: read('worker-failure.json'),
+          workerRootPhaseV2Text: read('worker-root-phase-v2.json'),
+          workerCycleStepText: read('worker-cycle-step.json'),
+          parentCycleStepText: read('failure-cycle-step.json'),
+          workerDepositFundingSubstageText: read('worker-deposit-funding-substage.json'),
+        });
+      expect(detail).toMatchObject({ cycle, step: 'deposit-funding',
+        depositFundingSubstage: substage, operationCompletionEstablished: false,
+        rootCleanupEstablished: false, rawCausePublished: false });
+      expect(detail.workerFailureReceiptDigestHex)
+        .toBe(JSON.parse(read('worker-failure.json')).receiptDigestHex);
+      expect(detail.workerRootPhaseV2ReceiptDigestHex)
+        .toBe(JSON.parse(read('worker-root-phase-v2.json')).receiptDigestHex);
+      expect(detail.workerCycleStepReceiptDigestHex)
+        .toBe(JSON.parse(read('worker-cycle-step.json')).receiptDigestHex);
+      expect(detail.parentCycleStepReceiptDigestHex)
+        .toBe(JSON.parse(read('failure-cycle-step.json')).receiptDigestHex);
+      expect(detail.workerDepositFundingSubstageReceiptDigestHex)
+        .toBe(JSON.parse(read('worker-deposit-funding-substage.json')).receiptDigestHex);
+      expect(read('worker-deposit-funding-substage.json')
+        + read('failure-deposit-funding-substage.json')).not.toContain('private');
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+    });
+
+  it.each(['missing tag', 'conflicting tag', 'reused tag', 'wrong step',
+    'missing worker', 'invalid worker', 'BOM worker', 'occupied worker', 'worker directory',
+    'changed failure ancestor', 'changed root ancestor', 'changed step ancestor',
+    'occupied parent cycle ancestor', 'invalid parent', 'BOM parent', 'occupied parent',
+    'parent directory'] as const)(
+    'preserves the thrown value and older receipts when deposit-funding detail has %s', async fault => {
+      const fixture = commandFixture(); configureParent(fixture, projectedResult());
+      const primary = new Error('synthetic private deposit-funding cause');
+      tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(primary, 'cycle-1');
+      tagNativeTwoCycleCycleStepFailureV1(primary, 'cycle-1',
+        fault === 'wrong step' ? 'source-lock' : 'deposit-funding');
+      const tag = createNativeDepositFundingSubstageTaggerV1();
+      if (fault !== 'missing tag') tag(primary, 'owned-transaction-hold');
+      if (fault === 'conflicting tag') tag(primary, 'held-funding-equality');
+      if (fault === 'reused tag') {
+        createNativeDepositFundingSubstageTaggerV1()(primary, 'owned-transaction-hold');
+      }
+      mocked.root.mockRejectedValueOnce(primary);
+      const workerPath = join(fixture.attemptPath, 'worker-deposit-funding-substage.json');
+      const parentPath = join(fixture.attemptPath, 'failure-deposit-funding-substage.json');
+      let retained: Record<string, string> = {};
+      mocked.process.mockImplementationOnce(async input => {
+        if (fault === 'occupied worker') writeFileSync(workerPath, 'retained worker substage');
+        if (fault === 'worker directory') mkdirSync(workerPath);
+        try {
+          await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
+            input.args.slice(input.args.indexOf('--config')));
+          throw new Error('unexpected worker success');
+        } catch (cause) {
+          expect(cause).toBe(primary);
+          const read = (name: string) => readFileSync(join(fixture.attemptPath, name), 'utf8');
+          retained = Object.fromEntries(['worker-failure.json', 'worker-root-phase.json',
+            'worker-root-phase-v2.json', 'worker-cycle-step.json']
+            .map(name => [name, read(name)]));
+          if (fault === 'missing worker' && existsSync(workerPath)) rmSync(workerPath);
+          if (fault === 'invalid worker') writeFileSync(workerPath, '{}\n');
+          if (fault === 'BOM worker') {
+            writeFileSync(workerPath, '\ufeff' + readFileSync(workerPath, 'utf8'));
+          }
+          if (fault === 'changed failure ancestor') {
+            const changed = createNativeTwoCycleWorkerFailureDiagnosticV1(
+              failureBindings(fixture), 'pre-root', new Error());
+            retained['worker-failure.json'] = `${canonicalJson(changed)}\n`;
+            writeFileSync(join(fixture.attemptPath, 'worker-failure.json'), retained['worker-failure.json']);
+          }
+          if (fault === 'changed root ancestor') {
+            const changed = createNativeTwoCycleWorkerRootPhaseV2(failureBindings(fixture),
+              { primaryPhase: 'cycle-2', cleanupErrorCount: 0, ergoNodeStartupPhase: null });
+            retained['worker-root-phase-v2.json'] = `${canonicalJson(changed)}\n`;
+            writeFileSync(join(fixture.attemptPath, 'worker-root-phase-v2.json'),
+              retained['worker-root-phase-v2.json']);
+          }
+          if (fault === 'changed step ancestor') {
+            const changed = createNativeTwoCycleWorkerCycleStepV1(failureBindings(fixture),
+              read('worker-failure.json'), read('worker-root-phase-v2.json'),
+              { cycle: 'cycle-1', step: 'source-lock' });
+            retained['worker-cycle-step.json'] = `${canonicalJson(changed)}\n`;
+            writeFileSync(join(fixture.attemptPath, 'worker-cycle-step.json'),
+              retained['worker-cycle-step.json']);
+          }
+          if (fault === 'occupied parent cycle ancestor') {
+            writeFileSync(join(fixture.attemptPath, 'failure-cycle-step.json'),
+              'retained parent cycle step');
+          }
+          if (fault === 'invalid parent') writeFileSync(parentPath, '{}\n');
+          if (fault === 'BOM parent') writeFileSync(parentPath, '\ufeff{}\n');
+          if (fault === 'occupied parent') writeFileSync(parentPath, 'retained parent substage');
+          if (fault === 'parent directory') mkdirSync(parentPath);
+          throw cause;
+        }
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+        '--config', fixture.configSourcePath,
+      ])).rejects.toBe(primary);
+      const read = (name: string) => readFileSync(join(fixture.attemptPath, name), 'utf8');
+      expect(read('failure.json')).toBe(expectedTerminalFailure(fixture));
+      for (const [name, bytes] of Object.entries(retained)) expect(read(name)).toBe(bytes);
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+      if (fault === 'occupied worker') expect(read('worker-deposit-funding-substage.json'))
+        .toBe('retained worker substage');
+      if (fault === 'worker directory') expect(lstatSync(workerPath).isDirectory()).toBe(true);
+      if (fault === 'invalid parent') expect(read('failure-deposit-funding-substage.json')).toBe('{}\n');
+      else if (fault === 'BOM parent') expect(read('failure-deposit-funding-substage.json')).toBe('\ufeff{}\n');
+      else if (fault === 'occupied parent') expect(read('failure-deposit-funding-substage.json'))
+        .toBe('retained parent substage');
+      else if (fault === 'parent directory') expect(lstatSync(parentPath).isDirectory()).toBe(true);
+      else expect(existsSync(parentPath)).toBe(false);
+    });
+
+  it.each(['worker-deposit-funding-substage.json',
+    'failure-deposit-funding-substage.json'] as const)(
+    'rejects %s at the worker success boundary for regular and dangling entries', async artifact => {
+      for (const entry of ['regular', 'dangling'] as const) {
+        const fixture = workerFixture();
+        const recoveryEvidence = writeRecoveryManifestFixture(fixture);
+        mocked.load.mockReturnValue(fixture.loaded);
+        mocked.environment.mockResolvedValue(environment());
+        mocked.root.mockImplementationOnce(async () => {
+          const path = join(fixture.attemptPath, artifact);
+          if (entry === 'regular') writeFileSync(path, 'retained contradictory substage');
+          else symlinkSync(join(fixture.attemptPath, 'absent-deposit-substage-target'), path,
+            process.platform === 'win32' ? 'junction' : 'dir');
+          return { root: 'result', recoveryEvidence };
+        });
+        mocked.project.mockReturnValue(projectedResult());
+        await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
+          '--config', fixture.configPath,
+          '--expected-config-sha256', fixture.loaded.configSha256Hex,
+          '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex,
+          '--attempt', fixture.attemptPath,
+        ])).rejects.toThrow(/deposit funding substage contradicts success/iu);
+        expect(existsSync(join(fixture.attemptPath, 'worker-result.json'))).toBe(false);
+        expect(lstatSync(join(fixture.attemptPath, artifact))).toBeDefined();
+      }
+    });
+
+  it.each(['worker-deposit-funding-substage.json',
+    'failure-deposit-funding-substage.json'] as const)(
+    'rejects %s at the parent success boundary for regular and dangling entries', async artifact => {
+      for (const entry of ['regular', 'dangling'] as const) {
+        const fixture = commandFixture(); const result = projectedResult(); configureParent(fixture, result);
+        mocked.process.mockImplementationOnce(async input => {
+          writeWorkerTransport(fixture, result);
+          const path = join(fixture.attemptPath, artifact);
+          if (entry === 'regular') writeFileSync(path, 'retained contradictory substage');
+          else symlinkSync(join(fixture.attemptPath, 'absent-deposit-substage-target'), path,
+            process.platform === 'win32' ? 'junction' : 'dir');
+          return cleanProcessResult(input);
+        });
+        await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+          '--config', fixture.configSourcePath,
+        ])).rejects.toThrow(/contradictory failure evidence/iu);
+        expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+        expect(lstatSync(join(fixture.attemptPath, artifact))).toBeDefined();
+      }
     });
 
   it.each((['genesis', 'continuation'] as const).flatMap(kind =>

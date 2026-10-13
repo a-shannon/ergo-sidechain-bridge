@@ -38,6 +38,28 @@ This identifies the tagged boundary, not its inner cause or completed effects.
 Completion, cleanup and custody disposal remain unknown; zero cleanup errors
 establish no cleanup. No automatic C66, push or new CI is selected.
 
+The prospective deposit-funding attribution is implemented through the actual
+root, optional worker/parent companions and strict exported parsers. All eight
+last-entered operations are covered in both funding branches; both retain the
+existing `cycle-1` phase. Invocation-private tags require one native primary
+with matching own root and cycle-step metadata. A same-Error two-root falsifier
+exposed stale detail; the later invocation now permanently refuses it without
+changing the thrown value. A separate composed falsifier exposed BOM removal
+before parsing; the new parent reader preserves the BOM for strict rejection.
+Original predicates, budgets, old receipt bytes and domains remain unchanged.
+Missing, invalid or occupied optional detail preserves failure; either new
+entry, including a dangling link, contradicts success.
+
+Local evidence covers 258 direct metadata/codec cases, 21 new actual-root
+cases with 512 unchanged cases reused, and 37 composed cases with 476 unchanged
+cases reused. These selections overlap and are not added together. Architecture
+and broadcast closure, TypeScript and imports pass in their changed scopes;
+exact independent review and guarded local promotion remain.
+The next result remains a genuine complete packaged lifecycle. First refresh
+the non-authorizing operator preparation for the promoted source; preparation03
+belongs only to its earlier source identity. No C66 is selected automatically
+or to obtain a label, and no label establishes C65's historical cause.
+
 The local source correction binds each deposit's prior confirmations to its newly
 held canonical chain. Two focused full-root synthetic negatives showed that a
 witness-only replacement of an issuance or payout confirmation after Hold
@@ -2048,7 +2070,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Genuine packaged complete two-cycle lifecycle and stopped public recovery selection | Finish guarded local promotion of the held prior-confirmation correction; separately select and freshly admit the actual missing lifecycle result | Preserve original ownership, custody, signing, fees and budgets. Source fixtures do not establish C65's cause or packaged lifecycle; C24-C65 holds remain permanent, no automatic C66 |
+| **Now** | Prospective deposit-funding attribution -> exact-source operator preparation | Close exact review/local promotion, then refresh the non-authorizing package preparation for that promoted source before reassessing a separately selected genuine lifecycle result | Source-only detail cannot establish C65 cause or execution authority. C24-C65 holds remain permanent; no automatic C66, push or new CI |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Separately select and admit one local synthetic campaign after a deciding checkpoint, exact local source identity, applicable checks/review and fresh runtime/source/output/custody/fee gates; apply guarded publication and due exact-head CI at public promotion | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
@@ -2093,6 +2115,7 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
+| Deposit-funding entered-operation attribution (selected local batch) | Invocation-owned native primary metadata reaches optional bounded worker/parent companions with exact root/cycle-step lineage and strict false claims | Exercise all eight source operations in both root branches, hostile graph and codec refusals, create-only failure preservation and dangling-entry success contradiction; close consumers and exact review before local promotion. No historical cause or diagnostic-label campaign |
 | Held prior-confirmation funding join (local source correction) | Both nodes retain every exact prior issuance/payout confirmation on the newly held canonical chain before reward discovery; exact held-tip reads bracket singleton header membership | Root512 including helper35, eight in-memory mutants, architecture/broadcast445, TypeScript and imports pass in their scopes. Exact independent review, final claims consumers and guarded local promotion are required before a separately fresh lifecycle admission. No historical cause, campaign acceptance or automatic C66 |
 | Raw held-watermark observation join (locally closed at97486f05) | Well-formed partial observations within the authenticated held height remain pending; contradictions refuse; Hold and completion still require exact paired indexing, canonical lookups and stability before the next Arm | The 175 exact extracted-production/raw-reader cases, TypeScript, affected generic consumers and independent source/test/claims review passed guarded local promotion. No budget, legacy reader or authority change; no C64/C65 cause or campaign acceptance |
 | Transaction-specific bounded mining (locally closed at a148240c) | Authenticated Hold/Arm/Status binds the original live process, exact held indexed parent and transaction; permits inclusion plus ten successors; confirms and rejoins the held watermark before the next Arm under the original deadline | Cumulative patch/locks, native actor/API execution, parser/control/lifetime/transport and four submission consumers, architecture refusals, docs and independent review passed guarded local promotion. Real NodeView fixtures and synthetic ports are distinct from packaged lifecycle, custody and operator acceptance; C64 is consumed |

@@ -29,6 +29,8 @@ import { tagNativeTwoCycleCycleStepFailureV1, projectOwnNativeTwoCycleCycleStepF
 import { beginNativeTwoCycleCallbackTimingV1, tagNativeTwoCycleCallbackTimingFailureV1,
   type NativeTwoCycleCallbackTimingTraceV1 }
   from '../../substrate-federated-native-two-cycle-callback-timing-v1.js';
+import { createNativeDepositFundingSubstageTaggerV1, type NativeDepositFundingSubstageV1 }
+  from '../../substrate-federated-native-deposit-funding-substage-v1.js';
 import { createOwnedFederatedGenesisDevnetProcessSessionV1, assertOwnedFederatedGenesisDevnetTargetV1,
   type OwnedFederatedGenesisDevnetProcessSessionV1 } from '../../substrate-federated-authority-safe-devnet-process-v1.js';
 import { buildSubstrateFederatedGenesisNodeV1, type BuildSubstrateFederatedGenesisNodeV1Input } from '../../substrate-federated-genesis-node-build-v1.js';
@@ -129,8 +131,14 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
   let cycleStep: NativeTwoCycleCycleStepV1 | null = null;
   let callbackTiming: ReturnType<typeof beginNativeTwoCycleCallbackTimingV1> | undefined;
   let callbackTimingTrace: Readonly<NativeTwoCycleCallbackTimingTraceV1> | null = null;
+  const tagDepositFundingSubstage = createNativeDepositFundingSubstageTaggerV1();
+  let depositFundingSubstage: NativeDepositFundingSubstageV1 | null = null;
+  const markDepositFundingSubstage = (substage: NativeDepositFundingSubstageV1) => {
+    depositFundingSubstage = substage;
+  };
   const markStep = (step: NativeTwoCycleCycleStepV1) => {
     cycleStep = step; callbackTiming?.record(step);
+    if (step !== 'deposit-funding') depositFundingSubstage = null;
   };
   let setupAcquired = false;
   try {
@@ -404,13 +412,21 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
           assertActive();
           // Issuance funding is spent. Discover a new owned input for this deposit.
           markStep('deposit-funding');
+          markDepositFundingSubstage('owned-transaction-hold');
           const heldDepositSnapshot = await holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(target);
+          markDepositFundingSubstage('post-hold-owner-custody-guard');
           assertActive();
+          markDepositFundingSubstage('prior-confirmation-revalidation');
           await assertHeldDepositConfirmationsV1(target, heldDepositSnapshot, transactions, assertActive, 'issuance');
+          markDepositFundingSubstage('post-revalidation-owner-custody-guard');
           assertActive();
+          markDepositFundingSubstage('owned-reward-input-discovery');
           const ownedFunding = await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(setup.signer, target);
+          markDepositFundingSubstage('post-discovery-owner-custody-guard');
           assertActive();
+          markDepositFundingSubstage('owned-reward-input-provenance');
           const funding = assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1(ownedFunding, target);
+          markDepositFundingSubstage('held-funding-equality');
           if (funding.target.genesisHeaderIdHex !== batch.request.target.genesisHeaderIdHex
             || funding.target.tipHeight !== heldDepositSnapshot.fullHeight
             || funding.target.tipHeaderIdHex !== heldDepositSnapshot.headerIdHex
@@ -539,7 +555,7 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
         ? { captureConfirmationProgress: true as const } : {}),
       priorSnapshot: executed.receipt.finalSnapshot };
     const first = await native.withTarget(async () => {
-      const result = await completeFirstNativeReturn(returnInput, markStep);
+      const result = await completeFirstNativeReturn(returnInput, markStep, markDepositFundingSubstage);
       continuationSourceOperation = result.continuation.sourceOperation;
       markStep('target-exit');
       return result;
@@ -623,6 +639,10 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
     const failurePhase = rootPhase as SubstrateFederatedNativeTwoCycleRootPhaseV1;
     if ((failurePhase === 'cycle-1' || failurePhase === 'cycle-2') && cycleStep !== null) {
       tagNativeTwoCycleCycleStepFailureV1(rootFailure, failurePhase, cycleStep);
+    }
+    if ((failurePhase === 'cycle-1' || failurePhase === 'cycle-2')
+      && cycleStep === 'deposit-funding' && depositFundingSubstage !== null) {
+      tagDepositFundingSubstage(rootFailure, previouslyRootTagged ? null : depositFundingSubstage);
     }
     if (failurePhase === 'cycle-1' && cycleStep === 'cycle-summary') {
       tagNativeTwoCycleCallbackTimingFailureV1(rootFailure,
@@ -829,7 +849,8 @@ async function completeFirstNativeReturn(input: Readonly<{
   state: NativeJournalState;
   prepared: Readonly<NativeReturnContinuation>;
   priorSnapshot: Readonly<{ fullHeight: number; headerIdHex: string }>;
-}>, markStep: (step: NativeTwoCycleCycleStepV1) => void) {
+}>, markStep: (step: NativeTwoCycleCycleStepV1) => void,
+  markDepositFundingSubstage: (substage: NativeDepositFundingSubstageV1) => void) {
   markStep('return-preparation');
   const { node, setup, state, prepared, priorSnapshot } = input;
   const remainingCustody = () => {
@@ -987,15 +1008,23 @@ async function completeFirstNativeReturn(input: Readonly<{
       // The second source deposit is built and committed while the first
       // confirmation target and its retained signer are still current.
       markStep('deposit-funding');
+      markDepositFundingSubstage('owned-transaction-hold');
       const heldDepositSnapshot = await holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(target);
+      markDepositFundingSubstage('post-hold-owner-custody-guard');
       readCustody();
+      markDepositFundingSubstage('prior-confirmation-revalidation');
       await assertHeldDepositConfirmationsV1(target, heldDepositSnapshot, [{
         confirmationHeight: payout.confirmationHeight, confirmationHeaderIdHex: payout.confirmationHeaderId,
       }], readCustody, 'payout');
+      markDepositFundingSubstage('post-revalidation-owner-custody-guard');
       readCustody();
+      markDepositFundingSubstage('owned-reward-input-discovery');
       const ownedFunding = await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(setup.signer, target);
+      markDepositFundingSubstage('post-discovery-owner-custody-guard');
       readCustody();
+      markDepositFundingSubstage('owned-reward-input-provenance');
       const funding = assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1(ownedFunding, target);
+      markDepositFundingSubstage('held-funding-equality');
       if (funding.target.genesisHeaderIdHex !== genesisHeaderIdHex
         || funding.target.tipHeight !== heldDepositSnapshot.fullHeight
         || funding.target.tipHeaderIdHex !== heldDepositSnapshot.headerIdHex

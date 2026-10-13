@@ -331,6 +331,7 @@ Only the parent's terminal artifact determines the invocation outcome:
 | `failure-root-phase-v2.json` | Optional parent V2 sidecar. It binds the terminal failure, V1 worker failure and V2 worker root receipts to the same invocation. |
 | `worker-cycle-step.json` | Optional invocation-local operation within a failed cycle, bound to the worker failure and V2 root phase. |
 | `failure-cycle-step.json` | Optional parent sidecar linking that operation to the exact terminal failure and worker ancestry. |
+| `worker-deposit-funding-substage.json` / `failure-deposit-funding-substage.json` | Optional worker/parent pair identifying the last deposit-funding operation entered, bound to exact worker failure, V2 root phase and worker/parent cycle-step receipts. |
 | `worker-tracker-context.json` | Optional V2 context-construction phase for either cycle, bound to the worker failure, V2 root phase and cycle-step ancestry. |
 | `failure-tracker-context.json` | Optional parent sidecar binding the constructor phase, exact worker ancestry and validated parent cycle-step receipt to the terminal failure. |
 | `worker-setup-stage.json` | Optional native setup operation label, available only for `cycle-1/setup-check` with valid worker failure, V2 root phase and cycle-step ancestry. |
@@ -370,6 +371,29 @@ assign one; a cleanup exception count, including zero, never proves disposal.
 A primitive value thrown during cleanup is not included in this count; a
 cleanup-only primitive may have no root-phase companion. A missing or invalid
 companion does not change the terminal result or permit another attempt.
+
+The deposit-funding companion identifies one of eight existing operations:
+`owned-transaction-hold`, `post-hold-owner-custody-guard`,
+`prior-confirmation-revalidation`, `post-revalidation-owner-custody-guard`,
+`owned-reward-input-discovery`, `post-discovery-owner-custody-guard`,
+`owned-reward-input-provenance` or `held-funding-equality`. The actual root owns
+a private invocation token and records each operation before entering it in
+both funding branches. Continuation funding is still within the first root
+cycle; a label does not change the existing phase. Internal guards in the
+prior-confirmation helper remain under `prior-confirmation-revalidation`.
+
+Only one native primary error with its own matching root phase and
+`deposit-funding` cycle-step can provide detail. Reused or conflicting tags,
+unsafe error graphs, multiple primaries and cleanup ancestry refuse it without
+executing getters or proxies. Each companion has a separate schema and digest
+domain, is bounded to 16 KiB and is written create-only. Strict exported worker
+and parent parsers validate canonical JSON plus one LF, exact keys, identities,
+legacy ancestry and all receipt digests. Missing, invalid or occupied optional
+detail preserves the failure and older receipts. Either new entry, including
+a dangling link, contradicts success. The last operation entered does not
+establish its inner cause, effects, completion or cleanup; the three completion,
+cleanup and raw-cause claims remain false. These files cannot classify earlier
+attempts or supply execution or retry authority.
 
 The revalidation companion distinguishes the callback's retained observation
 and custody guard from the following concrete revalidator call. It tags only

@@ -161,6 +161,10 @@ import { projectNativeTwoCycleCycleStepFailureV1 }
   from '../../substrate-federated-native-two-cycle-cycle-step-v1.js';
 import { tagNativeTwoCycleCycleStepFailureV1 }
   from '../../substrate-federated-native-two-cycle-cycle-step-v1.js';
+import { NATIVE_DEPOSIT_FUNDING_SUBSTAGES_V1,
+  projectNativeDepositFundingSubstageV1,
+  type NativeDepositFundingSubstageV1 }
+  from '../../substrate-federated-native-deposit-funding-substage-v1.js';
 import { tagSubstrateFederatedTrackerV2BuildFailurePhaseV1,
   projectSubstrateFederatedTrackerV2BuildFailurePhaseV1,
   tagSubstrateFederatedTrackerV2StatementFailureCheckV1,
@@ -288,6 +292,64 @@ function assertDisposed() {
   if (setup) expect(() => assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(setup!.signer)).toThrow(/active process provenance/);
 }
 function stageMock(stage: DownstreamStage) { return stage === 'funding' ? mocked.discover : mocked[stage]; }
+function injectDepositFundingSubstageFailure(
+  second: boolean,
+  substage: NativeDepositFundingSubstageV1,
+  trigger: Error,
+) {
+  const executionTarget = second ? phaseTargets.confirmation : target;
+  const originalHold = mocked.hold.getMockImplementation()!;
+  let held = false;
+  mocked.hold.mockImplementation(async (...args) => {
+    if (args[0] !== executionTarget) return originalHold(...args);
+    if (substage === 'owned-transaction-hold') throw trigger;
+    const snapshot = await originalHold(...args);
+    held = true;
+    return snapshot;
+  });
+
+  const guard = second ? mocked.nativeRead : mocked.frontierOwned;
+  const originalGuard = guard.getMockImplementation()!;
+  let guardCallsAfterHold = 0;
+  const targetGuardCall = substage === 'post-hold-owner-custody-guard' ? 1
+    : substage === 'post-revalidation-owner-custody-guard' ? 20
+      : substage === 'post-discovery-owner-custody-guard' ? 21 : null;
+  guard.mockImplementation((...args) => {
+    const isFundingGuard = held && (second ? args[1] === target : args[0] === frontierEndpoints);
+    if (isFundingGuard && ++guardCallsAfterHold === targetGuardCall) throw trigger;
+    return originalGuard(...args);
+  });
+
+  const originalHeldTip = readHeldDepositTip;
+  readHeldDepositTip = (origin, snapshot) => {
+    if (held && substage === 'prior-confirmation-revalidation'
+      && origin === target.primaryNodeOrigin) throw trigger;
+    return originalHeldTip(origin, snapshot);
+  };
+
+  const originalDiscovery = mocked.discover.getMockImplementation()!;
+  mocked.discover.mockImplementation(async (...args) => {
+    if (held && args[1] === executionTarget && substage === 'owned-reward-input-discovery') throw trigger;
+    return originalDiscovery(...args);
+  });
+
+  const originalProvenance = mocked.fundingOwned.getMockImplementation()!;
+  mocked.fundingOwned.mockImplementation((...args) => {
+    if (held && args[1] === executionTarget && substage === 'owned-reward-input-provenance') throw trigger;
+    const observation = originalProvenance(...args);
+    if (!held || args[1] !== executionTarget || substage !== 'held-funding-equality') return observation;
+    const fundingTarget = { ...observation.target };
+    Object.defineProperty(fundingTarget, 'genesisHeaderIdHex', {
+      enumerable: true,
+      get: () => { throw trigger; },
+    });
+    return { ...observation, target: fundingTarget };
+  });
+
+  return () => {
+    if (targetGuardCall !== null) expect(guardCallsAfterHold).toBe(targetGuardCall);
+  };
+}
 function assertDownstreamPrefix(stage: DownstreamStage) {
   const last = downstreamStages.indexOf(stage);
   const continuationCalls: Partial<Record<DownstreamStage, string>> = {
@@ -352,7 +414,7 @@ function canonicalBox(fields: Omit<Eip12Box, 'boxId'>): Eip12Box {
   } finally { for (const value of owned.reverse()) value.free(); }
 }
 
-beforeEach(() => {
+function prepareRootFixture() {
   vi.clearAllMocks();
   mocked.continuationReservation.mockReset();
   mocked.projectConfirmation.mockReturnValue(null); mocked.projectSubmission.mockReturnValue(null);
@@ -924,12 +986,14 @@ beforeEach(() => {
     const { method, params } = JSON.parse(init.body as string);
     calls.push({ url, method, params }); return response(readResult(url, method, params));
   }));
-});
-afterEach(() => {
+}
+beforeEach(prepareRootFixture);
+function disposeRootFixture() {
   if (operator) operators.disposeFederatedGenesisOperatorV1(operator);
   source?.dispose(); setup?.dispose(); vi.restoreAllMocks(); vi.unstubAllGlobals();
   rmSync(directory, { recursive: true, force: true });
-});
+}
+afterEach(disposeRootFixture);
 
 function configureNativeReturnMocks() {
   const confirmedFee = (name: 'withdrawal' | 'tracker', byte: string, height: number,
@@ -2512,6 +2576,88 @@ describe('fresh FED target composition', () => {
     expect(mocked.packet).toHaveBeenCalledTimes(second ? 1 : 0);
     expect(mocked.continuationPacket).not.toHaveBeenCalled();
     expect(order).not.toContain(second ? 'continuationFunding' : 'funding');
+    assertDisposed();
+  });
+
+  it.each(([false, true] as const).flatMap(second =>
+    NATIVE_DEPOSIT_FUNDING_SUBSTAGES_V1.map(substage => ({ second, substage }))))(
+    'attributes the last entered deposit-funding substage $substage through the actual root (continuation=$second)',
+    async ({ second, substage }) => {
+      const trigger = new Error(`synthetic ${substage} failure`);
+      const assertInjection = injectDepositFundingSubstageFailure(second, substage, trigger);
+
+      const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+
+      expect(failure).toBe(trigger);
+      expect(projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(failure)).toEqual({
+        primaryPhase: 'cycle-1', cleanupErrorCount: 0, ergoNodeStartupPhase: null,
+      });
+      expect(projectNativeTwoCycleCycleStepFailureV1(failure)).toEqual({
+        cycle: 'cycle-1', step: 'deposit-funding',
+      });
+      expect(projectNativeDepositFundingSubstageV1(failure)).toBe(substage);
+      assertInjection();
+      const substageIndex = NATIVE_DEPOSIT_FUNDING_SUBSTAGES_V1.indexOf(substage);
+      expect(mocked.discover).toHaveBeenCalledTimes(1 + Number(second) + Number(substageIndex >= 4));
+      expect(mocked.packet).toHaveBeenCalledTimes(Number(second));
+      expect(mocked.continuationPacket).not.toHaveBeenCalled();
+      expect(mocked.recovery).not.toHaveBeenCalled();
+      assertDisposed();
+    });
+
+  it('refuses stale deposit detail after the same Error crosses two actual root invocations', async () => {
+    const trigger = new Error('synthetic reused deposit failure');
+    injectDepositFundingSubstageFailure(false, 'owned-transaction-hold', trigger);
+    const first = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+    expect(first).toBe(trigger);
+    expect(projectNativeDepositFundingSubstageV1(first)).toBe('owned-transaction-hold');
+    assertDisposed();
+    disposeRootFixture();
+    prepareRootFixture();
+    injectDepositFundingSubstageFailure(false, 'owned-reward-input-discovery', trigger);
+    const second = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+    expect(second).toBe(trigger);
+    expect(projectNativeTwoCycleCycleStepFailureV1(second)).toEqual({ cycle: 'cycle-1', step: 'deposit-funding' });
+    expect(projectNativeDepositFundingSubstageV1(second)).toBeNull();
+    expect(mocked.packet).not.toHaveBeenCalled();
+    expect(mocked.recovery).not.toHaveBeenCalled();
+    assertDisposed();
+  });
+
+  it.each([false, true])(
+    'does not retain deposit-funding detail for a later packet failure (continuation=%s)', async second => {
+      const trigger = new Error('synthetic later packet failure');
+      (second ? mocked.continuationPacket : mocked.packet).mockRejectedValueOnce(trigger);
+
+      const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+
+      expect(failure).toBe(trigger);
+      expect(projectNativeTwoCycleCycleStepFailureV1(failure)).toEqual({
+        cycle: 'cycle-1', step: 'deposit-construction',
+      });
+      expect(projectNativeDepositFundingSubstageV1(failure)).toBeNull();
+      expect(mocked.packet).toHaveBeenCalledOnce();
+      expect(mocked.continuationPacket).toHaveBeenCalledTimes(Number(second));
+      expect(mocked.recovery).not.toHaveBeenCalled();
+      assertDisposed();
+    });
+
+  it.each([
+    { name: 'primitive', thrown: 'primitive deposit Hold failure' },
+    { name: 'proxy', thrown: new Proxy(new Error('proxied deposit Hold failure'), {}) },
+  ])('does not invent deposit-funding detail for a $name thrown value', async ({ thrown }) => {
+    const originalHold = mocked.hold.getMockImplementation()!;
+    mocked.hold.mockImplementation(async value => {
+      if (value === target) throw thrown;
+      return originalHold(value);
+    });
+
+    const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+
+    expect(failure).toBe(thrown);
+    expect(projectNativeDepositFundingSubstageV1(failure)).toBeNull();
+    expect(mocked.packet).not.toHaveBeenCalled();
+    expect(mocked.continuationPacket).not.toHaveBeenCalled();
     assertDisposed();
   });
 

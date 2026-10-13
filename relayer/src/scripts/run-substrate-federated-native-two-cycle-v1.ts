@@ -45,6 +45,8 @@ import { createNativeTwoCycleParentTrackerContextV1, createNativeTwoCycleParentT
   from '../substrate-federated-tracker-context-failure-v1.js';
 import { createNativeTwoCycleParentSourceLockStageV1 }
   from '../substrate-federated-native-source-lock-failure-v1.js';
+import { createNativeTwoCycleParentDepositFundingSubstageV1 }
+  from '../substrate-federated-native-deposit-funding-substage-v1.js';
 import { createNativeTwoCycleParentCommittedReserveStageV1 }
   from '../substrate-federated-native-committed-reserve-failure-v1.js';
 import { createNativeTwoCycleParentCommittedReserveRevalidationV1 }
@@ -254,6 +256,8 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
       || existsSync(join(attemptPath, 'worker-root-phase.json'))
       || existsSync(join(attemptPath, 'worker-root-phase-v2.json'))
       || existsSync(join(attemptPath, 'worker-cycle-step.json'))
+      || copiedSelectionEntryExists(join(attemptPath, 'worker-deposit-funding-substage.json'))
+      || copiedSelectionEntryExists(join(attemptPath, 'failure-deposit-funding-substage.json'))
       || existsSync(join(attemptPath, 'worker-tracker-context.json'))
       || existsSync(join(attemptPath, 'worker-tracker-statement.json'))
       || existsSync(join(attemptPath, 'failure-tracker-statement.json'))
@@ -554,6 +558,29 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
             'native two-cycle parent cycle step companion');
         } catch {
           // Absent, invalid or occupied step evidence cannot alter the terminal failure.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const readSubstageAncestor = (name: string) => new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+            readBoundedRegularFile(join(attemptPath, name),
+              'native two-cycle deposit funding substage lineage', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleParentDepositFundingSubstageV1(bindings,
+            failure.receiptDigestHex, {
+              workerFailureText: readSubstageAncestor('worker-failure.json'),
+              workerRootPhaseV2Text: readSubstageAncestor('worker-root-phase-v2.json'),
+              workerCycleStepText: readSubstageAncestor('worker-cycle-step.json'),
+              parentCycleStepText: readSubstageAncestor('failure-cycle-step.json'),
+              workerDepositFundingSubstageText: readSubstageAncestor('worker-deposit-funding-substage.json'),
+            });
+          writeNewFile(join(attemptPath, 'failure-deposit-funding-substage.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle parent deposit funding substage companion');
+        } catch {
+          // Missing, invalid or occupied substage detail preserves every older receipt.
         }
         try {
           const bindings = {

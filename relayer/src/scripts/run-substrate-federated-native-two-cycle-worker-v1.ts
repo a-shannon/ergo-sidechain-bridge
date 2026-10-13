@@ -19,6 +19,8 @@ import {
 import { createNativeTwoCycleWorkerRootPhaseV1 } from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v1.js';
 import { createNativeTwoCycleWorkerRootPhaseV2 } from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v2.js';
 import { createNativeTwoCycleWorkerCycleStepV1 } from '../substrate-federated-native-two-cycle-cycle-step-diagnostic-v1.js';
+import { createNativeTwoCycleWorkerDepositFundingSubstageV1, projectNativeDepositFundingSubstageV1 }
+  from '../substrate-federated-native-deposit-funding-substage-v1.js';
 import { createNativeTwoCycleWorkerCallbackTimingV1, projectNativeTwoCycleCallbackTimingFailureV1 }
   from '../substrate-federated-native-two-cycle-callback-timing-v1.js';
 import { projectNativeTwoCycleCycleStepFailureV1 } from '../substrate-federated-native-two-cycle-cycle-step-v1.js';
@@ -224,6 +226,10 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
       Buffer.from(`${canonicalJson(recoveryLocator)}\n`, 'utf8'),
       'native two-cycle worker recovery locator',
     );
+    if (copiedSelectionEntryExists(join(invocation.attemptPath, 'worker-deposit-funding-substage.json'))
+      || copiedSelectionEntryExists(join(invocation.attemptPath, 'failure-deposit-funding-substage.json'))) {
+      throw new Error('native two-cycle deposit funding substage contradicts success');
+    }
     const workerSelectionPath = join(invocation.attemptPath, 'worker-copied-ergo-selection-v1.json');
     if (copiedSelectionEntryExists(workerSelectionPath)
       || copiedSelectionEntryExists(join(invocation.attemptPath, 'copied-ergo-selection-v1.json'))) {
@@ -332,6 +338,22 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
         }
       } catch {
         // Optional step capture cannot replace failure or release the consumed claim.
+      }
+      try {
+        const substage = projectNativeDepositFundingSubstageV1(primaryFailure);
+        if (substage !== null && workerFailureText !== undefined
+          && workerRootPhaseV2Text !== undefined && workerCycleStepText !== undefined) {
+          const companion = createNativeTwoCycleWorkerDepositFundingSubstageV1({
+            configSha256Hex: invocation.configSha256Hex,
+            expectedBridgeCommit: invocation.config.expectedBridgeCommit,
+            pathIdentityDigestHex: invocation.pathIdentityDigestHex,
+          }, { workerFailureText, workerRootPhaseV2Text, workerCycleStepText }, substage);
+          writeNewFile(join(invocation.attemptPath, 'worker-deposit-funding-substage.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle worker deposit funding substage companion');
+        }
+      } catch {
+        // Optional substage detail cannot replace failure or older receipts.
       }
       try {
         const stage = projectSubstrateFederatedNativeSourceLockFailureStageV1(primaryFailure);
