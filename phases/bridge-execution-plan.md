@@ -28,7 +28,31 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–63 are permanently consumed or held. Packaged C63 on local
+**Now:** Campaigns 24–64 are permanently consumed or held. C64 on local
+`a148240c289c2febd169d7cdf6cee92b79ef2c81` terminated once at
+`2026-10-12T23:57:22.6610811Z`, with integer command exit 1, null launcher
+exception and no parent result. Independent review validated the current
+public graph and canonical digest joins:
+`execution_failure/root-or-cleanup/cycle-1/deposit-funding`.
+This identifies the tagged boundary, not its inner cause or completed effects.
+Completion, cleanup and custody disposal remain unknown; zero cleanup errors
+establish no cleanup. No automatic C65, push or new CI is selected.
+
+The current local batch joins raw header/full-block/index samples to the exact
+held mining watermark. A synthetic exact-production-body falsifier accepts
+ready and index-lag samples, but the old reader immediately seals Hold when a
+header precedes its full block. The replacement treats only well-formed
+partial samples within the held height as pending under the original deadline.
+Ahead-of-watermark samples, an index beyond its own full height, malformed
+fields and a different header at the held height still refuse. Both nodes must
+reach the exact indexed watermark, pass canonical lookups and a stable repeat;
+post-exact regression still seals the operation. The legacy snapshot reader,
+Arm authority, original budgets and all custody/signing predicates are unchanged.
+Raw Hold and completion joins, isolated refusals and mutants pass 175 cases;
+TypeScript and exact independent source/test review pass in their stated scopes.
+These fixtures do not establish C64's cause or packaged lifecycle acceptance.
+
+Historical packaged C63 on local
 `6c74a946dbe51233d32d6eb78fb3cffe179ff696` terminated once at
 `2026-10-12T19:48:36.4345743Z`, with integer command exit 1, null launcher
 exception and no parent result. Main and independent review validated the
@@ -59,7 +83,7 @@ remains active; the source does not guarantee that the successor stays inside
 the window. Their agreement supports preserving the guard and addressing that
 producer/mining contract. No automatic C64, push or new CI is selected.
 
-The selected local batch connects transaction-specific bounded mining through
+The transaction-specific bounded mining join closed locally at `a148240c` through
 the original process lifetime, paired indexed watermarks, deposit packet capture
 and the four already authorized submissions. An authenticated Hold drains its
 registered block. Each Arm binds the exact held parent and transaction, admits
@@ -70,8 +94,8 @@ signing, custody and fee predicates remain binding. The native API, TypeScript
 control and orchestration joins are implemented. Exact reconstructed-source
 execution, affected consumers, final claims review and guarded local promotion
 are the deciding closure; synthetic fixtures do not establish the missing
-packaged lifecycle, recovery or independent operator acceptance. No C64, push
-or new CI is selected.
+packaged lifecycle, recovery or independent operator acceptance. C64 exercised
+the candidate once and remains consumed at its public deposit-funding boundary.
 
 Native input-refusal attribution is locally closed at `6c74a946`: separate
 optional worker/parent companions preserve original predicates, errors,
@@ -2002,13 +2026,13 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Transaction-bound mining -> original owned process -> deposit packet and authorized submissions | Close the native Hold/Arm/Status, exact paired-index watermarks and four submission joins under their original deadlines, with exact reconstructed-source validation and local promotion | Inclusion plus ten successors supplies depth ten. Native and synthetic consumer fixtures cannot establish the missing packaged lifecycle, successful accumulated-state capture or recovery admission; C24-C63 holds remain permanent |
+| **Now** | Raw partial observations -> original held mining watermark -> Hold and completion | Close the bounded pending/contradiction reader join with raw Hold/completion fixtures, isolated refusals, exact source/test/claims review and guarded local promotion | Both peers must still reach the exact indexed held tip and stable canonical lookups under original deadlines. Synthetic convergence does not establish C64's historical cause or packaged lifecycle; C24-C64 holds remain permanent |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Separately select and admit one local synthetic campaign after a deciding checkpoint, exact local source identity, applicable checks/review and fresh runtime/source/output/custody/fee gates; apply guarded publication and due exact-head CI at public promotion | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns 24–63 remain consumed or held. C42 is incomplete/ambiguous without a
+Campaigns 24–64 remain consumed or held. C42 is incomplete/ambiguous without a
 parent terminal artifact; C43–C51 failed once as recorded in Current Focus and
 the active handoff. None authorizes retry, resume or custody reuse. The earlier
 timing, tracker-phase and source-lock checkpoints are closed; the selected
@@ -2047,7 +2071,8 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Transaction-specific bounded mining (current local batch) | Authenticated Hold/Arm/Status binds the original live process, exact held indexed parent and transaction; permits inclusion plus ten successors; confirms and rejoins the held watermark before the next Arm under the original deadline | Close exact cumulative patch/locks, native actor/API execution, parser/control/lifetime/transport and four submission consumers, architecture refusals, docs and independent review before guarded local promotion. Real NodeView fixtures and synthetic ports are distinct from packaged lifecycle, custody and operator acceptance; no automatic C64 |
+| Raw held-watermark observation join (current local batch) | Well-formed partial observations within the authenticated held height remain pending; contradictions refuse; Hold and completion still require exact paired indexing, canonical lookups and stability before the next Arm | The 175 exact extracted-production/raw-reader cases, TypeScript and independent source/test review pass. Close canonical affected consumers, final claims and guarded local promotion. No budget, legacy reader or authority change; no C64 cause or automatic C65 |
+| Transaction-specific bounded mining (locally closed at a148240c) | Authenticated Hold/Arm/Status binds the original live process, exact held indexed parent and transaction; permits inclusion plus ten successors; confirms and rejoins the held watermark before the next Arm under the original deadline | Cumulative patch/locks, native actor/API execution, parser/control/lifetime/transport and four submission consumers, architecture refusals, docs and independent review passed guarded local promotion. Real NodeView fixtures and synthetic ports are distinct from packaged lifecycle, custody and operator acceptance; C64 is consumed |
 | Signed successor-height boundary (locally closed at63c319df) | Each raw HTTP case binds its candidate through WASM and revalidation; a separate exported signed fixture agrees across WASM and native full transaction validation at the inclusive edge and next block | Complete fixture88, native48, caller/source pins90, TypeScript/import checks and exact independent review/local promotion pass. Keep transaction/proofs/ordered boxes fixed within each scope, refund unexpired and before/after observed tips stable. Preserve all runtime guards and budgets; no cross-case byte-identity claim, historical cause or automatic C64 |
 | Native input-refusal attribution (locally closed at6c74a946) | Join actual source-owned predicate errors and node roles to the exact existing operation graph without changing throws, predicates or budgets | Real native predicate fixtures, isolated codec/graph refusals and composed worker/parent failure preservation and success contradiction checks, exact independent review and guarded local promotion pass. Paired disagreement is a defensive predicate with malformed-normalizer fixture scope; no historical cause or lifecycle correction |
 | Accumulated-state recovery admission (requires successful lifecycle capture) | Admit a copied-Ergo observation caller against a genuine successful lifecycle capture and its selected public parent companion | The pure selector, optional packaged producer and public-parent owner-input preparation bind component-pin roles, expected snapshot and result/locator ancestry. Synthetic owner composition is closed; actual successful capture, stopped-state ownership and fresh recovery execution admission remain missing. No historical runtime reads, reused custody or automatic C64 |

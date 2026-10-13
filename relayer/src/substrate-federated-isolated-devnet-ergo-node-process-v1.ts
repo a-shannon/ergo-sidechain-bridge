@@ -4149,10 +4149,11 @@ function bindOwnedMiningTransactionPermit(
   const readExact = async (watermark: Readonly<{ headerId: string; height: number }>) => {
     assertOriginalTarget();
     const [primarySnapshot, witnessSnapshot] = await Promise.all([
-      readTargetSnapshot(primary, false, deadline, assertOriginalTarget),
-      readTargetSnapshot(witness, false, deadline, assertOriginalTarget),
+      readTransactionPermitTargetSnapshot(primary, watermark, deadline, assertOriginalTarget),
+      readTransactionPermitTargetSnapshot(witness, watermark, deadline, assertOriginalTarget),
     ]);
     assertOriginalTarget();
+    if (primarySnapshot === undefined || witnessSnapshot === undefined) return undefined;
     for (const snapshot of [primarySnapshot, witnessSnapshot]) {
       if (snapshot.fullHeight > watermark.height || snapshot.indexedHeight > snapshot.fullHeight
         || (snapshot.fullHeight === watermark.height && snapshot.headerIdHex !== watermark.headerId)) {
@@ -4590,6 +4591,48 @@ async function assertStableExactSnapshot(
   const [primaryAfter, witnessAfter] = settleReads ? await settleCopiedErgoReads(reads) : await Promise.all(reads);
   assertExactSnapshot(primaryAfter, expected, 'primary');
   assertExactSnapshot(witnessAfter, expected, 'witness');
+}
+
+/** Partial samples are pending only inside the exact held watermark. */
+async function readTransactionPermitTargetSnapshot(
+  node: Readonly<OwnedNode>,
+  watermark: Readonly<{ headerId: string; height: number }>,
+  deadline: number,
+  assertActive: () => void,
+): Promise<Readonly<TargetSnapshot> | undefined> {
+  const origin = node.role === 'primary'
+    ? SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN
+    : SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN;
+  const [infoValue, headersValue, indexValue] = await Promise.all([
+    getJson(origin, '/info', deadline, assertActive),
+    getJson(origin, '/blocks/lastHeaders/1', deadline, assertActive),
+    getJson(origin, '/blockchain/indexedHeight', deadline, assertActive),
+  ]);
+  assertActive();
+  const info = plainRecord(infoValue, `${node.role} node info`);
+  const network = info.network ?? info.networkType;
+  if (typeof network !== 'string' || network.trim().toLowerCase() !== 'devnet') {
+    throw new Error(`${node.role} node did not identify the exact devnet network`);
+  }
+  const fullHeight = nonnegativeInteger(info.fullHeight, `${node.role} full height`);
+  if (!Array.isArray(headersValue) || headersValue.length !== 1) {
+    throw new Error(`${node.role} best-header response is not singular`);
+  }
+  const header = plainRecord(headersValue[0], `${node.role} best header`);
+  const headerHeight = nonnegativeInteger(header.height, `${node.role} header height`);
+  const headerIdHex = fixedHex(header.id, 32, `${node.role} best header ID`);
+  const index = plainRecord(indexValue, `${node.role} indexed height`);
+  const indexFullHeight = nonnegativeInteger(index.fullHeight, `${node.role} index full height`);
+  const indexedHeight = nonnegativeInteger(index.indexedHeight, `${node.role} indexed height`);
+  if ([fullHeight, headerHeight, indexFullHeight, indexedHeight].some(height => height > watermark.height)
+    || indexedHeight > indexFullHeight
+    || (headerHeight === watermark.height && headerIdHex !== watermark.headerId)) {
+    throw new Error('isolated Ergo transaction permit indexed tip contradicts its held parent');
+  }
+  if ([fullHeight, headerHeight, indexFullHeight, indexedHeight].some(height => height < watermark.height)) {
+    return undefined;
+  }
+  return Object.freeze({ network: 'devnet' as const, fullHeight, indexedHeight, headerIdHex });
 }
 
 async function readTargetSnapshot(

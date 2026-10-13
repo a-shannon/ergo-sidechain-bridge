@@ -261,6 +261,14 @@ exact transaction and held parent, allows its inclusion plus ten successors,
 then holds again. This is eleven block applications for indexed depth ten.
 The existing confirmation check and fresh exact held-index completion must
 both finish within the original confirmation deadline before the next Arm.
+During that indexed join, independently sampled header, full-block and index
+heights can lag one another. A well-formed sample below the held watermark
+remains pending within the original deadline. No sample may exceed the held
+height, report an index beyond its own full height, or name a different header
+at the held height. Both nodes must reach the exact held header and fully
+indexed height, pass canonical-height lookups and remain exact across the
+stability observation before the join completes. Regression after that first
+exact observation refuses the operation.
 The original process, target and custody guards remain active across every
 awaited operation. A failed or ambiguous operation never permits resubmission.
 

@@ -120,7 +120,7 @@ function harness(mutation?: Mutation) {
   const controlGuard = vi.fn((value: unknown) => {
     if (value !== control || state.paused || state.controlFailed) throw new Error('control revoked');
   });
-  const read = vi.fn(async (_node: Node, _settle: boolean, _deadline: number, _guard: () => void) => {
+  const read = vi.fn(async (_node: Node, _watermark: Watermark, _deadline: number, _guard: () => void): Promise<Snapshot | undefined> => {
     await step('read'); return { ...state.tip };
   });
   const canonical = vi.fn(async (_origin: string, selectedPath: string, _deadline: number, _guard: () => void) => {
@@ -133,7 +133,7 @@ function harness(mutation?: Mutation) {
     ACTIVE_OWNED_EXECUTION_TARGETS: active, OWNED_MINING_TRANSACTION_PERMIT_TARGETS: targets,
     OWNED_MINING_SUBMISSION_CONTROLS: controls, assertLive: live,
     assertOwnedErgoMiningTransactionPermitControlV1: controlGuard,
-    readTargetSnapshot: read, getJson: canonical,
+    readTransactionPermitTargetSnapshot: read, getJson: canonical,
     SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN: 'primary-double',
     SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN: 'witness-double',
   }, mutation);
@@ -414,8 +414,9 @@ describe('actual deadline-aware snapshot and JSON helper bodies', () => {
   interface Reads {
     json(origin: string, path: string, deadline?: number, guard?: () => void): Promise<unknown>;
     snapshot(node: Node, settle?: boolean, deadline?: number, guard?: () => void): Promise<Snapshot>;
+    permit(node: Node, parent: Watermark, deadline: number, guard: () => void): Promise<Snapshot | undefined>;
   }
-  function reads() {
+  function reads(mutation?: Mutation) {
     const state = { now: 10, active: true };
     const guard = vi.fn(() => { if (!state.active) throw new Error('read lifetime revoked'); });
     const timeout = vi.fn((duration: number) => ({ duration }));
@@ -423,15 +424,158 @@ describe('actual deadline-aware snapshot and JSON helper bodies', () => {
       ? { network: 'devnet', fullHeight: 40 } : url.endsWith('/blocks/lastHeaders/1')
         ? [{ height: 40, id: id(40) }] : { fullHeight: 40, indexedHeight: 40 }));
     const fetch = vi.fn(async (url: string, _init: RequestInit) => ({ ok: true, text: () => text(url) }));
-    const api = extract<Reads>({ json: 'getJson', snapshot: 'readTargetSnapshot', record: 'plainRecord',
+    const api = extract<Reads>({ json: 'getJson', snapshot: 'readTargetSnapshot',
+      permit: 'readTransactionPermitTargetSnapshot', record: 'plainRecord',
       integer: 'nonnegativeInteger', hex: 'fixedHex' }, {
       ...constants, Buffer, performance: { now: () => state.now }, AbortSignal: { timeout }, fetch,
       SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN: 'primary-double',
       SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN: 'witness-double',
       settleCopiedErgoReads: (pending: Promise<unknown>[]) => Promise.all(pending),
-    });
+    }, mutation);
     return { api, state, guard, timeout, text, fetch };
   }
+
+  const partialSamples = ['header before full', 'full before header', 'index before info', 'index behind full'] as const;
+  function useRawLifetimeReader(h: ReturnType<typeof harness>, r: ReturnType<typeof reads>) {
+    h.read.mockImplementation((node, parent, deadline, guard) => {
+      r.state.now = h.state.now;
+      return r.api.permit(node, parent, deadline, guard);
+    });
+  }
+  function sample(url: string, fault: string | undefined): string {
+    if (url.endsWith('/info')) return JSON.stringify({ network: 'devnet',
+      fullHeight: fault === 'header before full' || fault === 'index before info' ? 39 : 40 });
+    if (url.endsWith('/blocks/lastHeaders/1')) return JSON.stringify([
+      { height: fault === 'full before header' ? 39 : 40,
+        id: fault === 'full before header' ? id(39) : id(40) },
+    ]);
+    return JSON.stringify({ fullHeight: fault === 'header before full' ? 39 : 40,
+      indexedHeight: fault === 'header before full' || fault === 'index behind full' ? 39 : 40 });
+  }
+
+  it.each(partialSamples)('joins actual raw %s samples to Hold without another operation', async fault => {
+    const h = harness(); const r = reads(); h.bind();
+    r.text.mockImplementation(async url => sample(url,
+      url.startsWith('witness-double') && h.state.now === 0 ? fault : undefined));
+    useRawLifetimeReader(h, r);
+    expect(await h.api.hold(h.target)).toEqual(snapshot());
+    expect(h.hold).toHaveBeenCalledTimes(1); expect(h.arm).not.toHaveBeenCalled(); expect(h.status).not.toHaveBeenCalled();
+    expect(h.delay.mock.calls).toEqual([[250], [500]]);
+    expect(r.fetch.mock.calls.every(call => call[1].method === 'GET')).toBe(true);
+    expect(r.timeout.mock.calls.every(call => call[0] <= constants.REQUEST_TIMEOUT_MS)).toBe(true);
+  });
+
+  it.each(['primary', 'witness'])('keeps one deadline and guard for each raw held %s sample', async role => {
+    const r = reads();
+    expect(await r.api.permit({ role, mode: 'non-mining', child: {} }, watermark(), 110, r.guard)).toEqual(snapshot());
+    expect(r.timeout.mock.calls).toEqual([[100], [100], [100]]);
+    expect(r.guard).toHaveBeenCalledTimes(10);
+  });
+
+  const rawRefusals = ['network', 'full above held', 'header above held', 'index full above held',
+    'index above full', 'same-height fork', 'header cardinality', 'header ID', 'full type', 'header type',
+    'index full type', 'indexed type'] as const;
+  it.each(rawRefusals)('seals Hold on isolated actual raw %s before canonical lookup', async fault => {
+    const h = harness(); const r = reads(); h.bind();
+    r.text.mockImplementation(async url => {
+      if (url.endsWith('/info')) return JSON.stringify({ network: fault === 'network' ? 'mainnet' : 'devnet',
+        fullHeight: fault === 'full above held' ? 41 : fault === 'full type' ? '40' : 40 });
+      if (url.endsWith('/blocks/lastHeaders/1')) return JSON.stringify(fault === 'header cardinality' ? [] : [{
+        height: fault === 'header above held' ? 41 : fault === 'header type' ? 40.5 : 40,
+        id: fault === 'header ID' ? 'bad' : fault === 'same-height fork' ? id(41) : id(40),
+      }]);
+      return JSON.stringify({ fullHeight: fault === 'index full above held' ? 41
+        : fault === 'index above full' ? 39 : fault === 'index full type' ? null : 40,
+      indexedHeight: fault === 'indexed type' ? -1 : 40 });
+    });
+    useRawLifetimeReader(h, r);
+    await expect(h.api.hold(h.target)).rejects.toThrow();
+    expect(h.canonical).not.toHaveBeenCalled(); expect(h.delay).not.toHaveBeenCalled();
+    await remainsFailed(h);
+  });
+
+  it('retains the original Hold deadline while partial raw samples remain pending', async () => {
+    const h = harness(); const r = reads(); h.bind();
+    r.text.mockImplementation(async url => sample(url, 'header before full'));
+    useRawLifetimeReader(h, r);
+    h.delay.mockImplementation(async () => { h.state.now = constants.MINING_TIMEOUT_MS; });
+    await expect(h.api.hold(h.target)).rejects.toThrow('original deadline');
+    expect(h.hold).toHaveBeenCalledTimes(1); expect(h.canonical).not.toHaveBeenCalled(); await remainsFailed(h);
+  });
+
+  it('refuses a regressed raw sample after the first exact indexed watermark', async () => {
+    const h = harness(); const r = reads(); h.bind();
+    r.text.mockImplementation(async url => sample(url, h.state.now === 0 ? undefined : 'header before full'));
+    useRawLifetimeReader(h, r);
+    await expect(h.api.hold(h.target)).rejects.toThrow('watermark regressed'); await remainsFailed(h);
+  });
+
+  it.each([
+    { before: '|| indexedHeight > indexFullHeight', after: '|| false', fault: 'index above full' },
+    { before: '|| (headerHeight === watermark.height && headerIdHex !== watermark.headerId)', after: '|| false', fault: 'same-height fork' },
+  ])('kills omission of raw $fault refusal', async ({ before, after, fault }) => {
+    const r = reads({ before, after });
+    r.text.mockImplementation(async url => url.endsWith('/blocks/lastHeaders/1')
+      ? JSON.stringify([{ height: 40, id: fault === 'same-height fork' ? id(41) : id(40) }])
+      : url.endsWith('/info') ? JSON.stringify({ network: 'devnet', fullHeight: 40 })
+        : JSON.stringify({ fullHeight: fault === 'index above full' ? 39 : 40, indexedHeight: 40 }));
+    const observed = await r.api.permit({ role: 'primary', mode: 'mining', child: {} }, watermark(), 110, r.guard);
+    expect(observed === undefined || observed.headerIdHex === id(41)).toBe(true);
+  });
+
+  it.each(['primary', 'witness'])('does not hide the other peer fork behind raw %s lag', async pendingRole => {
+    const h = harness(); const r = reads(); h.bind();
+    r.text.mockImplementation(async url => url.startsWith(`${pendingRole}-double`)
+      ? sample(url, 'header before full')
+      : url.endsWith('/blocks/lastHeaders/1') ? JSON.stringify([{ height: 40, id: id(41) }])
+        : sample(url, undefined));
+    useRawLifetimeReader(h, r);
+    await expect(h.api.hold(h.target)).rejects.toThrow('contradicts its held parent');
+    expect(h.delay).not.toHaveBeenCalled(); expect(h.canonical).not.toHaveBeenCalled(); await remainsFailed(h);
+  });
+
+  it('joins raw completion lag to exact indexing and fresh status before another Arm', async () => {
+    const h = harness(); await h.armed(); const r = reads();
+    h.read.mockClear(); h.canonical.mockClear();
+    const start = h.state.now;
+    r.text.mockImplementation(async url => {
+      const lag = url.startsWith('witness-double') && h.state.now === start;
+      if (url.endsWith('/info')) return JSON.stringify({ network: 'devnet', fullHeight: lag ? 50 : 51 });
+      if (url.endsWith('/blocks/lastHeaders/1')) return JSON.stringify([{ height: 51, id: id(51) }]);
+      return JSON.stringify({ fullHeight: lag ? 50 : 51, indexedHeight: lag ? 50 : 51 });
+    });
+    useRawLifetimeReader(h, r);
+    const deadline = start + 5_000;
+    await h.api.complete(h.target, tx, deadline);
+    expect(h.status).toHaveBeenCalledTimes(2);
+    expect(h.read.mock.calls.every(call => call[2] === deadline)).toBe(true);
+    expect(h.canonical).toHaveBeenCalledTimes(6);
+    expect(h.hold).toHaveBeenCalledTimes(1); expect(h.arm).toHaveBeenCalledTimes(1);
+    await h.api.arm(h.target, nextTx);
+    expect(h.arm).toHaveBeenLastCalledWith(nextTx);
+    expect((await h.arm.mock.results[1].value).initialParent).toEqual(watermark(51));
+  });
+
+  it('seals completion on raw regression after an exact watermark without another Arm', async () => {
+    const h = harness(); await h.armed(); const r = reads(); const start = h.state.now;
+    r.text.mockImplementation(async url => {
+      const lag = h.state.now > start;
+      if (url.endsWith('/info')) return JSON.stringify({ network: 'devnet', fullHeight: lag ? 50 : 51 });
+      if (url.endsWith('/blocks/lastHeaders/1')) return JSON.stringify([{ height: 51, id: id(51) }]);
+      return JSON.stringify({ fullHeight: lag ? 50 : 51, indexedHeight: lag ? 50 : 51 });
+    });
+    useRawLifetimeReader(h, r);
+    await expect(h.api.complete(h.target, tx, start + 5_000)).rejects.toThrow('watermark regressed');
+    expect(h.status).toHaveBeenCalledTimes(1); expect(h.arm).toHaveBeenCalledTimes(1); await remainsFailed(h);
+  });
+
+  it('rechecks the original guard after the raw permit aggregate await', async () => {
+    const r = reads(); let calls = 0;
+    const guard = () => { if (++calls === 10) throw new Error('aggregate lifetime revoked'); };
+    await expect(r.api.permit({ role: 'primary', mode: 'mining', child: {} }, watermark(), 100, guard))
+      .rejects.toThrow('aggregate lifetime revoked');
+    expect(r.fetch).toHaveBeenCalledTimes(3); expect(calls).toBe(10);
+  });
 
   it.each([undefined, 11, 10_000])('uses the bounded request timeout for absolute deadline %s', async deadline => {
     const h = reads(); await h.api.json('primary-double', '/info', deadline, h.guard);
