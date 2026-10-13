@@ -28,17 +28,39 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–64 are permanently consumed or held. C64 on local
-`a148240c289c2febd169d7cdf6cee92b79ef2c81` terminated once at
-`2026-10-12T23:57:22.6610811Z`, with integer command exit 1, null launcher
+**Now:** Campaigns 24–65 are permanently consumed or held. C65 on local
+`97486f05d2db3125f83503fb728ab67b34345498` terminated once at
+`2026-10-13T06:59:38.4753067Z`, with integer command exit 1, null launcher
 exception and no parent result. Independent review validated the current
 public graph and canonical digest joins:
 `execution_failure/root-or-cleanup/cycle-1/deposit-funding`.
 This identifies the tagged boundary, not its inner cause or completed effects.
 Completion, cleanup and custody disposal remain unknown; zero cleanup errors
-establish no cleanup. No automatic C65, push or new CI is selected.
+establish no cleanup. No automatic C66, push or new CI is selected.
 
-The current local batch joins raw header/full-block/index samples to the exact
+The local source correction binds each deposit's prior confirmations to its newly
+held canonical chain. Two focused full-root synthetic negatives showed that a
+witness-only replacement of an issuance or payout confirmation after Hold
+could reach construction and complete the mocked root. Recheck every exact
+prior confirmation header on both owned nodes between exact held-tip reads,
+before fresh reward discovery. Preserve the independent held funding equality,
+custody guards and original budgets. The complete root file passes 512 cases,
+including 35 exact-helper cases; eight in-memory mutants retain valid positive
+twins and are detected by their isolated failures. Architecture/broadcast tests
+pass 445 cases, imports pass for 137 modules/931 sources, and no-write TypeScript
+passes. These selections have distinct scopes; subset counts are not additive.
+Exact independent review and publication guards remain required for local
+promotion. This is a prospective source invariant, not evidence of C65's cause
+or real acceptance.
+
+The next executable result is still the genuine packaged complete two-cycle
+lifecycle with stopped public recovery selection. Select any fresh invocation
+separately only after the coherent local correction is promoted and all fresh
+source/tool/native-journal/output/process/port/custody/fee/review/resource
+admission requirements pass. A local green source change does not select C66
+or authorize reuse of any prior execution input.
+
+The previous locally closed batch joins raw header/full-block/index samples to the exact
 held mining watermark. A synthetic exact-production-body falsifier accepts
 ready and index-lag samples, but the old reader immediately seals Hold when a
 header precedes its full block. The replacement treats only well-formed
@@ -2026,7 +2048,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Raw partial observations -> original held mining watermark -> Hold and completion | Close the bounded pending/contradiction reader join with raw Hold/completion fixtures, isolated refusals, exact source/test/claims review and guarded local promotion | Both peers must still reach the exact indexed held tip and stable canonical lookups under original deadlines. Synthetic convergence does not establish C64's historical cause or packaged lifecycle; C24-C64 holds remain permanent |
+| **Now** | Genuine packaged complete two-cycle lifecycle and stopped public recovery selection | Finish guarded local promotion of the held prior-confirmation correction; separately select and freshly admit the actual missing lifecycle result | Preserve original ownership, custody, signing, fees and budgets. Source fixtures do not establish C65's cause or packaged lifecycle; C24-C65 holds remain permanent, no automatic C66 |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Separately select and admit one local synthetic campaign after a deciding checkpoint, exact local source identity, applicable checks/review and fresh runtime/source/output/custody/fee gates; apply guarded publication and due exact-head CI at public promotion | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
@@ -2071,7 +2093,8 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Raw held-watermark observation join (current local batch) | Well-formed partial observations within the authenticated held height remain pending; contradictions refuse; Hold and completion still require exact paired indexing, canonical lookups and stability before the next Arm | The 175 exact extracted-production/raw-reader cases, TypeScript and independent source/test review pass. Close canonical affected consumers, final claims and guarded local promotion. No budget, legacy reader or authority change; no C64 cause or automatic C65 |
+| Held prior-confirmation funding join (local source correction) | Both nodes retain every exact prior issuance/payout confirmation on the newly held canonical chain before reward discovery; exact held-tip reads bracket singleton header membership | Root512 including helper35, eight in-memory mutants, architecture/broadcast445, TypeScript and imports pass in their scopes. Exact independent review, final claims consumers and guarded local promotion are required before a separately fresh lifecycle admission. No historical cause, campaign acceptance or automatic C66 |
+| Raw held-watermark observation join (locally closed at97486f05) | Well-formed partial observations within the authenticated held height remain pending; contradictions refuse; Hold and completion still require exact paired indexing, canonical lookups and stability before the next Arm | The 175 exact extracted-production/raw-reader cases, TypeScript, affected generic consumers and independent source/test/claims review passed guarded local promotion. No budget, legacy reader or authority change; no C64/C65 cause or campaign acceptance |
 | Transaction-specific bounded mining (locally closed at a148240c) | Authenticated Hold/Arm/Status binds the original live process, exact held indexed parent and transaction; permits inclusion plus ten successors; confirms and rejoins the held watermark before the next Arm under the original deadline | Cumulative patch/locks, native actor/API execution, parser/control/lifetime/transport and four submission consumers, architecture refusals, docs and independent review passed guarded local promotion. Real NodeView fixtures and synthetic ports are distinct from packaged lifecycle, custody and operator acceptance; C64 is consumed |
 | Signed successor-height boundary (locally closed at63c319df) | Each raw HTTP case binds its candidate through WASM and revalidation; a separate exported signed fixture agrees across WASM and native full transaction validation at the inclusive edge and next block | Complete fixture88, native48, caller/source pins90, TypeScript/import checks and exact independent review/local promotion pass. Keep transaction/proofs/ordered boxes fixed within each scope, refund unexpired and before/after observed tips stable. Preserve all runtime guards and budgets; no cross-case byte-identity claim, historical cause or automatic C64 |
 | Native input-refusal attribution (locally closed at6c74a946) | Join actual source-owned predicate errors and node roles to the exact existing operation graph without changing throws, predicates or budgets | Real native predicate fixtures, isolated codec/graph refusals and composed worker/parent failure preservation and success contradiction checks, exact independent review and guarded local promotion pass. Paired disagreement is a defensive predicate with malformed-normalizer fixture scope; no historical cause or lifecycle correction |

@@ -406,6 +406,8 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
           markStep('deposit-funding');
           const heldDepositSnapshot = await holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(target);
           assertActive();
+          await assertHeldDepositConfirmationsV1(target, heldDepositSnapshot, transactions, assertActive, 'issuance');
+          assertActive();
           const ownedFunding = await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(setup.signer, target);
           assertActive();
           const funding = assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1(ownedFunding, target);
@@ -987,6 +989,10 @@ async function completeFirstNativeReturn(input: Readonly<{
       markStep('deposit-funding');
       const heldDepositSnapshot = await holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(target);
       readCustody();
+      await assertHeldDepositConfirmationsV1(target, heldDepositSnapshot, [{
+        confirmationHeight: payout.confirmationHeight, confirmationHeaderIdHex: payout.confirmationHeaderId,
+      }], readCustody, 'payout');
+      readCustody();
       const ownedFunding = await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(setup.signer, target);
       readCustody();
       const funding = assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1(ownedFunding, target);
@@ -1399,6 +1405,59 @@ async function completeSecondNativeReturn(input: Readonly<{
       journalDigestHex: transported.value.journalDigestHex }),
     payout: confirmed.value.payout, confirmationExecution: confirmed.receipt,
   });
+}
+
+async function assertHeldDepositConfirmationsV1(
+  target: NativeReturnContinuation['target'],
+  held: Readonly<{ fullHeight: number; headerIdHex: string }>,
+  confirmations: readonly Readonly<{ confirmationHeight: number; confirmationHeaderIdHex: string }>[],
+  assertCustody: () => void,
+  kind: 'issuance' | 'payout',
+) {
+  const assertActive = () => {
+    assertCustody();
+    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  };
+  assertActive();
+  const refuse = () => new Error(`FED deposit funding ${kind} confirmation is not canonical under its held snapshot`);
+  if (!Number.isSafeInteger(held.fullHeight) || held.fullHeight <= 0
+    || typeof held.headerIdHex !== 'string' || !/^[0-9a-f]{64}$/.test(held.headerIdHex)
+    || confirmations.length === 0) throw refuse();
+  const expected = new Map<number, string>();
+  for (const confirmation of confirmations) {
+    const { confirmationHeight, confirmationHeaderIdHex } = confirmation;
+    if (!Number.isSafeInteger(confirmationHeight) || confirmationHeight <= 0
+      || confirmationHeight > held.fullHeight || typeof confirmationHeaderIdHex !== 'string'
+      || !/^[0-9a-f]{64}$/.test(confirmationHeaderIdHex)
+      || (expected.has(confirmationHeight) && expected.get(confirmationHeight) !== confirmationHeaderIdHex)) {
+      throw refuse();
+    }
+    expected.set(confirmationHeight, confirmationHeaderIdHex);
+  }
+  const clients = [target.primaryNodeOrigin, target.witnessNodeOrigin]
+    .map(origin => createBoundedAuthenticatedSpvTrackerReadOnlySource(origin));
+  const assertHeldTips = async () => {
+    await settleReads(clients.map(async client => {
+      assertActive();
+      const raw = await client.getBestHeader();
+      assertActive();
+      const tip = record(raw);
+      if (tip.height !== held.fullHeight || tip.id !== held.headerIdHex) throw refuse();
+    }));
+    assertActive();
+  };
+  // The held tip commits the ancestry checked between these visible-tip reads.
+  await assertHeldTips();
+  assertActive();
+  await settleReads(clients.flatMap(client => [...expected].map(async ([height, id]) => {
+    assertActive();
+    const headers = await client.getBlockHeaderIdsAtHeight(height);
+    assertActive();
+    if (headers.length !== 1 || headers[0] !== id) throw refuse();
+  })));
+  assertActive();
+  await assertHeldTips();
+  assertActive();
 }
 
 async function settleReads<T>(reads: readonly Promise<T>[]): Promise<T[]> {

@@ -225,6 +225,8 @@ let readErgoBox: (origin: string, id: string) => unknown;
 let readErgoTip: (origin: string) => unknown;
 let readErgoInclusion: (origin: string, height: number) => unknown;
 let readErgoAnchor: (origin: string, height: number) => unknown;
+let heldDepositTip: Readonly<{ height: number; id: string }> | null;
+let readHeldDepositTip: (origin: string, held: Readonly<{ height: number; id: string }>) => unknown;
 let retainedSetup: any;
 let frontierEndpoints: Readonly<{ primaryRpcUrl: string; witnessRpcUrl: string }>;
 let frontierActive: boolean;
@@ -571,7 +573,11 @@ beforeEach(() => {
         };
       } };
   });
-  mocked.owned.mockImplementation(value => { if (!active || value !== target) throw new Error('target inactive'); });
+  mocked.owned.mockImplementation(value => {
+    const initial = active && value === target;
+    const confirmation = phase === 'confirmation' && value === phaseTargets.confirmation;
+    if (!initial && !confirmation) throw new Error('target inactive');
+  });
   mocked.readOnlyOwned.mockImplementation(value => { expect(value).toBe(phaseTargets.readOnly); });
   mocked.discover.mockImplementation(async (signer, value) => {
     expect(signer).toBe(setup!.signer);
@@ -594,6 +600,7 @@ beforeEach(() => {
     if (second) { expect(phase).toBe('confirmation'); expect(mocked.continuationPacket).not.toHaveBeenCalled(); }
     else { expect(value).toBe(target); expect(active).toBe(true); expect(mocked.packet).not.toHaveBeenCalled(); }
     const observation = (second ? continuationFunding : funding).observation;
+    heldDepositTip = Object.freeze({ height: observation.target.tipHeight, id: observation.target.tipHeaderIdHex });
     return Object.freeze({ network: 'devnet', fullHeight: observation.target.tipHeight,
       indexedHeight: observation.target.tipHeight, headerIdHex: observation.target.tipHeaderIdHex });
   });
@@ -680,15 +687,18 @@ beforeEach(() => {
     const value = compiled.issuance.orderedTransactions.find(({ transaction }: any) => transaction.outputs[0].boxId === id);
     return value ? structuredClone(value.transaction.outputs[0]) : null;
   };
+  heldDepositTip = null;
   readErgoTip = () => ({ height: 120, id: '93'.repeat(32) });
-  readErgoInclusion = () => ['92'.repeat(32)];
+  readHeldDepositTip = (_origin, held) => held;
+  readErgoInclusion = (_origin, height) => [height === 150 ? 'f1'.repeat(32) : '92'.repeat(32)];
   const observedTips = new Map<string, Map<number, string>>();
   readErgoAnchor = (origin, height) => [observedTips.get(origin)?.get(height)];
   mocked.source.mockImplementation(origin => {
     expect([target.primaryNodeOrigin, target.witnessNodeOrigin]).toContain(origin);
     return { getBestHeader: async () => {
       assertCustodyActive();
-      const tip: any = await readErgoTip(origin);
+      const tip: any = heldDepositTip === null
+        ? await readErgoTip(origin) : await readHeldDepositTip(origin, heldDepositTip);
       if (tip && typeof tip.height === 'number' && typeof tip.id === 'string') {
         if (!observedTips.has(origin)) observedTips.set(origin, new Map());
         observedTips.get(origin)!.set(tip.height, tip.id);
@@ -698,7 +708,7 @@ beforeEach(() => {
       getBoxByIdOrNull: async (id: string) => { assertCustodyActive(); return readErgoBox(origin, id); },
       getBlockHeaderIdsAtHeight: async (height: number) => {
         assertCustodyActive();
-        return receipts.some(receipt => receipt.confirmationHeight === height)
+        return receipts.some(receipt => receipt.confirmationHeight === height) || (heldDepositTip !== null && height === 150)
           ? readErgoInclusion(origin, height) : readErgoAnchor(origin, height);
       } };
   });
@@ -1266,6 +1276,210 @@ function admissionHelperFixture(second: boolean,
     assertActive: vi.fn() };
   return { helper, request, height, pause, fresh, revalidate };
 }
+
+type HeldConfirmation = Readonly<{ confirmationHeight: number; confirmationHeaderIdHex: string }>;
+type HeldConfirmationHelper = (target: Readonly<{ primaryNodeOrigin: string; witnessNodeOrigin: string }>,
+  held: Readonly<{ fullHeight: number; headerIdHex: string }>, confirmations: readonly HeldConfirmation[],
+  assertCustody: () => void, kind: 'issuance' | 'payout') => Promise<void>;
+
+// Import-free exact production helper plus its all-settled read primitive.
+function heldDepositConfirmationHelperFixture() {
+  const sourceText = readFileSync(new URL('./substrate-federated-genesis-target-root-v1.ts', import.meta.url), 'utf8');
+  const parsed = ts.createSourceFile('root.ts', sourceText, ts.ScriptTarget.ES2022, true);
+  const selected = ['assertHeldDepositConfirmationsV1', 'settleReads'];
+  const declarations = selected.map(name => {
+    const matches = parsed.statements.filter((node): node is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(node) && node.name?.text === name);
+    expect(matches).toHaveLength(1); expect(matches[0]!.body).toBeDefined();
+    return matches[0]!.getText(parsed);
+  });
+  const compiled = ts.transpileModule(declarations.join('\n'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  expect(compiled).not.toMatch(/\brequire\s*\(/u);
+
+  const target = Object.freeze({ primaryNodeOrigin: 'primary', witnessNodeOrigin: 'witness' });
+  const held = Object.freeze({ fullHeight: 100, headerIdHex: 'aa'.repeat(32) });
+  const confirmations: HeldConfirmation[] = [
+    Object.freeze({ confirmationHeight: 80, confirmationHeaderIdHex: '11'.repeat(32) }),
+  ];
+  const tips = new Map<string, unknown[]>([
+    ['primary', [{ height: 100, id: 'aa'.repeat(32) }, { height: 100, id: 'aa'.repeat(32) }]],
+    ['witness', [{ height: 100, id: 'aa'.repeat(32) }, { height: 100, id: 'aa'.repeat(32) }]],
+  ]);
+  const membership = new Map<string, unknown>();
+  const bestCalls = new Map<string, number>();
+  const membershipCalls: [string, number][] = [];
+  const behavior: {
+    bestHeader(origin: string, call: number): Promise<unknown>;
+    headers(origin: string, height: number): Promise<unknown>;
+  } = {
+    bestHeader: async (origin, call) => tips.get(origin)![call],
+    headers: async (_origin, height) => membership.has(String(height))
+      ? membership.get(String(height))
+      : [confirmations.find(value => value.confirmationHeight === height)!.confirmationHeaderIdHex],
+  };
+  let active = true;
+  let custody = true;
+  const owned = vi.fn((value: unknown) => {
+    if (!active || value !== target) throw new Error('synthetic target custody lost');
+  });
+  const assertCustody = vi.fn(() => {
+    if (!custody) throw new Error('synthetic signer custody lost');
+  });
+  const createSource = vi.fn((origin: string) => ({
+    getBestHeader: vi.fn(async () => {
+      const call = bestCalls.get(origin) ?? 0; bestCalls.set(origin, call + 1);
+      return behavior.bestHeader(origin, call);
+    }),
+    getBlockHeaderIdsAtHeight: vi.fn(async (height: number) => {
+      membershipCalls.push([origin, height]);
+      return behavior.headers(origin, height);
+    }),
+  }));
+  const recordValue = (value: unknown) => {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('record required');
+    return value;
+  };
+  const factory = new Function('assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1',
+    'createBoundedAuthenticatedSpvTrackerReadOnlySource', 'record',
+    `${compiled}\nreturn assertHeldDepositConfirmationsV1;`);
+  const helper = factory(owned, createSource, recordValue) as HeldConfirmationHelper;
+  return { helper, target, held, confirmations, tips, membership, bestCalls, membershipCalls, behavior,
+    owned, assertCustody, createSource,
+    loseActive: () => { active = false; }, loseCustody: () => { custody = false; } };
+}
+
+describe('held deposit confirmation exact production helper', () => {
+  it.each(['issuance', 'payout'] as const)('accepts exact held tips and singleton %s membership', async kind => {
+    const h = heldDepositConfirmationHelperFixture();
+    if (kind === 'issuance') h.confirmations.push(
+      Object.freeze({ confirmationHeight: 81, confirmationHeaderIdHex: '22'.repeat(32) }),
+      Object.freeze({ confirmationHeight: 82, confirmationHeaderIdHex: '33'.repeat(32) }),
+    );
+    await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, kind)).resolves.toBeUndefined();
+    expect(h.createSource.mock.calls.map(call => call[0])).toEqual(['primary', 'witness']);
+    expect(h.bestCalls).toEqual(new Map([['primary', 2], ['witness', 2]]));
+    expect(h.membershipCalls).toEqual(['primary', 'witness'].flatMap(origin =>
+      h.confirmations.map(value => [origin, value.confirmationHeight] as [string, number])));
+  });
+
+  it.each([
+    ['empty confirmations', { confirmations: [] }],
+    ['zero confirmation height', { confirmations: [{ confirmationHeight: 0, confirmationHeaderIdHex: '11'.repeat(32) }] }],
+    ['future confirmation height', { confirmations: [{ confirmationHeight: 101, confirmationHeaderIdHex: '11'.repeat(32) }] }],
+    ['fractional confirmation height', { confirmations: [{ confirmationHeight: 80.5, confirmationHeaderIdHex: '11'.repeat(32) }] }],
+    ['short confirmation ID', { confirmations: [{ confirmationHeight: 80, confirmationHeaderIdHex: '11' }] }],
+    ['uppercase confirmation ID', { confirmations: [{ confirmationHeight: 80, confirmationHeaderIdHex: 'AA'.repeat(32) }] }],
+    ['non-string confirmation ID', { confirmations: [{ confirmationHeight: 80,
+      confirmationHeaderIdHex: 1 as unknown as string }] }],
+    ['zero held height', { held: { fullHeight: 0, headerIdHex: 'aa'.repeat(32) } }],
+    ['short held ID', { held: { fullHeight: 100, headerIdHex: 'aa' } }],
+    ['non-string held ID', { held: { fullHeight: 100, headerIdHex: 1 as unknown as string } }],
+  ] as const)('rejects %s before node I/O', async (_name, change) => {
+    const h = heldDepositConfirmationHelperFixture();
+    const held = 'held' in change ? change.held : h.held;
+    const confirmations = 'confirmations' in change ? change.confirmations : h.confirmations;
+    await expect(h.helper(h.target, held, confirmations, h.assertCustody, 'issuance'))
+      .rejects.toThrow('confirmation is not canonical');
+    expect(h.createSource).not.toHaveBeenCalled();
+  });
+
+  it('rejects conflicting IDs claimed at one height before node I/O', async () => {
+    const h = heldDepositConfirmationHelperFixture();
+    h.confirmations.push(Object.freeze({ confirmationHeight: 80, confirmationHeaderIdHex: '22'.repeat(32) }));
+    await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'issuance'))
+      .rejects.toThrow('confirmation is not canonical');
+    expect(h.createSource).not.toHaveBeenCalled();
+  });
+
+  it('deduplicates repeated claims with the same height and ID', async () => {
+    const h = heldDepositConfirmationHelperFixture();
+    h.confirmations.push(Object.freeze({ ...h.confirmations[0]! }));
+    await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'issuance')).resolves.toBeUndefined();
+    expect(h.membershipCalls).toEqual([['primary', 80], ['witness', 80]]);
+  });
+
+  it.each(['malformed', 'missing', 'extra', 'wrong'] as const)(
+    'rejects %s prior-confirmation membership', async fault => {
+      const h = heldDepositConfirmationHelperFixture();
+      h.membership.set('80', fault === 'malformed' ? null : fault === 'missing' ? []
+        : fault === 'extra' ? ['11'.repeat(32), '11'.repeat(32)] : ['22'.repeat(32)]);
+      await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'payout')).rejects.toThrow();
+    });
+
+  it.each([81, 82] as const)('rejects a wrong distinct issuance header at height %s', async height => {
+    const h = heldDepositConfirmationHelperFixture();
+    h.confirmations.push(
+      Object.freeze({ confirmationHeight: 81, confirmationHeaderIdHex: '22'.repeat(32) }),
+      Object.freeze({ confirmationHeight: 82, confirmationHeaderIdHex: '33'.repeat(32) }),
+    );
+    h.membership.set(String(height), ['44'.repeat(32)]);
+    await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'issuance'))
+      .rejects.toThrow('confirmation is not canonical');
+  });
+
+  it.each((['before', 'after'] as const).flatMap(stage => (['primary', 'witness'] as const)
+    .flatMap(role => (['height', 'header'] as const).map(field => ({ stage, role, field }))))) (
+    'rejects $role $field tip drift $stage membership reads', async ({ stage, role, field }) => {
+    const h = heldDepositConfirmationHelperFixture();
+    const call = stage === 'before' ? 0 : 1;
+    h.tips.get(role)![call] = field === 'height'
+      ? { height: 101, id: 'aa'.repeat(32) } : { height: 100, id: 'bb'.repeat(32) };
+    await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'payout'))
+      .rejects.toThrow('confirmation is not canonical');
+    expect(h.membershipCalls).toHaveLength(stage === 'before' ? 0 : 2);
+  });
+
+  it.each(['custody', 'target'] as const)('rejects pre-entry %s loss before node I/O', async loss => {
+    const h = heldDepositConfirmationHelperFixture();
+    (loss === 'custody' ? h.loseCustody : h.loseActive)();
+    await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'payout'))
+      .rejects.toThrow(loss === 'custody' ? 'signer custody lost' : 'target custody lost');
+    expect(h.createSource).not.toHaveBeenCalled();
+  });
+
+  it.each((['best-header', 'membership'] as const).flatMap(stage =>
+    (['custody', 'target'] as const).map(loss => ({ stage, loss }))))(
+    'rejects $loss loss across a $stage await', async ({ stage, loss }) => {
+      const h = heldDepositConfirmationHelperFixture();
+      const lose = loss === 'custody' ? h.loseCustody : h.loseActive;
+      if (stage === 'best-header') {
+        const original = h.behavior.bestHeader;
+        h.behavior.bestHeader = async (origin, call) => {
+          const value = await original(origin, call); if (origin === 'primary' && call === 0) lose(); return value;
+        };
+      } else {
+        const original = h.behavior.headers;
+        h.behavior.headers = async (origin, height) => {
+          const value = await original(origin, height); if (origin === 'primary') lose(); return value;
+        };
+      }
+      await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'payout'))
+        .rejects.toThrow(loss === 'custody' ? 'signer custody lost' : 'target custody lost');
+    });
+
+  it('drains paired membership reads and propagates the original rejection', async () => {
+    const h = heldDepositConfirmationHelperFixture();
+    const trigger = new Error('synthetic primary membership read failed');
+    let release!: () => void;
+    let entered!: () => void;
+    const enteredPromise = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    h.behavior.headers = async origin => {
+      if (origin === 'primary') throw trigger;
+      entered(); await gate; return ['11'.repeat(32)];
+    };
+    const pending = h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'payout');
+    await enteredPromise;
+    let settled = false;
+    void pending.then(() => { settled = true; }, () => { settled = true; });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(settled).toBe(false);
+    release();
+    await expect(pending).rejects.toBe(trigger);
+  });
+});
 
 describe('fresh FED target composition', () => {
   for (const second of [false, true]) {
@@ -2310,16 +2524,87 @@ describe('fresh FED target composition', () => {
         return { ...snapshot, ...(field === 'height' ? { fullHeight: snapshot.fullHeight + 1 }
           : { headerIdHex: 'aa'.repeat(32) }) };
       });
-      await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(/funding does not follow/);
+      await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(
+        /confirmation is not canonical under its held snapshot|funding does not follow/,
+      );
       expect(mocked.packet).toHaveBeenCalledTimes(second ? 1 : 0);
       expect(mocked.continuationPacket).not.toHaveBeenCalled();
       assertDisposed();
     });
 
+  it.each(['primary', 'witness'] as const)(
+    'rejects genesis funding when the $role owned node replaces an issuance confirmation after Hold', async role => {
+    const originalHold = mocked.hold.getMockImplementation()!;
+    let held = false;
+    mocked.hold.mockImplementation(async value => {
+      const snapshot = await originalHold(value);
+      if (value === target) held = true;
+      return snapshot;
+    });
+    readErgoInclusion = (origin, height) => held && height === 100
+      ? [origin === target[`${role}NodeOrigin`] ? 'a1'.repeat(32) : '92'.repeat(32)]
+      : ['92'.repeat(32)];
+
+    await expect(runSubstrateFederatedGenesisTargetRootV1(input))
+      .rejects.toThrow(/issuance confirmation.*canonical|funding does not follow/);
+    expect(mocked.discover).toHaveBeenCalledOnce();
+    expect(mocked.packet).not.toHaveBeenCalled();
+    assertDisposed();
+  });
+
+  it.each(['primary', 'witness'] as const)(
+    'rejects continuation funding when the $role owned node replaces the payout confirmation after Hold', async role => {
+    const originalHold = mocked.hold.getMockImplementation()!;
+    let held = false;
+    mocked.hold.mockImplementation(async value => {
+      const snapshot = await originalHold(value);
+      if (value === phaseTargets.confirmation) held = true;
+      return snapshot;
+    });
+    readErgoInclusion = (origin, height) => {
+      if (held && height === 150) {
+        return [origin === target[`${role}NodeOrigin`] ? 'a2'.repeat(32) : 'f1'.repeat(32)];
+      }
+      return ['92'.repeat(32)];
+    };
+
+    await expect(runSubstrateFederatedGenesisTargetRootV1(input))
+      .rejects.toThrow(/payout confirmation.*canonical|continuation funding does not follow/);
+    expect(mocked.discover).toHaveBeenCalledTimes(2);
+    expect(mocked.packet).toHaveBeenCalledOnce();
+    expect(mocked.continuationPacket).not.toHaveBeenCalled();
+    assertDisposed();
+  });
+
+  it.each((['before', 'after'] as const).flatMap(stage => (['primary', 'witness'] as const)
+    .map(role => ({ stage, role }))))(
+    'rejects a $role held-tip difference $stage genesis membership reads', async ({ stage, role }) => {
+      const calls = new Map<string, number>();
+      readHeldDepositTip = (origin, held) => {
+        const call = calls.get(origin) ?? 0; calls.set(origin, call + 1);
+        return origin === target[`${role}NodeOrigin`] && call === (stage === 'before' ? 0 : 1)
+          ? { ...held, id: 'ad'.repeat(32) } : held;
+      };
+      await expect(runSubstrateFederatedGenesisTargetRootV1(input))
+        .rejects.toThrow(/issuance confirmation.*canonical/);
+      expect(mocked.discover).toHaveBeenCalledOnce();
+      expect(mocked.packet).not.toHaveBeenCalled();
+      assertDisposed();
+    });
+
   it.each(['provenance', 'genesis', 'height'] as const)('rejects second funding %s before constructing a packet', async fault => {
     if (fault === 'provenance') mocked.fundingOwned.mockImplementationOnce(() => { throw new Error('funding provenance lost'); });
-    else funding = { ...funding, observation: { ...funding.observation, target: { ...funding.observation.target,
-      ...(fault === 'genesis' ? { genesisHeaderIdHex: '99'.repeat(32) } : { tipHeight: 99 }) } } };
+    else if (fault === 'genesis') funding = { ...funding, observation: { ...funding.observation,
+      target: { ...funding.observation.target, genesisHeaderIdHex: '99'.repeat(32) } } };
+    else {
+      const original = mocked.hold.getMockImplementation()!;
+      mocked.hold.mockImplementation(async value => {
+        const snapshot = await original(value);
+        if (value === target) funding = { ...funding, observation: { ...funding.observation,
+          target: { ...funding.observation.target, tipHeight: 99 } } };
+        return snapshot;
+      });
+    }
     await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(/funding provenance lost|does not follow/);
     expect(mocked.fundingOwned).toHaveBeenCalledOnce();
     assertDownstreamPrefix('funding'); assertDownstreamCleanup();
@@ -2556,16 +2841,20 @@ describe('fresh FED target composition', () => {
       expect(inSnapshot).toBe(false);
       return assertBatch(...args);
     });
+    let snapshotInclusionReads = 0;
     const inclusion = vi.fn((origin: string, at: number) => {
-      expect(inSnapshot).toBe(true);
       expect([target.primaryNodeOrigin, target.witnessNodeOrigin]).toContain(origin);
-      expect(at).toBe(100);
-      return ['92'.repeat(32)];
+      if (inSnapshot) {
+        snapshotInclusionReads++;
+        expect(at).toBe(100);
+      } else expect([100, 150]).toContain(at);
+      return [at === 150 ? 'f1'.repeat(32) : '92'.repeat(32)];
     });
     readErgoInclusion = inclusion;
     const result = await runSubstrateFederatedGenesisTargetRootV1(input);
     expect(result.operationalMintEstablished).toBe(true);
-    expect(inclusion).toHaveBeenCalledTimes(6);
+    expect(snapshotInclusionReads).toBe(6);
+    expect(inclusion).toHaveBeenCalledTimes(10);
     expect(tipReads).toBe(8);
     expect(observeConfirmation).toHaveBeenCalledTimes(6);
     expect(mocked.execute).toHaveBeenCalledOnce(); assertDisposed();
@@ -2634,16 +2923,19 @@ describe('fresh FED target composition', () => {
       return { status: 'confirmed', confirmationHeight: receipt.confirmationHeight,
         confirmationHeaderIdHex: receipt.confirmationHeaderIdHex };
     });
-    const inclusion = vi.fn((_origin: string, height: number) => [
-      receipts.find(receipt => receipt.confirmationHeight === height)!.confirmationHeaderIdHex,
-    ]);
+    const inclusion = vi.fn((_origin: string, height: number) => [height === 150
+      ? 'f1'.repeat(32)
+      : receipts.find(receipt => receipt.confirmationHeight === height)!.confirmationHeaderIdHex]);
     readErgoInclusion = inclusion;
     const result = await runSubstrateFederatedGenesisTargetRootV1(input);
     expect(result.operationalMintEstablished).toBe(true);
     for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
-      for (const height of [108, 109, 110]) expect(inclusion).toHaveBeenCalledWith(origin, height);
+      for (const height of [108, 109, 110]) {
+        expect(inclusion.mock.calls.filter(call => call[0] === origin && call[1] === height)).toHaveLength(2);
+      }
+      expect(inclusion.mock.calls.filter(call => call[0] === origin && call[1] === 150)).toHaveLength(1);
     }
-    expect(inclusion).toHaveBeenCalledTimes(6); assertDisposed();
+    expect(inclusion).toHaveBeenCalledTimes(14); assertDisposed();
   });
 
   it('drains a pending tip read before closing after its peer fails', async () => {

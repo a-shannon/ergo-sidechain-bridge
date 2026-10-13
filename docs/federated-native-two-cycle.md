@@ -269,6 +269,19 @@ at the held height. Both nodes must reach the exact held header and fully
 indexed height, pass canonical-height lookups and remain exact across the
 stability observation before the join completes. Regression after that first
 exact observation refuses the operation.
+
+Before discovering each deposit's fresh reward inputs, the root rechecks the
+exact prior confirmations on both owned nodes: all genesis issuance receipts
+for the first deposit, and the first withdrawal payout for the continuation.
+Every confirmation height must be positive, safe and at or below the held tip;
+conflicting header IDs at the same height refuse before node reads. Each node
+must return the single expected header ID at every distinct confirmation height.
+Both nodes' visible tips must equal the held height and header before and after
+those reads. The funding observation must still independently match that held
+tip. Height ordering alone cannot establish this canonical-chain relationship.
+The check adds four tip reads and two reads per distinct prior confirmation
+height; it does not claim atomic node snapshots or neutral polling cost. Parallel
+reads drain before returning or throwing, with the original read failure retained.
 The original process, target and custody guards remain active across every
 awaited operation. A failed or ambiguous operation never permits resubmission.
 
