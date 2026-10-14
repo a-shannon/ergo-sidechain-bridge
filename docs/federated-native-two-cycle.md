@@ -275,15 +275,27 @@ exact prior confirmations on both owned nodes: all genesis issuance receipts
 for the first deposit, and the first withdrawal payout for the continuation.
 Every confirmation height must be positive, safe and at or below the held tip;
 conflicting header IDs at the same height refuse before node reads. Each node
-must return the single expected header ID at every distinct confirmation height.
+must place the expected header ID first in its height list. The pinned Ergo
+endpoint retains sibling forks after that canonical entry, so additional
+well-formed, distinct IDs are allowed. The root also walks backward from the
+exact held tip to the oldest receipt through header-by-ID reads. Both nodes must
+agree on every requested ID, exact height and parent ID; each retained receipt
+must occur on that ancestry. Missing headers, discontinuities, repeated IDs or
+node disagreement refuse even when the expected ID appears in a height list.
 Both nodes' visible tips must equal the held height and header before and after
 those reads. The funding observation must still independently match that held
 tip. Height ordering alone cannot establish this canonical-chain relationship.
-The check adds four tip reads and two reads per distinct prior confirmation
-height; it does not claim atomic node snapshots or neutral polling cost. Parallel
-reads drain before returning or throwing, with the original read failure retained.
+The check adds four tip reads, two header reads per traversed height (including
+both endpoints) and two height-list reads per distinct receipt height. It uses
+each client's existing reconstruction deadline, request and byte limits; no
+unbounded fallback is available. Every begun scope closes on success or failure.
+Parallel reads drain before returning or throwing, and cleanup errors retain the
+original failure. These brackets do not provide an atomic node snapshot.
 The original process, target and custody guards remain active across every
 awaited operation. A failed or ambiguous operation never permits resubmission.
+This fixes revalidation of existing receipts. The earlier confirmation observer
+still requires singleton height lists, so complete fork compatibility and a
+successful packaged lifecycle require separate evidence.
 
 Before attesting either checkpoint, the original owned mining target requests
 its one-way submission pause. The node drains the exact pending submitted

@@ -1475,18 +1475,74 @@ async function assertHeldDepositConfirmationsV1(
     }));
     assertActive();
   };
-  // The held tip commits the ancestry checked between these visible-tip reads.
-  await assertHeldTips();
-  assertActive();
-  await settleReads(clients.flatMap(client => [...expected].map(async ([height, id]) => {
+  const begun: typeof clients = [];
+  let failed = false;
+  let failure: unknown;
+  try {
+    for (const client of clients) {
+      if (typeof client.beginAuthenticatedTrackerReconstruction !== 'function'
+        || typeof client.endAuthenticatedTrackerReconstruction !== 'function') throw refuse();
+    }
+    for (const client of clients) {
+      assertActive();
+      client.beginAuthenticatedTrackerReconstruction!();
+      begun.push(client);
+      assertActive();
+    }
+    // Height lists retain forks. Resolve each receipt through the exact held tip,
+    // and require both owned nodes to agree on every intervening header tuple.
+    await assertHeldTips();
     assertActive();
-    const headers = await client.getBlockHeaderIdsAtHeight(height);
+    const minimumHeight = Math.min(...expected.keys());
+    const visited = new Set<string>();
+    let currentId = held.headerIdHex;
+    for (let height = held.fullHeight; height >= minimumHeight; height--) {
+      assertActive();
+      if (visited.has(currentId)) throw refuse();
+      visited.add(currentId);
+      const pair = await settleReads(clients.map(async client => {
+        assertActive();
+        const raw = await client.getBlockHeaderById(currentId);
+        assertActive();
+        const header = record(raw);
+        if (header.id !== currentId || header.height !== height
+          || typeof header.parentId !== 'string' || !/^[0-9a-f]{64}$/.test(header.parentId)
+          || header.parentId === currentId) throw refuse();
+        return header.parentId;
+      }));
+      assertActive();
+      if (pair[0] !== pair[1]) throw refuse();
+      const confirmationId = expected.get(height);
+      if (confirmationId !== undefined) {
+        if (currentId !== confirmationId) throw refuse();
+        await settleReads(clients.map(async client => {
+          assertActive();
+          const headers = await client.getBlockHeaderIdsAtHeight(height);
+          assertActive();
+          if (!Array.isArray(headers) || headers.length === 0 || headers[0] !== confirmationId
+            || headers.some(id => typeof id !== 'string' || !/^[0-9a-f]{64}$/.test(id))
+            || new Set(headers).size !== headers.length) throw refuse();
+        }));
+        assertActive();
+      }
+      currentId = pair[0]!;
+    }
+    await assertHeldTips();
     assertActive();
-    if (headers.length !== 1 || headers[0] !== id) throw refuse();
-  })));
-  assertActive();
-  await assertHeldTips();
-  assertActive();
+  } catch (cause) {
+    failed = true;
+    failure = cause;
+  }
+  const cleanupFailures: unknown[] = [];
+  for (const client of begun) {
+    try { client.endAuthenticatedTrackerReconstruction!(); }
+    catch (cause) { cleanupFailures.push(cause); }
+  }
+  if (cleanupFailures.length !== 0) {
+    throw new AggregateError(failed ? [failure, ...cleanupFailures] : cleanupFailures,
+      'FED deposit funding confirmation observation scope failed');
+  }
+  if (failed) throw failure;
 }
 
 async function settleReads<T>(reads: readonly Promise<T>[]): Promise<T[]> {

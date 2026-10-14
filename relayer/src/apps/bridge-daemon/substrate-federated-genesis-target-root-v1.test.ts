@@ -311,12 +311,28 @@ function injectDepositFundingSubstageFailure(
   const guard = second ? mocked.nativeRead : mocked.frontierOwned;
   const originalGuard = guard.getMockImplementation()!;
   let guardCallsAfterHold = 0;
-  const targetGuardCall = substage === 'post-hold-owner-custody-guard' ? 1
-    : substage === 'post-revalidation-owner-custody-guard' ? 20
-      : substage === 'post-discovery-owner-custody-guard' ? 21 : null;
+  let closedRevalidationScopes = 0;
+  let fundingDiscovered = false;
+  let guardInjected = false;
+  const originalSource = mocked.source.getMockImplementation()!;
+  mocked.source.mockImplementation((...args) => {
+    const client = originalSource(...args);
+    const end = client.endAuthenticatedTrackerReconstruction;
+    return { ...client, endAuthenticatedTrackerReconstruction: () => {
+      end(); if (held) closedRevalidationScopes++;
+    } };
+  });
   guard.mockImplementation((...args) => {
     const isFundingGuard = held && (second ? args[1] === target : args[0] === frontierEndpoints);
-    if (isFundingGuard && ++guardCallsAfterHold === targetGuardCall) throw trigger;
+    if (isFundingGuard) {
+      guardCallsAfterHold++;
+      if ((substage === 'post-hold-owner-custody-guard' && guardCallsAfterHold === 1)
+        || (substage === 'post-revalidation-owner-custody-guard' && closedRevalidationScopes === 2 && !fundingDiscovered)
+        || (substage === 'post-discovery-owner-custody-guard' && fundingDiscovered)) {
+        guardInjected = true;
+        throw trigger;
+      }
+    }
     return originalGuard(...args);
   });
 
@@ -330,7 +346,9 @@ function injectDepositFundingSubstageFailure(
   const originalDiscovery = mocked.discover.getMockImplementation()!;
   mocked.discover.mockImplementation(async (...args) => {
     if (held && args[1] === executionTarget && substage === 'owned-reward-input-discovery') throw trigger;
-    return originalDiscovery(...args);
+    const observation = await originalDiscovery(...args);
+    if (held && args[1] === executionTarget) fundingDiscovered = true;
+    return observation;
   });
 
   const originalProvenance = mocked.fundingOwned.getMockImplementation()!;
@@ -347,7 +365,9 @@ function injectDepositFundingSubstageFailure(
   });
 
   return () => {
-    if (targetGuardCall !== null) expect(guardCallsAfterHold).toBe(targetGuardCall);
+    if (substage === 'post-hold-owner-custody-guard'
+      || substage === 'post-revalidation-owner-custody-guard'
+      || substage === 'post-discovery-owner-custody-guard') expect(guardInjected).toBe(true);
   };
 }
 function assertDownstreamPrefix(stage: DownstreamStage) {
@@ -757,7 +777,20 @@ function prepareRootFixture() {
   readErgoAnchor = (origin, height) => [observedTips.get(origin)?.get(height)];
   mocked.source.mockImplementation(origin => {
     expect([target.primaryNodeOrigin, target.witnessNodeOrigin]).toContain(origin);
-    return { getBestHeader: async () => {
+    const heldIdAt = (height: number): string => heldDepositTip?.height === height ? heldDepositTip.id
+      : receipts.find(receipt => receipt.confirmationHeight === height)?.confirmationHeaderIdHex
+        ?? (height === 150 ? 'f1'.repeat(32) : height.toString(16).padStart(64, '0'));
+    return {
+      beginAuthenticatedTrackerReconstruction: () => { assertCustodyActive(); },
+      endAuthenticatedTrackerReconstruction: () => {},
+      getBlockHeaderById: async (id: string) => {
+        assertCustodyActive();
+        for (let height = heldDepositTip?.height ?? 0; height >= 1; height--) {
+          if (heldIdAt(height) === id) return { id, height, parentId: heldIdAt(height - 1) };
+        }
+        return null;
+      },
+      getBestHeader: async () => {
       assertCustodyActive();
       const tip: any = heldDepositTip === null
         ? await readErgoTip(origin) : await readHeldDepositTip(origin, heldDepositTip);
@@ -1374,14 +1407,27 @@ function heldDepositConfirmationHelperFixture() {
   const membership = new Map<string, unknown>();
   const bestCalls = new Map<string, number>();
   const membershipCalls: [string, number][] = [];
+  const headerCalls: [string, string][] = [];
+  const beginScope = vi.fn();
+  const endScope = vi.fn();
+  const headerIdAt = (height: number) => height === held.fullHeight ? held.headerIdHex
+    : confirmations.find(value => value.confirmationHeight === height)?.confirmationHeaderIdHex
+      ?? height.toString(16).padStart(64, '0');
   const behavior: {
     bestHeader(origin: string, call: number): Promise<unknown>;
     headers(origin: string, height: number): Promise<unknown>;
+    blockHeader(origin: string, id: string): Promise<unknown>;
   } = {
     bestHeader: async (origin, call) => tips.get(origin)![call],
     headers: async (_origin, height) => membership.has(String(height))
       ? membership.get(String(height))
       : [confirmations.find(value => value.confirmationHeight === height)!.confirmationHeaderIdHex],
+    blockHeader: async (_origin, id) => {
+      for (let height = held.fullHeight; height >= 1; height--) {
+        if (headerIdAt(height) === id) return { id, height, parentId: headerIdAt(height - 1) };
+      }
+      return null;
+    },
   };
   let active = true;
   let custody = true;
@@ -1392,6 +1438,8 @@ function heldDepositConfirmationHelperFixture() {
     if (!custody) throw new Error('synthetic signer custody lost');
   });
   const createSource = vi.fn((origin: string) => ({
+    beginAuthenticatedTrackerReconstruction: () => beginScope(origin),
+    endAuthenticatedTrackerReconstruction: () => endScope(origin),
     getBestHeader: vi.fn(async () => {
       const call = bestCalls.get(origin) ?? 0; bestCalls.set(origin, call + 1);
       return behavior.bestHeader(origin, call);
@@ -1399,6 +1447,10 @@ function heldDepositConfirmationHelperFixture() {
     getBlockHeaderIdsAtHeight: vi.fn(async (height: number) => {
       membershipCalls.push([origin, height]);
       return behavior.headers(origin, height);
+    }),
+    getBlockHeaderById: vi.fn(async (id: string) => {
+      headerCalls.push([origin, id]);
+      return behavior.blockHeader(origin, id);
     }),
   }));
   const recordValue = (value: unknown) => {
@@ -1409,12 +1461,19 @@ function heldDepositConfirmationHelperFixture() {
     'createBoundedAuthenticatedSpvTrackerReadOnlySource', 'record',
     `${compiled}\nreturn assertHeldDepositConfirmationsV1;`);
   const helper = factory(owned, createSource, recordValue) as HeldConfirmationHelper;
-  return { helper, target, held, confirmations, tips, membership, bestCalls, membershipCalls, behavior,
-    owned, assertCustody, createSource,
+  return { helper, target, held, confirmations, tips, membership, bestCalls, membershipCalls,
+    headerCalls, beginScope, endScope, headerIdAt, behavior, owned, assertCustody, createSource,
     loseActive: () => { active = false; }, loseCustody: () => { custody = false; } };
 }
 
 describe('held deposit confirmation exact production helper', () => {
+  it.each(['issuance', 'payout'] as const)(
+    'accepts a canonical %s ancestor when the node retains a sibling fork', async kind => {
+      const h = heldDepositConfirmationHelperFixture();
+      h.membership.set('80', [h.confirmations[0]!.confirmationHeaderIdHex, 'bb'.repeat(32)]);
+      await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, kind))
+        .resolves.toBeUndefined();
+    });
   it.each(['issuance', 'payout'] as const)('accepts exact held tips and singleton %s membership', async kind => {
     const h = heldDepositConfirmationHelperFixture();
     if (kind === 'issuance') h.confirmations.push(
@@ -1424,8 +1483,10 @@ describe('held deposit confirmation exact production helper', () => {
     await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, kind)).resolves.toBeUndefined();
     expect(h.createSource.mock.calls.map(call => call[0])).toEqual(['primary', 'witness']);
     expect(h.bestCalls).toEqual(new Map([['primary', 2], ['witness', 2]]));
-    expect(h.membershipCalls).toEqual(['primary', 'witness'].flatMap(origin =>
-      h.confirmations.map(value => [origin, value.confirmationHeight] as [string, number])));
+    expect(h.membershipCalls).toEqual([...h.confirmations].sort((a, b) => b.confirmationHeight - a.confirmationHeight)
+      .flatMap(value => ['primary', 'witness'].map(origin => [origin, value.confirmationHeight])));
+    expect(h.beginScope.mock.calls).toEqual([['primary'], ['witness']]);
+    expect(h.endScope.mock.calls).toEqual([['primary'], ['witness']]);
   });
 
   it.each([
@@ -1463,6 +1524,173 @@ describe('held deposit confirmation exact production helper', () => {
     await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'issuance')).resolves.toBeUndefined();
     expect(h.membershipCalls).toEqual([['primary', 80], ['witness', 80]]);
   });
+
+  it('accepts unsorted distinct receipts and a receipt exactly at the held tip', async () => {
+    const h = heldDepositConfirmationHelperFixture();
+    h.confirmations.unshift({ confirmationHeight: 100, confirmationHeaderIdHex: h.held.headerIdHex });
+    h.confirmations.push({ confirmationHeight: 90, confirmationHeaderIdHex: '33'.repeat(32) });
+    await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'issuance')).resolves.toBeUndefined();
+    expect(h.membershipCalls).toEqual([100, 90, 80].flatMap(height => ['primary', 'witness'].map(origin => [origin, height])));
+  });
+
+  it.each(['expected second', 'expected absent', 'witness chooses sibling'] as const)(
+    'rejects canonical height ordering: %s', async fault => {
+      const h = heldDepositConfirmationHelperFixture();
+      const expected = h.confirmations[0]!.confirmationHeaderIdHex;
+      h.behavior.headers = async origin => fault === 'expected second' ? ['bb'.repeat(32), expected]
+        : fault === 'expected absent' || origin === 'witness' ? ['bb'.repeat(32)] : [expected];
+      await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'payout')).rejects.toThrow('not canonical');
+    });
+
+  it('rejects a claimed first height ID when held ancestry reaches its sibling', async () => {
+    const h = heldDepositConfirmationHelperFixture();
+    const read = h.behavior.blockHeader;
+    h.membership.set('80', [h.confirmations[0]!.confirmationHeaderIdHex, 'bb'.repeat(32)]);
+    h.behavior.blockHeader = async (origin, id) => {
+      if (id === 'bb'.repeat(32)) return { id, height: 80, parentId: h.headerIdAt(79) };
+      const value = await read(origin, id) as Record<string, unknown>;
+      return value.height === 81 ? { ...value, parentId: 'bb'.repeat(32) } : value;
+    };
+    await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'payout')).rejects.toThrow('not canonical');
+    expect(h.endScope).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['wrong id', 'height jump', 'height plateau', 'height increase', 'missing parent',
+    'uppercase parent', 'self parent', 'repeated parent', 'missing header', 'intermediate disagreement',
+    'receipt-height disagreement'] as const)('rejects ancestry fault: %s', async fault => {
+    const h = heldDepositConfirmationHelperFixture();
+    const read = h.behavior.blockHeader;
+    h.behavior.blockHeader = async (origin, id) => {
+      const value = await read(origin, id) as Record<string, unknown>;
+      const at = fault === 'receipt-height disagreement' ? 80 : 90;
+      if (value.height !== at || (fault.includes('disagreement') && origin !== 'witness')) return value;
+      if (fault === 'missing header') return null;
+      if (fault === 'wrong id') return { ...value, id: 'bb'.repeat(32) };
+      if (fault === 'height jump') return { ...value, height: at - 1 };
+      if (fault === 'height plateau') return { ...value, height: at + 1 };
+      if (fault === 'height increase') return { ...value, height: at + 2 };
+      if (fault === 'missing parent') return { ...value, parentId: undefined };
+      if (fault === 'uppercase parent') return { ...value, parentId: 'BB'.repeat(32) };
+      if (fault === 'self parent') return { ...value, parentId: id };
+      if (fault === 'repeated parent') return { ...value, parentId: h.held.headerIdHex };
+      return { ...value, parentId: 'bb'.repeat(32) };
+    };
+    await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'payout')).rejects.toThrow();
+    expect(h.beginScope).toHaveBeenCalledTimes(2); expect(h.endScope).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['custody', 'target'] as const)('rejects %s loss during the ancestry walk', async loss => {
+    const h = heldDepositConfirmationHelperFixture();
+    const read = h.behavior.blockHeader;
+    h.behavior.blockHeader = async (origin, id) => {
+      const value = await read(origin, id) as Record<string, unknown>;
+      if (value.height === 90 && origin === 'primary') (loss === 'custody' ? h.loseCustody : h.loseActive)();
+      return value;
+    };
+    await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'issuance')).rejects.toThrow('custody lost');
+    expect(h.endScope).toHaveBeenCalledTimes(2);
+  });
+
+  it('closes the first bounded scope if the second begin fails', async () => {
+    const h = heldDepositConfirmationHelperFixture();
+    const failure = new Error('synthetic second begin');
+    h.beginScope.mockImplementation(origin => { if (origin === 'witness') throw failure; });
+    await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'payout')).rejects.toBe(failure);
+    expect(h.endScope.mock.calls).toEqual([['primary']]); expect(h.bestCalls.size).toBe(0);
+  });
+
+  it.each(['begin', 'end'] as const)('refuses missing bounded scope %s before reads', async missing => {
+    const h = heldDepositConfirmationHelperFixture();
+    const create = h.createSource.getMockImplementation()!;
+    h.createSource.mockImplementation(origin => {
+      const client = create(origin);
+      return { ...client, [missing === 'begin' ? 'beginAuthenticatedTrackerReconstruction'
+        : 'endAuthenticatedTrackerReconstruction']: undefined } as unknown as ReturnType<typeof create>;
+    });
+    await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'payout')).rejects.toThrow('not canonical');
+    expect(h.beginScope).not.toHaveBeenCalled(); expect(h.bestCalls.size).toBe(0);
+  });
+
+  it.each(['custody', 'target'] as const)('closes a begun scope after immediate %s loss', async loss => {
+    const h = heldDepositConfirmationHelperFixture();
+    h.beginScope.mockImplementation(() => { (loss === 'custody' ? h.loseCustody : h.loseActive)(); });
+    await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'payout')).rejects.toThrow('custody lost');
+    expect(h.endScope.mock.calls).toEqual([['primary']]); expect(h.bestCalls.size).toBe(0);
+  });
+
+  it('drains both ancestry reads before closing either scope after a rejection', async () => {
+    const h = heldDepositConfirmationHelperFixture();
+    const failure = new Error('synthetic primary ancestry failure');
+    let release!: () => void;
+    let entered!: () => void;
+    const enteredPromise = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    h.behavior.blockHeader = async origin => {
+      if (origin === 'primary') throw failure;
+      entered(); await gate;
+      return { id: h.held.headerIdHex, height: 100, parentId: h.headerIdAt(99) };
+    };
+    const pending = h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'payout');
+    await enteredPromise; expect(h.endScope).not.toHaveBeenCalled(); release();
+    await expect(pending).rejects.toBe(failure); expect(h.endScope).toHaveBeenCalledTimes(2);
+  });
+
+  it('retains the primary failure and drains both scope ends if cleanup also fails', async () => {
+    const h = heldDepositConfirmationHelperFixture();
+    const primary = new Error('synthetic primary header read');
+    const cleanup = new Error('synthetic observation end');
+    h.behavior.blockHeader = async () => { throw primary; };
+    h.endScope.mockImplementation(origin => { if (origin === 'primary') throw cleanup; });
+    const failure = await h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'payout').catch(value => value);
+    expect(failure).toBeInstanceOf(AggregateError); expect(failure.errors).toEqual([primary, cleanup]);
+    expect(h.endScope.mock.calls).toEqual([['primary'], ['witness']]);
+  });
+
+  it.each(['valid raw fork', 'request budget', 'byte budget', 'original deadline'] as const)(
+    'uses the real raw node client and closes its bounded scopes: %s', async scenario => {
+      const actual = await vi.importActual<typeof import('../../authenticated-spv-tracker-read-only-node-client.js')>(
+        '../../authenticated-spv-tracker-read-only-node-client.js');
+      expect(actual.AUTHENTICATED_TRACKER_RECONSTRUCTION_DEADLINE_MS).toBe(120_000);
+      const h = heldDepositConfirmationHelperFixture();
+      const expected = h.confirmations[0]!.confirmationHeaderIdHex;
+      h.membership.set('80', [expected, 'bb'.repeat(32)]);
+      const ends: ReturnType<typeof vi.spyOn>[] = [];
+      let rawReads = 0;
+      let clock = 1_000;
+      const createStub = h.createSource.getMockImplementation()!;
+      h.createSource.mockImplementation(origin => {
+        const client = new actual.AuthenticatedSpvTrackerReadOnlyNodeClient(
+          origin === 'primary' ? 'http://127.0.0.1:18551' : 'http://127.0.0.1:18552', {
+            now: () => clock,
+            ...(scenario === 'request budget' ? { maxReconstructionRequests: 1 } : {}),
+            ...(scenario === 'byte budget' ? { maxReconstructionBytes: 100 } : {}),
+          });
+        let bestCall = 0;
+        (client as unknown as { client: { defaults: { adapter: unknown } } }).client.defaults.adapter = async (
+          config: { url: string },
+        ) => {
+          rawReads++;
+          let body: unknown;
+          if (config.url === '/blocks/lastHeaders/1') body = [await h.behavior.bestHeader(origin, bestCall++)];
+          else if (config.url.startsWith('/blocks/at/')) body = await h.behavior.headers(origin, Number(config.url.slice(11)));
+          else {
+            const match = /^\/blocks\/([0-9a-f]{64})\/header$/.exec(config.url);
+            if (!match) throw new Error('unexpected raw fixture route');
+            body = await h.behavior.blockHeader(origin, match[1]!);
+          }
+          if (scenario === 'original deadline') clock = 121_001;
+          return { data: Buffer.from(JSON.stringify(body)), status: body === null ? 404 : 200,
+            statusText: 'synthetic public JSON fixture', headers: { 'content-encoding': 'identity' }, config };
+        };
+        ends.push(vi.spyOn(client, 'endAuthenticatedTrackerReconstruction'));
+        return client as unknown as ReturnType<typeof createStub>;
+      });
+      const pending = h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'issuance');
+      if (scenario === 'valid raw fork') await expect(pending).resolves.toBeUndefined();
+      else await expect(pending).rejects.toThrow(/reconstruction/u);
+      expect(rawReads).toBeGreaterThan(0); expect(ends).toHaveLength(2);
+      for (const end of ends) expect(end).toHaveBeenCalledTimes(1);
+    });
 
   it.each(['malformed', 'missing', 'extra', 'wrong'] as const)(
     'rejects %s prior-confirmation membership', async fault => {

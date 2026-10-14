@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-10-13
+Updated: 2026-10-14
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,15 +28,18 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–65 are permanently consumed or held. C65 on local
-`97486f05d2db3125f83503fb728ab67b34345498` terminated once at
-`2026-10-13T06:59:38.4753067Z`, with integer command exit 1, null launcher
+**Now:** Correct held prior-confirmation revalidation before deposit funding.
+Campaigns 24–68 are permanently consumed or held. C68 on local
+`1b1353663d33e2b50e4f966756c5451cd150b2bf` terminated once at
+`2026-10-14T13:39:35.4600011Z`, with integer command exit 1, null launcher
 exception and no parent result. Independent review validated the current
 public graph and canonical digest joins:
 `execution_failure/root-or-cleanup/cycle-1/deposit-funding`.
 This identifies the tagged boundary, not its inner cause or completed effects.
 Completion, cleanup and custody disposal remain unknown; zero cleanup errors
-establish no cleanup. No automatic C66, push or new CI is selected.
+establish no cleanup. C66 and C67 refused before canonical runtime; they also
+remain permanently held. No automatic successor campaign, push or new CI is
+selected.
 
 The prospective deposit-funding attribution is implemented through the actual
 root, optional worker/parent companions and strict exported parsers. All eight
@@ -50,36 +53,43 @@ Original predicates, budgets, old receipt bytes and domains remain unchanged.
 Missing, invalid or occupied optional detail preserves failure; either new
 entry, including a dangling link, contradicts success.
 
-Local evidence covers 258 direct metadata/codec cases, 21 new actual-root
+The attribution closed locally at `1b135366`. Its evidence covers 258 direct
+metadata/codec cases, 21 new actual-root
 cases with 512 unchanged cases reused, and 37 composed cases with 476 unchanged
 cases reused. These selections overlap and are not added together. Architecture
 and broadcast closure, TypeScript and imports pass in their changed scopes;
-exact independent review and guarded local promotion remain.
+exact independent review and guarded local promotion closed for those bytes.
 The next result remains a genuine complete packaged lifecycle. First refresh
 the non-authorizing operator preparation for the promoted source; preparation03
-belongs only to its earlier source identity. No C66 is selected automatically
+belongs only to its earlier source identity. No new campaign is selected automatically
 or to obtain a label, and no label establishes C65's historical cause.
 
-The local source correction binds each deposit's prior confirmations to its newly
-held canonical chain. Two focused full-root synthetic negatives showed that a
-witness-only replacement of an issuance or payout confirmation after Hold
-could reach construction and complete the mocked root. Recheck every exact
-prior confirmation header on both owned nodes between exact held-tip reads,
-before fresh reward discovery. Preserve the independent held funding equality,
-custody guards and original budgets. The complete root file passes 512 cases,
-including 35 exact-helper cases; eight in-memory mutants retain valid positive
-twins and are detected by their isolated failures. Architecture/broadcast tests
-pass 445 cases, imports pass for 137 modules/931 sources, and no-write TypeScript
-passes. These selections have distinct scopes; subset counts are not additive.
-Exact independent review and publication guards remain required for local
-promotion. This is a prospective source invariant, not evidence of C65's cause
-or real acceptance.
+The selected correction resolves a demonstrated source mismatch: the pinned
+Ergo height-list endpoint retains sibling forks with the best-chain ID first,
+but the root rejected every non-singleton list. Valid sibling-fork fixtures for
+issuance and payout failed against the original helper. The replacement walks
+from the exact held tip to the oldest retained receipt, checks both nodes' exact
+ID/height/parent tuples at every height, and requires each receipt on that path
+and first in both height lists. Exact held-tip brackets, custody guards, funding
+equality and the original client reconstruction limits remain mandatory. Begun
+scopes close on every path, after all paired reads drain.
+
+The complete root file passes 564 cases, including 66 exact-helper cases and
+both actual funding branches. The 477 architecture, broadcast and read-only
+client cases pass separately; TypeScript and the 137-module/932-source import
+check pass. These selections have distinct scopes; subset counts are not
+additive. Exact independent source/test/claims review passes. Six isolated
+in-memory relaxations are each detected in both funding branches, with valid
+positive twins retained. Local promotion requires the exact staged publication
+guard. The upstream confirmation observer still has
+its singleton rule. This correction establishes neither full fork compatibility
+nor C68's historical cause or packaged lifecycle acceptance.
 
 The next executable result is still the genuine packaged complete two-cycle
 lifecycle with stopped public recovery selection. Select any fresh invocation
 separately only after the coherent local correction is promoted and all fresh
 source/tool/native-journal/output/process/port/custody/fee/review/resource
-admission requirements pass. A local green source change does not select C66
+admission requirements pass. A local green source change does not select a campaign
 or authorize reuse of any prior execution input.
 
 The previous locally closed batch joins raw header/full-block/index samples to the exact
@@ -2070,13 +2080,13 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Prospective deposit-funding attribution -> exact-source operator preparation | Close exact review/local promotion, then refresh the non-authorizing package preparation for that promoted source before reassessing a separately selected genuine lifecycle result | Source-only detail cannot establish C65 cause or execution authority. C24-C65 holds remain permanent; no automatic C66, push or new CI |
+| **Now** | Held prior-confirmation ancestry -> exact-source operator preparation | Close the demonstrated sibling-fork revalidation correction, exact review and local promotion; then prepare the promoted source before reassessing a separately selected genuine lifecycle result | Source fixtures do not establish C68 cause, complete fork compatibility or execution authority. C24-C68 holds remain permanent; no automatic campaign, push or new CI |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Separately select and admit one local synthetic campaign after a deciding checkpoint, exact local source identity, applicable checks/review and fresh runtime/source/output/custody/fee gates; apply guarded publication and due exact-head CI at public promotion | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns 24–64 remain consumed or held. C42 is incomplete/ambiguous without a
+Campaigns 24–68 remain consumed or held. C42 is incomplete/ambiguous without a
 parent terminal artifact; C43–C51 failed once as recorded in Current Focus and
 the active handoff. None authorizes retry, resume or custody reuse. The earlier
 timing, tracker-phase and source-lock checkpoints are closed; the selected
@@ -2115,8 +2125,8 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Deposit-funding entered-operation attribution (selected local batch) | Invocation-owned native primary metadata reaches optional bounded worker/parent companions with exact root/cycle-step lineage and strict false claims | Exercise all eight source operations in both root branches, hostile graph and codec refusals, create-only failure preservation and dangling-entry success contradiction; close consumers and exact review before local promotion. No historical cause or diagnostic-label campaign |
-| Held prior-confirmation funding join (local source correction) | Both nodes retain every exact prior issuance/payout confirmation on the newly held canonical chain before reward discovery; exact held-tip reads bracket singleton header membership | Root512 including helper35, eight in-memory mutants, architecture/broadcast445, TypeScript and imports pass in their scopes. Exact independent review, final claims consumers and guarded local promotion are required before a separately fresh lifecycle admission. No historical cause, campaign acceptance or automatic C66 |
+| Deposit-funding entered-operation attribution (locally closed at1b135366) | Invocation-owned native primary metadata reaches optional bounded worker/parent companions with exact root/cycle-step lineage and strict false claims | All eight source operations in both root branches, hostile graph and codec refusals, create-only failure preservation, dangling-entry success contradiction and exact independent review passed. C68's optional detail was absent; no historical inner cause follows |
+| Held prior-confirmation ancestry (locally validated source correction) | Every issuance/payout receipt lies on the exact held tip's ancestry on both nodes, remains canonical-first and is revalidated within the original bounded scopes before reward discovery | Original valid sibling-fork twins fail; corrected root564/helper66 and architecture/broadcast/client477 pass, with TypeScript/imports and exact independent source/test/claims review. Six isolated relaxations are detected in both branches; valid positive twins pass. Guarded local promotion uses exact staged bytes. The unchanged initial observer's singleton rule limits scope; no historical cause, campaign acceptance or automatic successor invocation |
 | Raw held-watermark observation join (locally closed at97486f05) | Well-formed partial observations within the authenticated held height remain pending; contradictions refuse; Hold and completion still require exact paired indexing, canonical lookups and stability before the next Arm | The 175 exact extracted-production/raw-reader cases, TypeScript, affected generic consumers and independent source/test/claims review passed guarded local promotion. No budget, legacy reader or authority change; no C64/C65 cause or campaign acceptance |
 | Transaction-specific bounded mining (locally closed at a148240c) | Authenticated Hold/Arm/Status binds the original live process, exact held indexed parent and transaction; permits inclusion plus ten successors; confirms and rejoins the held watermark before the next Arm under the original deadline | Cumulative patch/locks, native actor/API execution, parser/control/lifetime/transport and four submission consumers, architecture refusals, docs and independent review passed guarded local promotion. Real NodeView fixtures and synthetic ports are distinct from packaged lifecycle, custody and operator acceptance; C64 is consumed |
 | Signed successor-height boundary (locally closed at63c319df) | Each raw HTTP case binds its candidate through WASM and revalidation; a separate exported signed fixture agrees across WASM and native full transaction validation at the inclusive edge and next block | Complete fixture88, native48, caller/source pins90, TypeScript/import checks and exact independent review/local promotion pass. Keep transaction/proofs/ordered boxes fixed within each scope, refund unexpired and before/after observed tips stable. Preserve all runtime guards and budgets; no cross-case byte-identity claim, historical cause or automatic C64 |
