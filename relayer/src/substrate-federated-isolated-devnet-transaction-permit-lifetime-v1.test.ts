@@ -13,8 +13,11 @@ const names = {
   complete: 'completeSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1',
   require: 'requireOwnedMiningTransactionPermitTarget',
   guard: 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1',
+  common: 'assertSubstrateFederatedIsolatedDevnetMiningWatermarkSnapshotsV1',
   exact: 'assertSubstrateFederatedIsolatedDevnetTransactionPermitIndexedSnapshotV1',
   paused: 'assertSubstrateFederatedIsolatedDevnetPausedMiningIndexedSnapshotV1',
+  canonicalSnapshot: 'assertSubstrateFederatedIsolatedDevnetTransactionPermitCanonicalSnapshotV1',
+  stableHeader: 'assertSubstrateFederatedIsolatedDevnetTransactionPermitCanonicalHeaderStableV1',
   same: 'assertExactSnapshot',
 } as const;
 type Snapshot = { network: string; fullHeight: number; indexedHeight: number; headerIdHex: string };
@@ -123,9 +126,20 @@ function harness(mutation?: Mutation) {
   const read = vi.fn(async (_node: Node, _watermark: Watermark, _deadline: number, _guard: () => void): Promise<Snapshot | undefined> => {
     await step('read'); return { ...state.tip };
   });
-  const canonical = vi.fn(async (_origin: string, selectedPath: string, _deadline: number, _guard: () => void) => {
-    await step('canonical'); return [id(Number(selectedPath.split('/').at(-1)))];
-  });
+  const canonicalResponse = async (_origin: string, selectedPath: string, _deadline: number,
+    _guard: () => void): Promise<unknown> => {
+    await step('canonical');
+    if (selectedPath.startsWith('/blocks/at/')) {
+      const height = Number(selectedPath.slice('/blocks/at/'.length));
+      return [id(height), 'ef'.repeat(32)];
+    }
+    const match = /^\/blocks\/chainSlice\?fromHeight=([0-9]+)&toHeight=([0-9]+)$/u.exec(selectedPath);
+    assert(match, `unexpected canonical path: ${selectedPath}`);
+    const fromHeight = Number(match[1]); const height = Number(match[2]);
+    assert.equal(fromHeight, height - 1);
+    return [{ id: id(height), height, parentId: id(height - 1), acceptedExtraField: true }];
+  };
+  const canonical = vi.fn(canonicalResponse);
   const delay = vi.fn(async (duration: number) => { await step('delay'); state.now += duration; });
   const api = extract<API>(names, {
     ...constants, performance: { now: () => state.now }, delay,
@@ -134,6 +148,12 @@ function harness(mutation?: Mutation) {
     OWNED_MINING_SUBMISSION_CONTROLS: controls, assertLive: live,
     assertOwnedErgoMiningTransactionPermitControlV1: controlGuard,
     readTransactionPermitTargetSnapshot: read, getJson: canonical,
+    settleCopiedErgoReads: async <T>(reads: readonly Promise<T>[]) => {
+      const settled = await Promise.allSettled(reads);
+      const failure = settled.find(result => result.status === 'rejected');
+      if (failure?.status === 'rejected') throw failure.reason;
+      return settled.map(result => (result as PromiseFulfilledResult<T>).value);
+    },
     SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN: 'primary-double',
     SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN: 'witness-double',
   }, mutation);
@@ -143,7 +163,7 @@ function harness(mutation?: Mutation) {
   async function armed() { await held(); await api.arm(target, tx); state.tip = snapshot(51); resetEvents(); }
   function block(key: string) { blocked = { key, entered: deferred(), gate: deferred() }; return blocked; }
   return { api, target, primary, witness, active, targets, controls, state, events, hold, arm, status,
-    read, canonical, delay, controlGuard, processGuard, live, bind, held, armed, block, resetEvents };
+    read, canonical, canonicalResponse, delay, controlGuard, processGuard, live, bind, held, armed, block, resetEvents };
 }
 
 async function remainsFailed(h: ReturnType<typeof harness>) {
@@ -161,18 +181,19 @@ describe('transaction permit exact production target lifetime', () => {
     const h = harness(); h.bind();
     expect(await h.api.hold(h.target)).toEqual(snapshot());
     expect(h.hold).toHaveBeenCalledTimes(1); expect(h.read).toHaveBeenCalledTimes(4);
-    expect(h.canonical).toHaveBeenCalledTimes(4);
+    expect(h.canonical).toHaveBeenCalledTimes(8);
     await h.api.arm(h.target, tx); h.state.tip = snapshot(51); h.resetEvents();
     const deadline = h.state.now + 2_000;
     await h.api.complete(h.target, tx, deadline);
-    expect(h.events).toEqual(['status:1', 'read:1', 'read:2', 'canonical:1', 'canonical:2', 'delay:1',
-      'read:3', 'read:4', 'canonical:3', 'canonical:4', 'status:2', 'read:5', 'read:6', 'canonical:5', 'canonical:6']);
+    expect(h.events).toEqual(['status:1', 'read:1', 'read:2', 'canonical:1', 'canonical:2', 'canonical:3',
+      'canonical:4', 'delay:1', 'read:3', 'read:4', 'canonical:5', 'canonical:6', 'canonical:7',
+      'canonical:8', 'status:2', 'read:5', 'read:6', 'canonical:9', 'canonical:10', 'canonical:11', 'canonical:12']);
     const originalArm = await h.arm.mock.results[0].value;
     expect(h.status.mock.calls[0][0]).toBe(originalArm);
     expect(h.status.mock.calls[1][0]).toBe(originalArm);
     expect(h.status.mock.calls.map(call => call[1])).toEqual([2_000, 1_500]);
     for (const call of h.read.mock.calls.slice(4)) expect(call[2]).toBe(deadline);
-    for (const call of h.canonical.mock.calls.slice(4)) expect(call[2]).toBe(deadline);
+    for (const call of h.canonical.mock.calls.slice(8)) expect(call[2]).toBe(deadline);
     await h.api.arm(h.target, nextTx); expect(h.arm).toHaveBeenLastCalledWith(nextTx);
     expect((await h.arm.mock.results[1].value).initialParent).toEqual(watermark(51));
     h.state.tip = snapshot(62);
@@ -180,6 +201,29 @@ describe('transaction permit exact production target lifetime', () => {
     const secondArm = await h.arm.mock.results[1].value;
     expect(h.status.mock.calls.slice(2).map(call => call[0])).toEqual([secondArm, secondArm]);
     expect(h.primary.mode).toBe('mining');
+  });
+
+  it.each([
+    { name: 'singleton lists', forkOrigin: 'neither' },
+    { name: 'siblings only on primary', forkOrigin: 'primary-double' },
+    { name: 'siblings only on witness', forkOrigin: 'witness-double' },
+  ])('joins Hold with $name through exact list and slice paths', async ({ forkOrigin }) => {
+    const h = harness();
+    h.canonical.mockImplementation(async (origin, selectedPath, deadline, guard) => {
+      const value = await h.canonicalResponse(origin, selectedPath, deadline, guard);
+      if (selectedPath.startsWith('/blocks/at/')) {
+        const values = value as string[];
+        return origin === forkOrigin ? values : [values[0]];
+      }
+      return value;
+    });
+    h.bind();
+    await expect(h.api.hold(h.target)).resolves.toEqual(snapshot());
+    const paths = h.canonical.mock.calls.map(call => call[1]);
+    const group = ['/blocks/at/40', '/blocks/at/40',
+      '/blocks/chainSlice?fromHeight=39&toHeight=40', '/blocks/chainSlice?fromHeight=39&toHeight=40'];
+    expect(paths).toEqual([...group, ...group]);
+    expect(h.canonical.mock.calls.every(call => call[2] === 120_000 && typeof call[3] === 'function')).toBe(true);
   });
 
   it.each(['missing control', 'different child', 'wrong role', 'non-mining'])(
@@ -217,9 +261,11 @@ describe('transaction permit exact production target lifetime', () => {
     });
 
   const boundaries = [
-    ...['hold:1', 'read:1', 'canonical:1', 'delay:1', 'read:3', 'canonical:3'].map(key => ({ operation: 'hold', key })),
+    ...['hold:1', 'read:1', 'canonical:1', 'canonical:3', 'delay:1', 'read:3', 'canonical:5', 'canonical:7']
+      .map(key => ({ operation: 'hold', key })),
     { operation: 'arm', key: 'arm:1' },
-    ...['status:1', 'read:1', 'canonical:1', 'delay:1', 'read:3', 'canonical:3', 'status:2', 'read:5', 'canonical:5']
+    ...['status:1', 'read:1', 'canonical:1', 'canonical:3', 'delay:1', 'read:3', 'canonical:5', 'canonical:7',
+      'status:2', 'read:5', 'canonical:9', 'canonical:11']
       .map(key => ({ operation: 'complete', key })),
   ];
   it.each(boundaries.flatMap(boundary => ['target', 'Pause', 'control', 'process'].map(revoke => ({ ...boundary, revoke }))))(
@@ -257,6 +303,27 @@ describe('transaction permit exact production target lifetime', () => {
       ? h.api.complete(h.target, tx, 10_000) : h.api.hold(h.target);
     await expect(running).rejects.toBe(error); await remainsFailed(h);
   });
+
+  it.each([0, 1, 2, 3])(
+    'drains all four canonical reads before preserving rejection at ordered position %s', async rejectedIndex => {
+    const h = harness(); h.bind();
+    const error = new Error(`canonical refusal ${rejectedIndex}`);
+    const entered = deferred(); const gate = deferred(); let call = 0;
+    h.canonical.mockImplementation(async (...args) => {
+      const index = call; call += 1;
+      if (index === rejectedIndex) throw error;
+      if (index === (rejectedIndex === 3 ? 2 : 3)) { entered.resolve(); await gate.promise; }
+      return await h.canonicalResponse(...args);
+    });
+    const running = h.api.hold(h.target);
+    const refused = expect(running).rejects.toBe(error);
+    let completed = false; void running.catch(() => {}).finally(() => { completed = true; });
+    await entered.promise; await Promise.resolve(); expect(completed).toBe(false);
+    gate.resolve(); await refused; expect(completed).toBe(true);
+    expect(h.canonical).toHaveBeenCalledTimes(4);
+    await remainsFailed(h);
+    },
+  );
 
   it('polls Pending and initial index lag without another Hold or Arm', async () => {
     const h = harness(); await h.armed();
@@ -310,6 +377,26 @@ describe('transaction permit exact production target lifetime', () => {
       }
       await expect(h.api.complete(h.target, tx, h.state.now + 5_000)).rejects.toThrow(); await remainsFailed(h);
     });
+
+  it.each(['Hold stability', 'completion closing'] as const)(
+    'refuses canonical parent drift during $0 while ID and height remain exact', async boundary => {
+      const h = harness();
+      if (boundary === 'completion closing') { await h.armed(); h.canonical.mockClear(); }
+      else h.bind();
+      let slices = 0;
+      h.canonical.mockImplementation(async (...args) => {
+        const value = await h.canonicalResponse(...args);
+        if (!args[1].startsWith('/blocks/chainSlice')) return value;
+        slices += 1;
+        const drift = boundary === 'Hold stability' ? slices > 2 : slices > 4;
+        return drift ? [{ ...(value as Record<string, unknown>[])[0], parentId: id(1) }] : value;
+      });
+      const running = boundary === 'Hold stability' ? h.api.hold(h.target)
+        : h.api.complete(h.target, tx, h.state.now + 5_000);
+      await expect(running).rejects.toThrow('canonical header changed');
+      await remainsFailed(h);
+    },
+  );
 
   it.each([NaN, Infinity, -Infinity, 0])('refuses unusable original completion deadline %s before status', async deadline => {
     const h = harness(); await h.armed();
@@ -549,7 +636,7 @@ describe('actual deadline-aware snapshot and JSON helper bodies', () => {
     await h.api.complete(h.target, tx, deadline);
     expect(h.status).toHaveBeenCalledTimes(2);
     expect(h.read.mock.calls.every(call => call[2] === deadline)).toBe(true);
-    expect(h.canonical).toHaveBeenCalledTimes(6);
+      expect(h.canonical).toHaveBeenCalledTimes(12);
     expect(h.hold).toHaveBeenCalledTimes(1); expect(h.arm).toHaveBeenCalledTimes(1);
     await h.api.arm(h.target, nextTx);
     expect(h.arm).toHaveBeenLastCalledWith(nextTx);

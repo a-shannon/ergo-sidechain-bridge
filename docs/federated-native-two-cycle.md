@@ -270,6 +270,25 @@ indexed height, pass canonical-height lookups and remain exact across the
 stability observation before the join completes. Regression after that first
 exact observation refuses the operation.
 
+The native transaction permit uses a dedicated proof of that exact held parent.
+Both height lists must be nonempty, contain distinct lowercase header IDs and
+put the held ID first. A sibling fork after that entry is allowed only when each
+node also returns exactly one header from
+`/blocks/chainSlice?fromHeight=H-1&toHeight=H`, with the held ID and height and
+the same valid, non-self parent ID. An absent, extra or mismatched row refuses
+the operation; the tuple must match even if the node route uses its best-header
+fallback. The full header tuple remains identical across
+the stable observation and the final completion re-read, as do the indexed
+snapshots. Ordinary index lag remains pending before these proof requests;
+contradictions refuse. All four height-list and slice reads drain before any
+failure escapes. The original absolute deadline, request limit and response
+byte limit remain unchanged.
+
+This proof belongs to the authenticated native transaction permit. The mining
+pause validator and the earlier exact-snapshot export retain their singleton
+height-list rule. The caller receives the same held snapshot and gains no new
+submission, custody or fee authority.
+
 Before discovering each deposit's fresh reward inputs, the root rechecks the
 exact prior confirmations on both owned nodes: all genesis issuance receipts
 for the first deposit, and the first withdrawal payout for the continuation.
@@ -283,8 +302,9 @@ reads. Each request covers at most 1,024 headers in the interval
 `(fromHeight, toHeight]`, in ascending order. The root requires the exact count
 and height at every position, anchors the highest page to the held tip, and
 anchors each lower page to the already validated parent from the higher page.
-The node route can fall back to its best header or truncate a response; neither
-behavior is accepted as the requested proof. Both nodes must
+The node route can fall back to its best header or cap a response. Its returned
+count, heights and parent links must still match the complete requested proof.
+Both nodes must
 agree on every requested ID, exact height and parent ID; each retained receipt
 must occur on that ancestry. Missing headers, discontinuities, repeated IDs or
 node disagreement refuse even when the expected ID appears in a height list.
@@ -305,8 +325,9 @@ original failure. These brackets do not provide an atomic node snapshot.
 The original process, target and custody guards remain active across every
 awaited operation. A failed or ambiguous operation never permits resubmission.
 This fixes revalidation of existing receipts. The earlier confirmation observer
-still requires singleton height lists, so complete fork compatibility and a
-successful packaged lifecycle require separate evidence.
+and the one-way mining-pause validator still require singleton height lists.
+Complete fork compatibility and a successful packaged lifecycle require
+separate evidence.
 
 Before attesting either checkpoint, the original owned mining target requests
 its one-way submission pause. The node drains the exact pending submitted

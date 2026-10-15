@@ -28,9 +28,10 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Bound the request cost of exact held prior-confirmation revalidation
-before deposit funding, without changing its proof or resource limits.
-Campaigns 24–69 are permanently consumed or held. C68 on local
+**Now:** Prove the native transaction permit's exact held watermark with paired
+canonical header tuples, while preserving the historical singleton validators
+and all resource and authority limits.
+Campaigns 24–70 are permanently consumed or held. C68 on local
 `1b1353663d33e2b50e4f966756c5451cd150b2bf` terminated once at
 `2026-10-14T13:39:35.4600011Z`, with integer command exit 1, null launcher
 exception and no parent result. Independent review validated the current
@@ -49,6 +50,34 @@ exception and no parent result. Independent review validates its exact public
 failure graph and the same `cycle-1/deposit-funding` boundary; it establishes
 neither the inner cause nor completion, cleanup or custody disposal. C69 is
 permanently held, with no retry or automatic successor selection.
+
+C70 separately exercised the promoted bounded ancestry implementation at local
+`0760b9097b8556ae09562c2dcf708952006eddd4`. Its one canonical invocation
+terminated at `2026-10-15T10:49:11.0138410Z` with integer exit 1, null launcher
+exception and no parent result. Exact independent public-graph review validates
+`execution_failure/root-or-cleanup/cycle-1/deposit-funding`; the fourteen later
+optional public companions are absent. The inner cause, effects, completion,
+cleanup and custody disposal remain unknown. C70 is permanently held. No retry
+or automatic successor campaign is selected.
+
+The next source correction addresses a distinct reproducible mismatch. The
+native Hold path still joins its exact authenticated watermark through a
+singleton height-list validator, although the pinned Ergo route permits
+sibling forks after the best-chain ID. A pure production-validator falsifier
+passes the singleton twin and rejects two valid sibling-fork cases. The selected
+permit-only proof requires exact paired snapshots, unique canonical-first
+height lists and one-row canonical slices with the same ID, height and parent
+on both nodes. It repeats the tuple proof during stability and final completion,
+drains all four proof reads, and preserves ordinary lag handling before those
+requests. The legacy Pause and exact-snapshot validators retain singleton
+semantics. The focused pure/lifetime pair passes 229 cases, including 25 pure
+cases and six isolated mutations with positive twins. Legacy Pause passes 61;
+affected consumers, architecture and broadcast policy pass 1,037, with eleven
+existing native cases inapplicable without their separately admitted context.
+The broadcast surface passes 41; TypeScript noEmit and the 137-module/932-source
+import check pass. These scopes are reported separately. Exact independent
+review and guarded promotion gate the candidate. This establishes no C70 cause,
+general fork compatibility or new execution authority.
 
 The prospective deposit-funding attribution is implemented through the actual
 root, optional worker/parent companions and strict exported parsers. All eight
@@ -73,7 +102,7 @@ the non-authorizing operator preparation for the promoted source; preparation03
 belongs only to its earlier source identity. No new campaign is selected automatically
 or to obtain a label, and no label establishes C65's historical cause.
 
-The selected correction resolves a demonstrated source mismatch: the pinned
+The earlier ancestry correction resolves a demonstrated source mismatch: the pinned
 Ergo height-list endpoint retains sibling forks with the best-chain ID first,
 but the root rejected every non-singleton list. Valid sibling-fork fixtures for
 issuance and payout failed against the original helper. The replacement walks
@@ -100,12 +129,12 @@ receipts at height 100 and held tip 137 require 41 requests per node and fit
 118,900 ms. Changing only the valid held tip/path to height 138 requires a
 42nd request and correctly refuses at the original 120,000 ms aggregate
 deadline. This demonstrates request cost, not a faulty deadline or C69 cause.
-The selected implementation reads full ancestry in bounded 1,024-header
+The promoted implementation reads full ancestry in bounded 1,024-header
 `/blocks/chainSlice` pages. It preserves every ID/height/parent comparison,
 page seam, repeated-ID refusal, paired-node agreement, canonical-first receipt
 membership, held-tip bracket, custody check and reconstruction limit. Exact
-length and position checks reject the pinned node route's fallback or capped
-output. No retry, cache or higher timeout/request/byte budget is introduced.
+length and position checks reject any fallback or capped output that does not
+match the requested proof. No retry, cache or higher timeout/request/byte budget is introduced.
 The two cost cases are RED then GREEN for issuance and payout. The complete
 root passes 626 cases, including 128 helper cases with isolated slice faults, page boundaries and
 14 guarded fault/phase cases in each funding kind, each with original refusal,
@@ -116,7 +145,7 @@ TypeScript and the 137-module/932-source actual import check pass. A typed
 genesis-check test provider now explicitly refuses an unexpected range read;
 its existing consumer does not use that method. The broad genesis crypto
 fixtures are unchanged and not replayed for this type-only join. Exact
-independent review and guarded promotion remain required for the candidate;
+independent review and guarded local promotion closed at `0760b909`;
 these local checks establish no lifecycle success or future admission authority.
 
 The next executable result is still the genuine packaged complete two-cycle
@@ -2159,6 +2188,7 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
+| Native permit canonical held watermark (source validated locally) | The authenticated permit rejoins exact paired indexing and canonical-first height lists through one-row identical ID/height/parent slices, stable through Hold and closing completion; historical singleton exports and all authority/resource guards remain | Original singleton twin passes and two valid sibling-fork inputs refuse. Dedicated pure/lifetime229 includes25 pure cases, four positive combinations, isolated field/role refusals, drift/drainage and six mutants with twins. Legacy Pause61, affected consumers/architecture/policy1037 with11 native-context cases inapplicable, standalone surface41, TypeScript and imports pass in distinct scopes. Exact independent review and guarded promotion gate the candidate before any new lifecycle preparation; no C70 cause or automatic campaign |
 | Deposit-funding entered-operation attribution (locally closed at1b135366) | Invocation-owned native primary metadata reaches optional bounded worker/parent companions with exact root/cycle-step lineage and strict false claims | All eight source operations in both root branches, hostile graph and codec refusals, create-only failure preservation, dangling-entry success contradiction and exact independent review passed. C68's optional detail was absent; no historical inner cause follows |
 | Held prior-confirmation ancestry (bounded range source validated locally) | Every issuance/payout receipt lies on the exact held tip's ancestry on both nodes, remains canonical-first and is revalidated through complete bounded pages within the original scopes before reward discovery | At dc2971 the singleton correction closed root564/helper66 and its scoped consumers. The new cost discriminator selects1024-header pages with exact counts, seams and every paired tuple retained. Two cost RED-to-GREEN cases, root626/helper128, architecture417, client35/transport7/surface41/policy8 and TypeScript/import checks pass; subset scopes are not summed. Exact independent review and guarded promotion remain explicit gates. The unchanged initial observer's singleton rule limits scope; no historical cause, campaign acceptance or automatic successor invocation |
 | Raw held-watermark observation join (locally closed at97486f05) | Well-formed partial observations within the authenticated held height remain pending; contradictions refuse; Hold and completion still require exact paired indexing, canonical lookups and stability before the next Arm | The 175 exact extracted-production/raw-reader cases, TypeScript, affected generic consumers and independent source/test/claims review passed guarded local promotion. No budget, legacy reader or authority change; no C64/C65 cause or campaign acceptance |

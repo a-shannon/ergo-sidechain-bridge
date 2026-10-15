@@ -4002,7 +4002,7 @@ async function waitForCommonIndexedSnapshot(
   });
 }
 
-export function assertSubstrateFederatedIsolatedDevnetPausedMiningIndexedSnapshotV1(
+function assertSubstrateFederatedIsolatedDevnetMiningWatermarkSnapshotsV1(
   input: Readonly<{
     watermark: OwnedErgoMiningSubmissionPauseReceiptV1['latestAppliedBlock'];
     primarySnapshot: Readonly<TargetSnapshot>;
@@ -4034,8 +4034,15 @@ export function assertSubstrateFederatedIsolatedDevnetPausedMiningIndexedSnapsho
     && primarySnapshot.headerIdHex !== watermark.headerId) {
     throw new Error('isolated Ergo mining pause tip contradicts its applied watermark');
   }
+}
+
+export function assertSubstrateFederatedIsolatedDevnetPausedMiningIndexedSnapshotV1(
+  input: Parameters<typeof assertSubstrateFederatedIsolatedDevnetMiningWatermarkSnapshotsV1>[0],
+): void {
+  assertSubstrateFederatedIsolatedDevnetMiningWatermarkSnapshotsV1(input);
+  const { watermark } = input;
   for (const value of [input.primaryHeaderIdsAtWatermark, input.witnessHeaderIdsAtWatermark]) {
-    if (!Array.isArray(value) || value.length !== 1 || value[0] !== watermark.headerId) {
+    if (!Array.isArray(value) || value.length !== 1 || value[0] !== watermark!.headerId) {
       throw new Error('isolated Ergo mining pause watermark is not canonical on both nodes');
     }
   }
@@ -4163,15 +4170,20 @@ function bindOwnedMiningTransactionPermit(
     if ([primarySnapshot, witnessSnapshot].some(snapshot =>
       snapshot.fullHeight < watermark.height || snapshot.indexedHeight < watermark.height)) return undefined;
     const path = `/blocks/at/${watermark.height}`;
-    const [primaryHeaderIdsAtWatermark, witnessHeaderIdsAtWatermark] = await Promise.all([
+    const canonicalPath = `/blocks/chainSlice?fromHeight=${watermark.height - 1}&toHeight=${watermark.height}`;
+    const [primaryHeaderIdsAtWatermark, witnessHeaderIdsAtWatermark,
+      primaryCanonicalHeaders, witnessCanonicalHeaders] = await settleCopiedErgoReads([
       getJson(SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN, path, deadline, assertOriginalTarget),
       getJson(SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN, path, deadline, assertOriginalTarget),
+      getJson(SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN, canonicalPath, deadline, assertOriginalTarget),
+      getJson(SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN, canonicalPath, deadline, assertOriginalTarget),
     ]);
     assertOriginalTarget();
-    assertSubstrateFederatedIsolatedDevnetTransactionPermitIndexedSnapshotV1({
+    const canonicalHeader = assertSubstrateFederatedIsolatedDevnetTransactionPermitCanonicalSnapshotV1({
       watermark, primarySnapshot, witnessSnapshot, primaryHeaderIdsAtWatermark, witnessHeaderIdsAtWatermark,
+      primaryCanonicalHeaders, witnessCanonicalHeaders,
     });
-    return primarySnapshot;
+    return Object.freeze({ snapshot: primarySnapshot, canonicalHeader });
   };
   const stableExact = async (watermark: Readonly<{ headerId: string; height: number }>) => {
     for (;;) {
@@ -4183,7 +4195,10 @@ function bindOwnedMiningTransactionPermit(
       const after = await readExact(watermark);
       assertOriginalTarget();
       if (after === undefined) throw new Error('isolated Ergo transaction permit indexed watermark regressed');
-      assertExactSnapshot(after, snapshot, 'primary');
+      assertExactSnapshot(after.snapshot, snapshot.snapshot, 'primary');
+      assertSubstrateFederatedIsolatedDevnetTransactionPermitCanonicalHeaderStableV1(
+        snapshot.canonicalHeader, after.canonicalHeader,
+      );
       return snapshot;
     }
   };
@@ -4202,7 +4217,7 @@ function bindOwnedMiningTransactionPermit(
         assertOriginalTarget();
         phase = 'held';
         deadline = Infinity;
-        return snapshot;
+        return snapshot.snapshot;
       } catch (cause) { phase = 'failed'; throw cause; }
     },
     arm: async (transactionIdHex: string) => {
@@ -4244,7 +4259,10 @@ function bindOwnedMiningTransactionPermit(
           const after = await readExact(fresh.finalWatermark);
           assertOriginalTarget();
           if (after === undefined) throw new Error('isolated Ergo transaction permit completion index regressed');
-          assertExactSnapshot(after, snapshot, 'primary');
+          assertExactSnapshot(after.snapshot, snapshot.snapshot, 'primary');
+          assertSubstrateFederatedIsolatedDevnetTransactionPermitCanonicalHeaderStableV1(
+            snapshot.canonicalHeader, after.canonicalHeader,
+          );
           phase = 'held';
           deadline = Infinity;
           return;
@@ -4262,6 +4280,71 @@ export function assertSubstrateFederatedIsolatedDevnetTransactionPermitIndexedSn
     if (snapshot.fullHeight !== input.watermark!.height || snapshot.headerIdHex !== input.watermark!.headerId) {
       throw new Error('isolated Ergo transaction permit nodes are not exactly at their held watermark');
     }
+  }
+}
+
+export function assertSubstrateFederatedIsolatedDevnetTransactionPermitCanonicalSnapshotV1(
+  input: Parameters<typeof assertSubstrateFederatedIsolatedDevnetMiningWatermarkSnapshotsV1>[0]
+    & Readonly<{ primaryCanonicalHeaders: unknown; witnessCanonicalHeaders: unknown }>,
+): Readonly<{ id: string; height: number; parentId: string }> {
+  assertSubstrateFederatedIsolatedDevnetMiningWatermarkSnapshotsV1(input);
+  const watermark = input.watermark!;
+  for (const snapshot of [input.primarySnapshot, input.witnessSnapshot]) {
+    if (snapshot.fullHeight !== watermark.height || snapshot.headerIdHex !== watermark.headerId) {
+      throw new Error('isolated Ergo transaction permit nodes are not exactly at their held watermark');
+    }
+  }
+  for (const ids of [input.primaryHeaderIdsAtWatermark, input.witnessHeaderIdsAtWatermark]) {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      throw new Error('isolated Ergo transaction permit watermark is not first in a distinct canonical height list');
+    }
+    const seen = new Set<string>();
+    for (let index = 0; index < ids.length; index += 1) {
+      const descriptor = Object.getOwnPropertyDescriptor(ids, String(index));
+      if (descriptor === undefined || !Object.hasOwn(descriptor, 'value')
+        || typeof descriptor.value !== 'string' || !/^[0-9a-f]{64}$/u.test(descriptor.value)) {
+        throw new Error('isolated Ergo transaction permit watermark is not first in a distinct canonical height list');
+      }
+      seen.add(descriptor.value);
+    }
+    if (seen.size !== ids.length || ids[0] !== watermark.headerId) {
+      throw new Error('isolated Ergo transaction permit watermark is not first in a distinct canonical height list');
+    }
+  }
+  const headers: Readonly<{ id: string; height: number; parentId: string }>[] = [];
+  for (const rows of [input.primaryCanonicalHeaders, input.witnessCanonicalHeaders]) {
+    if (!Array.isArray(rows) || rows.length !== 1) {
+      throw new Error('isolated Ergo transaction permit canonical slice must contain exactly one header');
+    }
+    const row: unknown = rows[0];
+    if (row === null || typeof row !== 'object' || Array.isArray(row)) {
+      throw new Error('isolated Ergo transaction permit canonical header is not a record');
+    }
+    const descriptors = ['id', 'height', 'parentId'].map(name => Object.getOwnPropertyDescriptor(row, name));
+    if (descriptors.some(descriptor => descriptor === undefined || !Object.hasOwn(descriptor, 'value'))) {
+      throw new Error('isolated Ergo transaction permit canonical header requires own data fields');
+    }
+    const [id, height, parentId]: unknown[] = descriptors.map(descriptor => descriptor!.value);
+    if (typeof id !== 'string' || id !== watermark.headerId
+      || typeof height !== 'number' || height !== watermark.height
+      || typeof parentId !== 'string' || !/^[0-9a-f]{64}$/u.test(parentId) || parentId === id) {
+      throw new Error('isolated Ergo transaction permit canonical header differs from its held watermark');
+    }
+    headers.push(Object.freeze({ id, height, parentId }));
+  }
+  if (headers[0]!.id !== headers[1]!.id || headers[0]!.height !== headers[1]!.height
+    || headers[0]!.parentId !== headers[1]!.parentId) {
+    throw new Error('isolated Ergo transaction permit canonical headers disagree between nodes');
+  }
+  return headers[0]!;
+}
+
+function assertSubstrateFederatedIsolatedDevnetTransactionPermitCanonicalHeaderStableV1(
+  before: Readonly<{ id: string; height: number; parentId: string }>,
+  after: Readonly<{ id: string; height: number; parentId: string }>,
+): void {
+  if (before.id !== after.id || before.height !== after.height || before.parentId !== after.parentId) {
+    throw new Error('isolated Ergo transaction permit canonical header changed during observation');
   }
 }
 
