@@ -7,6 +7,7 @@ import {
   AUTHENTICATED_SPV_TRACKER_MAX_LINEAGE_BOXES,
 } from './authenticated-spv-tracker-reconstruction.js';
 import {
+  AUTHENTICATED_TRACKER_NODE_MAX_HEADER_SLICE,
   AUTHENTICATED_TRACKER_NODE_INDEX_PAGE_SIZE,
   AUTHENTICATED_TRACKER_NODE_MAX_RESPONSE_BYTES,
   AuthenticatedSpvTrackerReadOnlyNodeClient,
@@ -104,6 +105,114 @@ describe('authenticated tracker read-only node client', () => {
       get: async () => ({ data: JSON.stringify([headerId, headerId]) }),
     };
     await expect(client.getBlockHeaderIdsAtHeight(1)).rejects.toThrow(/duplicate/i);
+  });
+
+  it('reads only exact bounded header-chain slice intervals through the guarded GET transport', async () => {
+    const client = new AuthenticatedSpvTrackerReadOnlyNodeClient('http://127.0.0.1:9053');
+    const calls: Array<{ path: string; options: any }> = [];
+    (client as any).client = {
+      get: async (path: string, options: any) => {
+        calls.push({ path, options });
+        const length = options.params.toHeight - options.params.fromHeight;
+        return { data: JSON.stringify(Array.from({ length }, (_, height) => ({ height }))) };
+      },
+    };
+
+    await expect(client.getBlockHeaderChainSlice(0, 1)).resolves.toHaveLength(1);
+    await expect(client.getBlockHeaderChainSlice(
+      0,
+      AUTHENTICATED_TRACKER_NODE_MAX_HEADER_SLICE,
+    )).resolves.toHaveLength(AUTHENTICATED_TRACKER_NODE_MAX_HEADER_SLICE);
+    expect(calls).toHaveLength(2);
+    expect(calls.map(call => ({ path: call.path, params: call.options.params }))).toEqual([
+      { path: '/blocks/chainSlice', params: { fromHeight: 0, toHeight: 1 } },
+      {
+        path: '/blocks/chainSlice',
+        params: { fromHeight: 0, toHeight: AUTHENTICATED_TRACKER_NODE_MAX_HEADER_SLICE },
+      },
+    ]);
+    for (const call of calls) {
+      expect(call.options).toEqual(expect.objectContaining({
+        timeout: 30_000,
+        signal: expect.any(AbortSignal),
+        responseType: 'arraybuffer',
+        decompress: false,
+        transformResponse: expect.any(Array),
+      }));
+    }
+  });
+
+  it.each([
+    [Number.NaN, 1, /fromHeight.*nonnegative safe integer/i],
+    [0, Number.NaN, /toHeight.*nonnegative safe integer/i],
+    [-1, 1, /fromHeight.*nonnegative safe integer/i],
+    [0, -1, /toHeight.*nonnegative safe integer/i],
+    [0.5, 1, /fromHeight.*nonnegative safe integer/i],
+    [0, 1.5, /toHeight.*nonnegative safe integer/i],
+    [2_147_483_648, 1, /fromHeight.*Scala Int/i],
+    [0, 2_147_483_648, /toHeight.*Scala Int/i],
+    [0, 0, /fromHeight < toHeight/i],
+    [2, 1, /fromHeight < toHeight/i],
+    [0, AUTHENTICATED_TRACKER_NODE_MAX_HEADER_SLICE + 1, /must not exceed 1024 headers/i],
+  ])('rejects invalid chain-slice interval %s..%s before I/O', async (fromHeight, toHeight, pattern) => {
+    const client = new AuthenticatedSpvTrackerReadOnlyNodeClient('http://127.0.0.1:9053');
+    const get = vi.fn();
+    (client as any).client = { get };
+
+    await expect(client.getBlockHeaderChainSlice(fromHeight, toHeight)).rejects.toThrow(pattern);
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{}, /must be an array/i],
+    [[], /exactly 1 headers/i],
+    [[{}, {}], /exactly 1 headers/i],
+  ])('rejects malformed or inexact chain-slice response %#', async (response, pattern) => {
+    const client = new AuthenticatedSpvTrackerReadOnlyNodeClient('http://127.0.0.1:9053');
+    (client as any).client = {
+      get: async () => ({ data: JSON.stringify(response) }),
+    };
+
+    await expect(client.getBlockHeaderChainSlice(0, 1)).rejects.toThrow(pattern);
+  });
+
+  it('charges chain-slice reads to reconstruction request, byte, and deadline budgets', async () => {
+    const body = JSON.stringify([{}]);
+    const requestClient = new AuthenticatedSpvTrackerReadOnlyNodeClient(
+      'http://127.0.0.1:9053',
+      { maxReconstructionRequests: 1 },
+    );
+    const requestGet = vi.fn(async () => ({ data: body }));
+    (requestClient as any).client = { get: requestGet };
+    requestClient.beginAuthenticatedTrackerReconstruction();
+    await expect(requestClient.getBlockHeaderChainSlice(0, 1)).resolves.toEqual([{}]);
+    await expect(requestClient.getBlockHeaderChainSlice(0, 1)).rejects.toThrow(/request bound/i);
+    requestClient.endAuthenticatedTrackerReconstruction();
+    expect(requestGet).toHaveBeenCalledTimes(1);
+
+    const byteClient = new AuthenticatedSpvTrackerReadOnlyNodeClient(
+      'http://127.0.0.1:9053',
+      { maxReconstructionBytes: Buffer.byteLength(body) - 1 },
+    );
+    (byteClient as any).client = { get: async () => ({ data: body }) };
+    byteClient.beginAuthenticatedTrackerReconstruction();
+    await expect(byteClient.getBlockHeaderChainSlice(0, 1)).rejects.toThrow(/byte bound/i);
+    byteClient.endAuthenticatedTrackerReconstruction();
+
+    let now = 0;
+    const deadlineClient = new AuthenticatedSpvTrackerReadOnlyNodeClient(
+      'http://127.0.0.1:9053',
+      { now: () => now, reconstructionDeadlineMs: 100 },
+    );
+    (deadlineClient as any).client = {
+      get: async () => {
+        now = 101;
+        return { data: body };
+      },
+    };
+    deadlineClient.beginAuthenticatedTrackerReconstruction();
+    await expect(deadlineClient.getBlockHeaderChainSlice(0, 1)).rejects.toThrow(/aggregate deadline/i);
+    deadlineClient.endAuthenticatedTrackerReconstruction();
   });
 
   it('derives one address and pages unspent boxes through bounded GET requests', async () => {

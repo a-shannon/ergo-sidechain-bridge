@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-10-14
+Updated: 2026-10-15
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,8 +28,9 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Correct held prior-confirmation revalidation before deposit funding.
-Campaigns 24–68 are permanently consumed or held. C68 on local
+**Now:** Bound the request cost of exact held prior-confirmation revalidation
+before deposit funding, without changing its proof or resource limits.
+Campaigns 24–69 are permanently consumed or held. C68 on local
 `1b1353663d33e2b50e4f966756c5451cd150b2bf` terminated once at
 `2026-10-14T13:39:35.4600011Z`, with integer command exit 1, null launcher
 exception and no parent result. Independent review validated the current
@@ -40,6 +41,14 @@ Completion, cleanup and custody disposal remain unknown; zero cleanup errors
 establish no cleanup. C66 and C67 refused before canonical runtime; they also
 remain permanently held. No automatic successor campaign, push or new CI is
 selected.
+
+C69 separately exercised the promoted ancestry correction at local
+`dc2971f8f8f6a05f91450b3ae9341659f010690b`. Its one canonical invocation
+terminated at `2026-10-15T00:39:45.0590029Z` with integer exit 1, null launcher
+exception and no parent result. Independent review validates its exact public
+failure graph and the same `cycle-1/deposit-funding` boundary; it establishes
+neither the inner cause nor completion, cleanup or custody disposal. C69 is
+permanently held, with no retry or automatic successor selection.
 
 The prospective deposit-funding attribution is implemented through the actual
 root, optional worker/parent companions and strict exported parsers. All eight
@@ -74,7 +83,7 @@ and first in both height lists. Exact held-tip brackets, custody guards, funding
 equality and the original client reconstruction limits remain mandatory. Begun
 scopes close on every path, after all paired reads drain.
 
-The complete root file passes 564 cases, including 66 exact-helper cases and
+At `dc2971f8`, the complete root file passed 564 cases, including 66 exact-helper cases and
 both actual funding branches. The 477 architecture, broadcast and read-only
 client cases pass separately; TypeScript and the 137-module/932-source import
 check pass. These selections have distinct scopes; subset counts are not
@@ -84,6 +93,31 @@ positive twins retained. Local promotion requires the exact staged publication
 guard. The upstream confirmation observer still has
 its singleton rule. This correction establishes neither full fork compatibility
 nor C68's historical cause or packaged lifecycle acceptance.
+
+A subsequent source-only discriminator uses the exact production helper and
+actual bounded raw client with independent synthetic clocks. Three canonical
+receipts at height 100 and held tip 137 require 41 requests per node and fit
+118,900 ms. Changing only the valid held tip/path to height 138 requires a
+42nd request and correctly refuses at the original 120,000 ms aggregate
+deadline. This demonstrates request cost, not a faulty deadline or C69 cause.
+The selected implementation reads full ancestry in bounded 1,024-header
+`/blocks/chainSlice` pages. It preserves every ID/height/parent comparison,
+page seam, repeated-ID refusal, paired-node agreement, canonical-first receipt
+membership, held-tip bracket, custody check and reconstruction limit. Exact
+length and position checks reject the pinned node route's fallback or capped
+output. No retry, cache or higher timeout/request/byte budget is introduced.
+The two cost cases are RED then GREEN for issuance and payout. The complete
+root passes 626 cases, including 128 helper cases with isolated slice faults, page boundaries and
+14 guarded fault/phase cases in each funding kind, each with original refusal,
+accepted in-memory mutant and valid twin. Architecture passes 417 cases;
+the raw client passes 35, raw transport 7, broadcast surface 41 and broadcast
+policy 8 in their separate scopes. Subset counts are not added to their parents.
+TypeScript and the 137-module/932-source actual import check pass. A typed
+genesis-check test provider now explicitly refuses an unexpected range read;
+its existing consumer does not use that method. The broad genesis crypto
+fixtures are unchanged and not replayed for this type-only join. Exact
+independent review and guarded promotion remain required for the candidate;
+these local checks establish no lifecycle success or future admission authority.
 
 The next executable result is still the genuine packaged complete two-cycle
 lifecycle with stopped public recovery selection. Select any fresh invocation
@@ -2126,7 +2160,7 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
 | Deposit-funding entered-operation attribution (locally closed at1b135366) | Invocation-owned native primary metadata reaches optional bounded worker/parent companions with exact root/cycle-step lineage and strict false claims | All eight source operations in both root branches, hostile graph and codec refusals, create-only failure preservation, dangling-entry success contradiction and exact independent review passed. C68's optional detail was absent; no historical inner cause follows |
-| Held prior-confirmation ancestry (locally validated source correction) | Every issuance/payout receipt lies on the exact held tip's ancestry on both nodes, remains canonical-first and is revalidated within the original bounded scopes before reward discovery | Original valid sibling-fork twins fail; corrected root564/helper66 and architecture/broadcast/client477 pass, with TypeScript/imports and exact independent source/test/claims review. Six isolated relaxations are detected in both branches; valid positive twins pass. Guarded local promotion uses exact staged bytes. The unchanged initial observer's singleton rule limits scope; no historical cause, campaign acceptance or automatic successor invocation |
+| Held prior-confirmation ancestry (bounded range source validated locally) | Every issuance/payout receipt lies on the exact held tip's ancestry on both nodes, remains canonical-first and is revalidated through complete bounded pages within the original scopes before reward discovery | At dc2971 the singleton correction closed root564/helper66 and its scoped consumers. The new cost discriminator selects1024-header pages with exact counts, seams and every paired tuple retained. Two cost RED-to-GREEN cases, root626/helper128, architecture417, client35/transport7/surface41/policy8 and TypeScript/import checks pass; subset scopes are not summed. Exact independent review and guarded promotion remain explicit gates. The unchanged initial observer's singleton rule limits scope; no historical cause, campaign acceptance or automatic successor invocation |
 | Raw held-watermark observation join (locally closed at97486f05) | Well-formed partial observations within the authenticated held height remain pending; contradictions refuse; Hold and completion still require exact paired indexing, canonical lookups and stability before the next Arm | The 175 exact extracted-production/raw-reader cases, TypeScript, affected generic consumers and independent source/test/claims review passed guarded local promotion. No budget, legacy reader or authority change; no C64/C65 cause or campaign acceptance |
 | Transaction-specific bounded mining (locally closed at a148240c) | Authenticated Hold/Arm/Status binds the original live process, exact held indexed parent and transaction; permits inclusion plus ten successors; confirms and rejoins the held watermark before the next Arm under the original deadline | Cumulative patch/locks, native actor/API execution, parser/control/lifetime/transport and four submission consumers, architecture refusals, docs and independent review passed guarded local promotion. Real NodeView fixtures and synthetic ports are distinct from packaged lifecycle, custody and operator acceptance; C64 is consumed |
 | Signed successor-height boundary (locally closed at63c319df) | Each raw HTTP case binds its candidate through WASM and revalidation; a separate exported signed fixture agrees across WASM and native full transaction validation at the inclusive edge and next block | Complete fixture88, native48, caller/source pins90, TypeScript/import checks and exact independent review/local promotion pass. Keep transaction/proofs/ordered boxes fixed within each scope, refund unexpired and before/after observed tips stable. Preserve all runtime guards and budgets; no cross-case byte-identity claim, historical cause or automatic C64 |

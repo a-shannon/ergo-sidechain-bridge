@@ -790,6 +790,13 @@ function prepareRootFixture() {
         }
         return null;
       },
+      getBlockHeaderChainSlice: async (fromHeight: number, toHeight: number) => {
+        assertCustodyActive();
+        return Array.from({ length: toHeight - fromHeight }, (_, index) => {
+          const height = fromHeight + index + 1;
+          return { id: heldIdAt(height), height, parentId: heldIdAt(height - 1) };
+        });
+      },
       getBestHeader: async () => {
       assertCustodyActive();
       const tip: any = heldDepositTip === null
@@ -1380,7 +1387,9 @@ type HeldConfirmationHelper = (target: Readonly<{ primaryNodeOrigin: string; wit
   assertCustody: () => void, kind: 'issuance' | 'payout') => Promise<void>;
 
 // Import-free exact production helper plus its all-settled read primitive.
-function heldDepositConfirmationHelperFixture() {
+function heldDepositConfirmationHelperFixture(options: {
+  heldHeight?: number; confirmationHeight?: number; rewrite?: (source: string) => string;
+} = {}) {
   const sourceText = readFileSync(new URL('./substrate-federated-genesis-target-root-v1.ts', import.meta.url), 'utf8');
   const parsed = ts.createSourceFile('root.ts', sourceText, ts.ScriptTarget.ES2022, true);
   const selected = ['assertHeldDepositConfirmationsV1', 'settleReads'];
@@ -1390,24 +1399,26 @@ function heldDepositConfirmationHelperFixture() {
     expect(matches).toHaveLength(1); expect(matches[0]!.body).toBeDefined();
     return matches[0]!.getText(parsed);
   });
-  const compiled = ts.transpileModule(declarations.join('\n'), {
+  const productionDeclarations = declarations.join('\n');
+  const compiled = ts.transpileModule(options.rewrite?.(productionDeclarations) ?? productionDeclarations, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
   expect(compiled).not.toMatch(/\brequire\s*\(/u);
 
   const target = Object.freeze({ primaryNodeOrigin: 'primary', witnessNodeOrigin: 'witness' });
-  const held = Object.freeze({ fullHeight: 100, headerIdHex: 'aa'.repeat(32) });
+  const held = Object.freeze({ fullHeight: options.heldHeight ?? 100, headerIdHex: 'aa'.repeat(32) });
   const confirmations: HeldConfirmation[] = [
-    Object.freeze({ confirmationHeight: 80, confirmationHeaderIdHex: '11'.repeat(32) }),
+    Object.freeze({ confirmationHeight: options.confirmationHeight ?? 80, confirmationHeaderIdHex: '11'.repeat(32) }),
   ];
   const tips = new Map<string, unknown[]>([
-    ['primary', [{ height: 100, id: 'aa'.repeat(32) }, { height: 100, id: 'aa'.repeat(32) }]],
-    ['witness', [{ height: 100, id: 'aa'.repeat(32) }, { height: 100, id: 'aa'.repeat(32) }]],
+    ['primary', [{ height: held.fullHeight, id: held.headerIdHex }, { height: held.fullHeight, id: held.headerIdHex }]],
+    ['witness', [{ height: held.fullHeight, id: held.headerIdHex }, { height: held.fullHeight, id: held.headerIdHex }]],
   ]);
   const membership = new Map<string, unknown>();
   const bestCalls = new Map<string, number>();
   const membershipCalls: [string, number][] = [];
   const headerCalls: [string, string][] = [];
+  const sliceCalls: [string, number, number][] = [];
   const beginScope = vi.fn();
   const endScope = vi.fn();
   const headerIdAt = (height: number) => height === held.fullHeight ? held.headerIdHex
@@ -1417,16 +1428,28 @@ function heldDepositConfirmationHelperFixture() {
     bestHeader(origin: string, call: number): Promise<unknown>;
     headers(origin: string, height: number): Promise<unknown>;
     blockHeader(origin: string, id: string): Promise<unknown>;
+    slice(origin: string, fromHeight: number, toHeight: number): Promise<unknown>;
   } = {
     bestHeader: async (origin, call) => tips.get(origin)![call],
     headers: async (_origin, height) => membership.has(String(height))
       ? membership.get(String(height))
       : [confirmations.find(value => value.confirmationHeight === height)!.confirmationHeaderIdHex],
     blockHeader: async (_origin, id) => {
-      for (let height = held.fullHeight; height >= 1; height--) {
-        if (headerIdAt(height) === id) return { id, height, parentId: headerIdAt(height - 1) };
+      if (!/^[0-9a-f]{64}$/.test(id)) return null;
+      const height = id === held.headerIdHex ? held.fullHeight
+        : confirmations.find(value => value.confirmationHeaderIdHex === id)?.confirmationHeight
+          ?? Number(BigInt(`0x${id}`));
+      return Number.isSafeInteger(height) && height > 0 && height <= held.fullHeight && headerIdAt(height) === id
+        ? { id, height, parentId: headerIdAt(height - 1) } : null;
+    },
+    slice: async (origin, fromHeight, toHeight) => {
+      const result: unknown[] = [];
+      for (let height = fromHeight + 1; height <= toHeight; height++) {
+        const id = headerIdAt(height);
+        headerCalls.push([origin, id]);
+        result.push(await behavior.blockHeader(origin, id));
       }
-      return null;
+      return result;
     },
   };
   let active = true;
@@ -1452,6 +1475,10 @@ function heldDepositConfirmationHelperFixture() {
       headerCalls.push([origin, id]);
       return behavior.blockHeader(origin, id);
     }),
+    getBlockHeaderChainSlice: vi.fn(async (fromHeight: number, toHeight: number) => {
+      sliceCalls.push([origin, fromHeight, toHeight]);
+      return behavior.slice(origin, fromHeight, toHeight);
+    }),
   }));
   const recordValue = (value: unknown) => {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('record required');
@@ -1462,8 +1489,49 @@ function heldDepositConfirmationHelperFixture() {
     `${compiled}\nreturn assertHeldDepositConfirmationsV1;`);
   const helper = factory(owned, createSource, recordValue) as HeldConfirmationHelper;
   return { helper, target, held, confirmations, tips, membership, bestCalls, membershipCalls,
-    headerCalls, beginScope, endScope, headerIdAt, behavior, owned, assertCustody, createSource,
+    headerCalls, sliceCalls, beginScope, endScope, headerIdAt, behavior, owned, assertCustody, createSource,
     loseActive: () => { active = false; }, loseCustody: () => { custody = false; } };
+}
+
+function installHeldSliceFault(h: ReturnType<typeof heldDepositConfirmationHelperFixture>, fault: string) {
+  if (fault === 'canonical first') {
+    h.membership.set(String(h.confirmations[0]!.confirmationHeight), ['bb'.repeat(32), h.confirmations[0]!.confirmationHeaderIdHex]);
+    return;
+  }
+  if (fault.startsWith('tip ')) {
+    const stage = fault.endsWith('before') ? 0 : 1;
+    const tip = h.tips.get('witness')![stage] as Record<string, unknown>;
+    h.tips.get('witness')![stage] = fault.includes('height') ? { ...tip, height: h.held.fullHeight - 1 }
+      : { ...tip, id: 'bb'.repeat(32) };
+    return;
+  }
+  const original = h.behavior.slice;
+  h.behavior.slice = async (origin, fromHeight, toHeight) => {
+    const raw = await original(origin, fromHeight, toHeight);
+    if (!Array.isArray(raw)) throw new Error('invalid slice fault fixture');
+    const rows = raw.map(row => ({ ...row as Record<string, unknown> }));
+    if (fault === 'malformed') return {};
+    if (fault === 'missing') return rows.slice(0, -1);
+    if (fault === 'extra') return [...rows, { height: toHeight + 1, id: 'cc'.repeat(32), parentId: h.headerIdAt(toHeight) }];
+    if (fault === 'reordered') return rows.reverse();
+    if (fault === 'custody') { h.loseCustody(); return rows; }
+    if (fault === 'target') { h.loseActive(); return rows; }
+    const oldest = rows[0]!;
+    if (fault === 'height') oldest.height = Number(oldest.height) + 1;
+    else if (fault === 'id') rows[rows.length - 1]!.id = 'bb'.repeat(32);
+    else if (fault === 'oldest parent') oldest.parentId = 'BB'.repeat(32);
+    else if (fault === 'self parent') oldest.parentId = oldest.id;
+    else if (fault === 'paired parent') { if (origin === 'witness') oldest.parentId = 'cc'.repeat(32); }
+    else if (fault === 'repeat id') {
+      if (rows.length < 5) throw new Error('repeat-ID fixture requires an interior span');
+      const repeatedAt = rows.length - 3;
+      rows[repeatedAt - 2]!.id = rows[repeatedAt]!.id;
+      rows[repeatedAt - 1]!.parentId = rows[repeatedAt]!.id;
+    } else if (fault === 'page seam') {
+      if (toHeight === 1126) rows[rows.length - 1]!.id = 'bb'.repeat(32);
+    } else throw new Error(`unknown slice fault fixture: ${fault}`);
+    return rows;
+  };
 }
 
 describe('held deposit confirmation exact production helper', () => {
@@ -1667,12 +1735,20 @@ describe('held deposit confirmation exact production helper', () => {
           });
         let bestCall = 0;
         (client as unknown as { client: { defaults: { adapter: unknown } } }).client.defaults.adapter = async (
-          config: { url: string },
+          config: { url: string; params?: { fromHeight: number; toHeight: number } },
         ) => {
           rawReads++;
           let body: unknown;
           if (config.url === '/blocks/lastHeaders/1') body = [await h.behavior.bestHeader(origin, bestCall++)];
           else if (config.url.startsWith('/blocks/at/')) body = await h.behavior.headers(origin, Number(config.url.slice(11)));
+          else if (config.url === '/blocks/chainSlice') {
+            const fromHeight = config.params!.fromHeight; const toHeight = config.params!.toHeight;
+            const headers: unknown[] = [];
+            for (let height = fromHeight + 1; height <= toHeight; height++) {
+              headers.push(await h.behavior.blockHeader(origin, h.headerIdAt(height)));
+            }
+            body = headers;
+          }
           else {
             const match = /^\/blocks\/([0-9a-f]{64})\/header$/.exec(config.url);
             if (!match) throw new Error('unexpected raw fixture route');
@@ -1690,6 +1766,135 @@ describe('held deposit confirmation exact production helper', () => {
       else await expect(pending).rejects.toThrow(/reconstruction/u);
       expect(rawReads).toBeGreaterThan(0); expect(ends).toHaveLength(2);
       for (const end of ends) expect(end).toHaveBeenCalledTimes(1);
+    });
+
+  it.each(['issuance', 'payout'] as const)(
+    'keeps adjacent valid %s ancestry within the unchanged deadline using bounded slices', async kind => {
+      const actual = await vi.importActual<typeof import('../../authenticated-spv-tracker-read-only-node-client.js')>(
+        '../../authenticated-spv-tracker-read-only-node-client.js');
+      expect(actual.AUTHENTICATED_TRACKER_RECONSTRUCTION_DEADLINE_MS).toBe(120_000);
+      const observedCounts: number[] = [];
+      for (const heldHeight of [137, 138]) {
+        const h = heldDepositConfirmationHelperFixture();
+        const headerId = (height: number) => height.toString(16).padStart(64, '0');
+        const header = (height: number) => ({ height, id: headerId(height), parentId: headerId(height - 1) });
+        const requests = new Map<string, number>();
+        const clocks = new Map<string, number>();
+        const ends: ReturnType<typeof vi.spyOn>[] = [];
+        const createStub = h.createSource.getMockImplementation()!;
+        h.createSource.mockImplementation(origin => {
+          clocks.set(origin, 0); requests.set(origin, 0);
+          const client = new actual.AuthenticatedSpvTrackerReadOnlyNodeClient(
+            origin === 'primary' ? 'http://127.0.0.1:18551' : 'http://127.0.0.1:18552', {
+              now: () => clocks.get(origin)!,
+            });
+          (client as unknown as { client: { defaults: { adapter: unknown } } }).client.defaults.adapter = async (
+            config: { url: string; params?: { fromHeight: number; toHeight: number } },
+          ) => {
+            requests.set(origin, requests.get(origin)! + 1);
+            let body: unknown;
+            if (config.url === '/blocks/lastHeaders/1') body = [header(heldHeight)];
+            else if (config.url === '/blocks/at/100') body = [headerId(100), 'bb'.repeat(32)];
+            else if (config.url === '/blocks/chainSlice') {
+              expect(config.params).toEqual({ fromHeight: 99, toHeight: heldHeight });
+              body = Array.from({ length: heldHeight - 99 }, (_, index) => header(100 + index));
+            } else {
+              const match = /^\/blocks\/([0-9a-f]{64})\/header$/.exec(config.url);
+              if (!match) throw new Error('unexpected raw ancestry cost fixture route');
+              body = header(Number(BigInt(`0x${match[1]!}`)));
+            }
+            clocks.set(origin, clocks.get(origin)! + 2_900);
+            return { data: Buffer.from(JSON.stringify(body)), status: 200,
+              statusText: 'synthetic canonical ancestry cost fixture', headers: { 'content-encoding': 'identity' }, config };
+          };
+          ends.push(vi.spyOn(client, 'endAuthenticatedTrackerReconstruction'));
+          return client as unknown as ReturnType<typeof createStub>;
+        });
+        const confirmations = Array.from({ length: 3 }, () => Object.freeze({
+          confirmationHeight: 100, confirmationHeaderIdHex: headerId(100),
+        }));
+        await expect(h.helper(h.target, { fullHeight: heldHeight, headerIdHex: headerId(heldHeight) },
+          confirmations, h.assertCustody, kind)).resolves.toBeUndefined();
+        expect(ends).toHaveLength(2);
+        for (const end of ends) expect(end).toHaveBeenCalledTimes(1);
+        observedCounts.push(requests.get('primary')!, requests.get('witness')!);
+      }
+      // The old walk passes137 but exceeds120s at138. Both complete tuples now
+      // fit the original scope through pre-tip/slice/membership/post-tip reads.
+      expect(observedCounts).toEqual([4, 4, 4, 4]);
+    });
+
+  it.each([1123, 1124, 1125, 2150].flatMap(height =>
+    (['issuance', 'payout'] as const).map(kind => [height, kind] as const)))(
+    'validates complete bounded slice coverage through height %s for %s', async (height, kind) => {
+      const h = heldDepositConfirmationHelperFixture({ heldHeight: height, confirmationHeight: 100 });
+      await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, kind)).resolves.toBeUndefined();
+      const expected: [string, number, number][] = [];
+      for (let upper = height; upper >= 100;) {
+        const from = Math.max(99, upper - 1024);
+        expected.push(['primary', from, upper], ['witness', from, upper]);
+        upper = from;
+      }
+      expect(h.sliceCalls).toEqual(expected);
+      expect(h.membershipCalls).toEqual([['primary', 100], ['witness', 100]]);
+      expect(h.endScope.mock.calls).toEqual([['primary'], ['witness']]);
+    });
+
+  it.each(['malformed', 'missing', 'extra', 'reordered', 'height', 'id', 'oldest parent',
+    'self parent', 'paired parent', 'repeat id', 'page seam'].flatMap(fault =>
+    (['issuance', 'payout'] as const).map(kind => [fault, kind] as const)))(
+    'rejects the isolated %s slice fault in %s ancestry', async (fault, kind) => {
+      const h = heldDepositConfirmationHelperFixture(fault === 'page seam'
+        ? { heldHeight: 2150, confirmationHeight: 100 } : {});
+      installHeldSliceFault(h, fault);
+      await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, kind)).rejects.toThrow('not canonical');
+      expect(h.endScope.mock.calls).toEqual([['primary'], ['witness']]);
+    });
+
+  it.each(['custody', 'target'] as const)('closes both scopes after %s loss at a range boundary', async fault => {
+    const h = heldDepositConfirmationHelperFixture({ heldHeight: 2150, confirmationHeight: 100 });
+    installHeldSliceFault(h, fault);
+    await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'issuance')).rejects.toThrow('custody lost');
+    expect(h.sliceCalls).toHaveLength(2);
+    expect(h.endScope.mock.calls).toEqual([['primary'], ['witness']]);
+  });
+
+  it.each([
+    { fault: 'extra', needle: 'raw.length !== expectedLength', replacement: 'false' },
+    { fault: 'height', needle: 'header.height !== height', replacement: 'false' },
+    { fault: 'id', needle: 'header.id !== currentId', replacement: 'false' },
+    { fault: 'oldest parent', needle: "typeof header.parentId !== 'string' || !/^[0-9a-f]{64}$/.test(header.parentId)", replacement: 'false' },
+    { fault: 'self parent', needle: 'header.parentId === currentId', replacement: 'false' },
+    { fault: 'paired parent', needle: 'pair[0] !== pair[1]', replacement: 'false' },
+    { fault: 'repeat id', needle: 'visited.has(currentId)', replacement: 'false' },
+    { fault: 'page seam', needle: 'header.id !== currentId', replacement: 'false' },
+    { fault: 'canonical first', needle: 'headers[0] !== confirmationId', replacement: 'false' },
+    { fault: 'custody', needle: 'assertCustody();', replacement: '' },
+    { fault: 'tip height before', needle: 'tip.height !== held.fullHeight', replacement: 'false' },
+    { fault: 'tip height after', needle: 'tip.height !== held.fullHeight', replacement: 'false' },
+    { fault: 'tip id before', needle: 'tip.id !== held.headerIdHex', replacement: 'false' },
+    { fault: 'tip id after', needle: 'tip.id !== held.headerIdHex', replacement: 'false' },
+  ].flatMap(rule => (['issuance', 'payout'] as const).map(kind => [rule.fault, kind, rule] as const)))(
+    'isolates the %s guard in %s ancestry with an accepted mutant and valid twin', async (_fault, kind, rule) => {
+      const options = rule.fault === 'page seam' ? { heldHeight: 2150, confirmationHeight: 100 } : {};
+      const original = heldDepositConfirmationHelperFixture(options);
+      installHeldSliceFault(original, rule.fault);
+      await expect(original.helper(original.target, original.held, original.confirmations, original.assertCustody, kind))
+        .rejects.toThrow(rule.fault === 'custody' ? 'custody lost' : 'not canonical');
+      expect(original.endScope).toHaveBeenCalledTimes(2);
+      const mutant = heldDepositConfirmationHelperFixture({ ...options, rewrite: source => {
+        // Source mutation and fixture construction are outside the rejection assertion.
+        expect(source.split(rule.needle)).toHaveLength(2);
+        return source.replace(rule.needle, rule.replacement);
+      } });
+      installHeldSliceFault(mutant, rule.fault);
+      await expect(mutant.helper(mutant.target, mutant.held, mutant.confirmations, mutant.assertCustody, kind))
+        .resolves.toBeUndefined();
+      expect(mutant.endScope).toHaveBeenCalledTimes(2);
+      const twin = heldDepositConfirmationHelperFixture(options);
+      await expect(twin.helper(twin.target, twin.held, twin.confirmations, twin.assertCustody, kind))
+        .resolves.toBeUndefined();
+      expect(twin.endScope).toHaveBeenCalledTimes(2);
     });
 
   it.each(['malformed', 'missing', 'extra', 'wrong'] as const)(

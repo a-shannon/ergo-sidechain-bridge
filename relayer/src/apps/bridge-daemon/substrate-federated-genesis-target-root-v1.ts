@@ -1494,38 +1494,53 @@ async function assertHeldDepositConfirmationsV1(
     await assertHeldTips();
     assertActive();
     const minimumHeight = Math.min(...expected.keys());
+    // Keep each query below the raw client's fixed header-slice bound.
+    const maximumHeadersPerSlice = 1024;
     const visited = new Set<string>();
     let currentId = held.headerIdHex;
-    for (let height = held.fullHeight; height >= minimumHeight; height--) {
+    for (let upperHeight = held.fullHeight; upperHeight >= minimumHeight;) {
       assertActive();
-      if (visited.has(currentId)) throw refuse();
-      visited.add(currentId);
-      const pair = await settleReads(clients.map(async client => {
+      const fromHeight = Math.max(minimumHeight - 1,
+        upperHeight - maximumHeadersPerSlice);
+      const expectedLength = upperHeight - fromHeight;
+      const slices = await settleReads(clients.map(async client => {
         assertActive();
-        const raw = await client.getBlockHeaderById(currentId);
+        const raw = await client.getBlockHeaderChainSlice(fromHeight, upperHeight);
         assertActive();
-        const header = record(raw);
-        if (header.id !== currentId || header.height !== height
-          || typeof header.parentId !== 'string' || !/^[0-9a-f]{64}$/.test(header.parentId)
-          || header.parentId === currentId) throw refuse();
-        return header.parentId;
+        // The node route can fall back to its best tip or truncate its output.
+        // Neither behavior supplies the requested interval's ancestry proof.
+        if (!Array.isArray(raw) || raw.length !== expectedLength) throw refuse();
+        return raw;
       }));
       assertActive();
-      if (pair[0] !== pair[1]) throw refuse();
-      const confirmationId = expected.get(height);
-      if (confirmationId !== undefined) {
-        if (currentId !== confirmationId) throw refuse();
-        await settleReads(clients.map(async client => {
-          assertActive();
-          const headers = await client.getBlockHeaderIdsAtHeight(height);
-          assertActive();
-          if (!Array.isArray(headers) || headers.length === 0 || headers[0] !== confirmationId
-            || headers.some(id => typeof id !== 'string' || !/^[0-9a-f]{64}$/.test(id))
-            || new Set(headers).size !== headers.length) throw refuse();
-        }));
+      for (let height = upperHeight; height > fromHeight; height--) {
         assertActive();
+        if (visited.has(currentId)) throw refuse();
+        visited.add(currentId);
+        const pair = slices.map(slice => {
+          const header = record(slice[height - fromHeight - 1]);
+          if (header.id !== currentId || header.height !== height
+            || typeof header.parentId !== 'string' || !/^[0-9a-f]{64}$/.test(header.parentId)
+            || header.parentId === currentId) throw refuse();
+          return header.parentId;
+        });
+        if (pair[0] !== pair[1]) throw refuse();
+        const confirmationId = expected.get(height);
+        if (confirmationId !== undefined) {
+          if (currentId !== confirmationId) throw refuse();
+          await settleReads(clients.map(async client => {
+            assertActive();
+            const headers = await client.getBlockHeaderIdsAtHeight(height);
+            assertActive();
+            if (!Array.isArray(headers) || headers.length === 0 || headers[0] !== confirmationId
+              || headers.some(id => typeof id !== 'string' || !/^[0-9a-f]{64}$/.test(id))
+              || new Set(headers).size !== headers.length) throw refuse();
+          }));
+          assertActive();
+        }
+        currentId = pair[0]!;
       }
-      currentId = pair[0]!;
+      upperHeight = fromHeight;
     }
     await assertHeldTips();
     assertActive();

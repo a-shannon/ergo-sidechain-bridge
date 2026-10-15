@@ -278,15 +278,26 @@ conflicting header IDs at the same height refuse before node reads. Each node
 must place the expected header ID first in its height list. The pinned Ergo
 endpoint retains sibling forks after that canonical entry, so additional
 well-formed, distinct IDs are allowed. The root also walks backward from the
-exact held tip to the oldest receipt through header-by-ID reads. Both nodes must
+exact held tip to the oldest receipt through bounded `GET /blocks/chainSlice`
+reads. Each request covers at most 1,024 headers in the interval
+`(fromHeight, toHeight]`, in ascending order. The root requires the exact count
+and height at every position, anchors the highest page to the held tip, and
+anchors each lower page to the already validated parent from the higher page.
+The node route can fall back to its best header or truncate a response; neither
+behavior is accepted as the requested proof. Both nodes must
 agree on every requested ID, exact height and parent ID; each retained receipt
 must occur on that ancestry. Missing headers, discontinuities, repeated IDs or
 node disagreement refuse even when the expected ID appears in a height list.
 Both nodes' visible tips must equal the held height and header before and after
 those reads. The funding observation must still independently match that held
 tip. Height ordering alone cannot establish this canonical-chain relationship.
-The check adds four tip reads, two header reads per traversed height (including
-both endpoints) and two height-list reads per distinct receipt height. It uses
+For an inclusive ancestry span of `N` headers and `U` distinct receipt heights,
+the check uses `2 + ceil(N / 1024) + U` requests per node: two tip reads, bounded
+chain-slice reads, and one canonical-first height-list read at each receipt
+height. Every intervening header tuple is still checked. The raw range method
+uses the existing guarded GET transport and accepts only explicit, nonnegative
+Scala-Int query heights and an exact-length array. It adds no retry or cache.
+The check uses
 each client's existing reconstruction deadline, request and byte limits; no
 unbounded fallback is available. Every begun scope closes on success or failure.
 Parallel reads drain before returning or throwing, and cleanup errors retain the

@@ -10,6 +10,7 @@ import { parseNodeJsonPreservingPowDistance } from './ergo-node-json.js';
 import { validateReadOnlyNodeUrl } from './read-only-node-url.js';
 
 export const AUTHENTICATED_TRACKER_NODE_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+export const AUTHENTICATED_TRACKER_NODE_MAX_HEADER_SLICE = 1024;
 export const AUTHENTICATED_TRACKER_NODE_INDEX_PAGE_SIZE = 16;
 export const AUTHENTICATED_TRACKER_MAX_LINEAGE_BYTES = 64 * 1024 * 1024;
 export const AUTHENTICATED_TRACKER_INDEX_PAGINATION_DEADLINE_MS = 120_000;
@@ -20,6 +21,7 @@ export const AUTHENTICATED_TRACKER_RECONSTRUCTION_DEADLINE_MS = 120_000;
 const AUTHENTICATED_TRACKER_NODE_REQUEST_TIMEOUT_MS = 30_000;
 const AUTHENTICATED_TRACKER_NODE_MAX_ADDRESS_PAGE_SIZE = 500;
 const AUTHENTICATED_TRACKER_NODE_MAX_ERGO_TREE_BYTES = 16 * 1024;
+const ERGO_NODE_MAX_SCALA_INT = 2_147_483_647;
 const AUTHENTICATED_TRACKER_ALLOWED_NODE_NETWORKS = new Set([
   'local',
   'development',
@@ -181,6 +183,39 @@ implements AuthenticatedSpvTrackerNodeSource {
       throw new Error('best-header response must contain exactly one header');
     }
     return data[0];
+  }
+
+  async getBlockHeaderChainSlice(
+    fromHeightValue: number,
+    toHeightValue: number,
+  ): Promise<unknown[]> {
+    const fromHeight = nonnegativeSafeInteger(fromHeightValue, 'chain-slice fromHeight');
+    const toHeight = nonnegativeSafeInteger(toHeightValue, 'chain-slice toHeight');
+    if (fromHeight > ERGO_NODE_MAX_SCALA_INT) {
+      throw new Error('chain-slice fromHeight must fit a nonnegative Scala Int');
+    }
+    if (toHeight > ERGO_NODE_MAX_SCALA_INT) {
+      throw new Error('chain-slice toHeight must fit a nonnegative Scala Int');
+    }
+    if (fromHeight >= toHeight) {
+      throw new Error('chain-slice interval must satisfy fromHeight < toHeight');
+    }
+    const expectedLength = toHeight - fromHeight;
+    if (expectedLength > AUTHENTICATED_TRACKER_NODE_MAX_HEADER_SLICE) {
+      throw new Error(
+        `chain-slice interval must not exceed ${AUTHENTICATED_TRACKER_NODE_MAX_HEADER_SLICE} headers`,
+      );
+    }
+    const { data } = await this.getRawJson('/blocks/chainSlice', {
+      params: { fromHeight, toHeight },
+    });
+    if (!Array.isArray(data)) {
+      throw new Error('chain-slice response must be an array');
+    }
+    if (data.length !== expectedLength) {
+      throw new Error(`chain-slice response must contain exactly ${expectedLength} headers`);
+    }
+    return data;
   }
 
   async getBlockHeaderIdsAtHeight(heightValue: number): Promise<string[]> {
@@ -443,7 +478,8 @@ implements AuthenticatedSpvTrackerNodeSource {
 
 export function createBoundedAuthenticatedSpvTrackerReadOnlySource(
   nodeUrl: string,
-): AuthenticatedSpvTrackerNodeSource & Pick<AuthenticatedSpvTrackerReadOnlyNodeClient, 'getBlockHeaderIdsAtHeight'> {
+): AuthenticatedSpvTrackerNodeSource & Pick<AuthenticatedSpvTrackerReadOnlyNodeClient,
+  'getBlockHeaderIdsAtHeight' | 'getBlockHeaderChainSlice'> {
   return new AuthenticatedSpvTrackerReadOnlyNodeClient(nodeUrl);
 }
 

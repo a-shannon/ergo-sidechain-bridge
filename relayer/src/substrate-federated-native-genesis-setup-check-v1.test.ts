@@ -2827,6 +2827,7 @@ describe('native FED managed setup session', () => {
         getInfo: async () => ({ network: 'devnet', fullHeight: 1020 }),
         getBestHeader: async () => ({ height: 1020, id: '70'.repeat(32) }),
         getBlockHeaderIdsAtHeight: async () => [request.target.genesisHeaderIdHex],
+        getBlockHeaderChainSlice: async () => { throw new Error('unexpected chain-slice read'); },
         getIndexedHeight: async () => { throw new Error('unexpected indexed-height read'); },
         getIndexedBoxesByTokenId: async () => { throw new Error('unexpected indexed-token read'); },
         getTransaction: async () => { throw new Error('unexpected transaction read'); },
