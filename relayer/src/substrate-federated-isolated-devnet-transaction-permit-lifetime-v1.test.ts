@@ -18,9 +18,13 @@ const names = {
   paused: 'assertSubstrateFederatedIsolatedDevnetPausedMiningIndexedSnapshotV1',
   canonicalSnapshot: 'assertSubstrateFederatedIsolatedDevnetTransactionPermitCanonicalSnapshotV1',
   stableHeader: 'assertSubstrateFederatedIsolatedDevnetTransactionPermitCanonicalHeaderStableV1',
+  proofWidth: 'transactionPermitHeaderProofWidthV1',
+  ancestry: 'assertTransactionPermitHeaderAncestryV1',
   same: 'assertExactSnapshot',
 } as const;
 type Snapshot = { network: string; fullHeight: number; indexedHeight: number; headerIdHex: string };
+type Header = { id: string; height: number; parentId: string };
+type PermitRead = { snapshot: Snapshot; bestHeader: Header };
 type Watermark = { height: number; headerId: string };
 type Arm = { operationId: string; transactionId: string; initialParent: Watermark };
 type Status = { completed: boolean; finalWatermark: Watermark | null };
@@ -77,9 +81,13 @@ function constant(name: string): number {
   return numeric(found[0].initializer);
 }
 const constants = Object.fromEntries(['MINIMUM_MINED_HEIGHT', 'MINING_TIMEOUT_MS', 'REQUEST_TIMEOUT_MS',
-  'STABILITY_DELAY_MS', 'MAX_RESPONSE_BYTES'].map(name => [name, constant(name)]));
+  'STABILITY_DELAY_MS', 'MAX_RESPONSE_BYTES', 'MAX_TRANSACTION_PERMIT_HEADER_ROWS'].map(name => [name, constant(name)]));
 function id(height: number) { return height.toString(16).padStart(64, '0'); }
 function snapshot(height = 40): Snapshot { return { network: 'devnet', fullHeight: height, indexedHeight: height, headerIdHex: id(height) }; }
+function header(height = 40): Header { return { id: id(height), height, parentId: id(height - 1) }; }
+function permitRead(value = snapshot(), bestHeader = header(value.fullHeight)): PermitRead {
+  return { snapshot: value, bestHeader };
+}
 function watermark(height = 40): Watermark { return { height, headerId: id(height) }; }
 const tx = 'ab'.repeat(32);
 const nextTx = 'cd'.repeat(32);
@@ -96,7 +104,8 @@ function harness(mutation?: Mutation) {
   const active = new WeakSet<object>([target]);
   const targets = new WeakMap<object, Binding>();
   const state = { now: 0, tip: snapshot(), parent: watermark(), paused: false, controlFailed: false, processLive: true,
-    primaryLive: true, witnessLive: true };
+    primaryLive: true, witnessLive: true, primaryBestHeader: undefined as Header | undefined,
+    witnessBestHeader: undefined as Header | undefined };
   const events: string[] = [];
   const sequence = new Map<string, number>();
   let blocked: { key: string; entered: ReturnType<typeof deferred>; gate: ReturnType<typeof deferred> } | undefined;
@@ -123,10 +132,11 @@ function harness(mutation?: Mutation) {
   const controlGuard = vi.fn((value: unknown) => {
     if (value !== control || state.paused || state.controlFailed) throw new Error('control revoked');
   });
-  const read = vi.fn(async (_node: Node, _watermark: Watermark, _deadline: number, _guard: () => void): Promise<Snapshot | undefined> => {
-    await step('read'); return { ...state.tip };
+  const read = vi.fn(async (node: Node, _watermark: Watermark, _deadline: number, _guard: () => void): Promise<PermitRead | undefined> => {
+    await step('read'); return permitRead({ ...state.tip },
+      state[node.role === 'primary' ? 'primaryBestHeader' : 'witnessBestHeader'] ?? header(state.tip.fullHeight));
   });
-  const canonicalResponse = async (_origin: string, selectedPath: string, _deadline: number,
+  const canonicalResponse = async (origin: string, selectedPath: string, _deadline: number,
     _guard: () => void): Promise<unknown> => {
     await step('canonical');
     if (selectedPath.startsWith('/blocks/at/')) {
@@ -136,8 +146,10 @@ function harness(mutation?: Mutation) {
     const match = /^\/blocks\/chainSlice\?fromHeight=([0-9]+)&toHeight=([0-9]+)$/u.exec(selectedPath);
     assert(match, `unexpected canonical path: ${selectedPath}`);
     const fromHeight = Number(match[1]); const height = Number(match[2]);
-    assert.equal(fromHeight, height - 1);
-    return [{ id: id(height), height, parentId: id(height - 1), acceptedExtraField: true }];
+    const tip = state[origin === 'primary-double' ? 'primaryBestHeader' : 'witnessBestHeader'];
+    return Array.from({ length: height - fromHeight }, (_, index) => ({
+      ...(tip?.height === fromHeight + index + 1 ? tip : header(fromHeight + index + 1)), acceptedExtraField: true,
+    }));
   };
   const canonical = vi.fn(canonicalResponse);
   const delay = vi.fn(async (duration: number) => { await step('delay'); state.now += duration; });
@@ -225,6 +237,131 @@ describe('transaction permit exact production target lifetime', () => {
     expect(paths).toEqual([...group, ...group]);
     expect(h.canonical.mock.calls.every(call => call[2] === 120_000 && typeof call[3] === 'function')).toBe(true);
   });
+
+  it.each([{ primary: 42, witness: 41 }, { primary: 40, witness: 42 }, { primary: 41, witness: 40 }])(
+    'proves each peer header-only ancestry at primary=$primary witness=$witness before public Hold', async tips => {
+      const h = harness(); h.state.primaryBestHeader = header(tips.primary); h.state.witnessBestHeader = header(tips.witness);
+      h.bind();
+      await expect(h.api.hold(h.target)).resolves.toEqual(snapshot());
+      const group = [
+        ['primary-double', '/blocks/at/40'], ['witness-double', '/blocks/at/40'],
+        ['primary-double', `/blocks/chainSlice?fromHeight=39&toHeight=${tips.primary}`],
+        ['witness-double', `/blocks/chainSlice?fromHeight=39&toHeight=${tips.witness}`],
+      ];
+      expect(h.canonical.mock.calls.map(call => call.slice(0, 2))).toEqual([...group, ...group]);
+      expect(h.canonical.mock.calls.every(call => call[2] === 120_000 && typeof call[3] === 'function')).toBe(true);
+      expect(h.arm).not.toHaveBeenCalled(); expect(h.status).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['different widths', 'same-width peer forks'])(
+    'refuses swapped canonical ancestry slices with %s', async fault => {
+      const h = harness(); h.state.primaryBestHeader = header(42);
+      h.state.witnessBestHeader = fault === 'different widths' ? header(41) : { ...header(42), id: id(142) };
+      h.canonical.mockImplementation(async (...args) => {
+        const value = await h.canonicalResponse(...args);
+        if (!args[1].startsWith('/blocks/chainSlice')) return value;
+        const other = args[0] === 'primary-double' ? h.state.witnessBestHeader! : h.state.primaryBestHeader!;
+        return Array.from({ length: other.height - 39 }, (_, index) => index + 40 === other.height ? other : header(index + 40));
+      });
+      h.bind(); await expect(h.api.hold(h.target)).rejects.toThrow('header ancestry');
+      expect(h.canonical).toHaveBeenCalledTimes(4); await remainsFailed(h);
+    },
+  );
+
+  it('drains ancestry proofs and preserves first request-slot failure after a later slot rejects first', async () => {
+    const h = harness(); h.state.primaryBestHeader = header(42); h.state.witnessBestHeader = header(41); h.bind();
+    const entered = deferred(); const gate = deferred(); let call = 0;
+    const first = new Error('first canonical request slot'); const second = new Error('second canonical request slot');
+    h.canonical.mockImplementation(async (...args) => {
+      const index = call++;
+      if (index === 0) { entered.resolve(); await gate.promise; throw first; }
+      if (index === 1) throw second;
+      return h.canonicalResponse(...args);
+    });
+    const pending = h.api.hold(h.target); const refused = expect(pending).rejects.toBe(first);
+    let settled = false; void pending.catch(() => {}).finally(() => { settled = true; });
+    await entered.promise; await Promise.resolve();
+    expect(h.canonical).toHaveBeenCalledTimes(4); expect(settled).toBe(false);
+    gate.resolve(); await refused; expect(settled).toBe(true); await remainsFailed(h);
+  });
+
+  it('preserves all four proof slots when successful responses complete in reverse request order', async () => {
+    const h = harness(); h.state.primaryBestHeader = header(42); h.state.witnessBestHeader = header(41); h.bind();
+    const gates = Array.from({ length: 4 }, () => deferred()); const entered = deferred();
+    const completion: number[] = []; let call = 0;
+    h.canonical.mockImplementation(async (...args) => {
+      const index = call++;
+      if (index < 4) {
+        if (index === 3) entered.resolve();
+        await gates[index].promise; completion.push(index);
+      }
+      return h.canonicalResponse(...args);
+    });
+    const pending = h.api.hold(h.target); const accepted = expect(pending).resolves.toEqual(snapshot());
+    await entered.promise;
+    for (const index of [3, 2, 1, 0]) { gates[index].resolve(); await Promise.resolve(); }
+    await accepted; expect(completion).toEqual([3, 2, 1, 0]);
+    expect(h.canonical.mock.calls.slice(0, 4).map(call => call.slice(0, 2))).toEqual([
+      ['primary-double', '/blocks/at/40'], ['witness-double', '/blocks/at/40'],
+      ['primary-double', '/blocks/chainSlice?fromHeight=39&toHeight=42'],
+      ['witness-double', '/blocks/chainSlice?fromHeight=39&toHeight=41'],
+    ]);
+    expect(h.canonical).toHaveBeenCalledTimes(8);
+  });
+
+  it('accepts the maximum Scala height without extending the held full-block state', async () => {
+    const h = harness(); h.state.tip = snapshot(2_147_483_647); h.state.parent = watermark(2_147_483_647); h.bind();
+    await expect(h.api.hold(h.target)).resolves.toEqual(snapshot(2_147_483_647));
+    expect(h.canonical).toHaveBeenCalledTimes(8);
+  });
+
+  it.each(['primary', 'witness'] as const)('refuses %s ancestry above Scala Int before the four block reads', async role => {
+    const h = harness(); h.state.tip = snapshot(2_147_483_647); h.state.parent = watermark(2_147_483_647);
+    h.state[role === 'primary' ? 'primaryBestHeader' : 'witnessBestHeader'] = header(2_147_483_648);
+    h.bind(); await expect(h.api.hold(h.target)).rejects.toThrow('bounded range');
+    expect(h.canonical).not.toHaveBeenCalled(); await remainsFailed(h);
+  });
+
+  it.each(['primary', 'witness'] as const)('refuses %s ancestry above the row cap before the four block reads', async role => {
+    const h = harness(); h.state[role === 'primary' ? 'primaryBestHeader' : 'witnessBestHeader'] =
+      header(40 + constants.MAX_TRANSACTION_PERMIT_HEADER_ROWS);
+    h.bind(); await expect(h.api.hold(h.target)).rejects.toThrow('bounded range');
+    expect(h.canonical).not.toHaveBeenCalled(); await remainsFailed(h);
+  });
+
+  it.each(['Hold stability', 'completion closing'].flatMap(boundary => ['primary', 'witness'].flatMap(role =>
+    ['id', 'height', 'parentId'].map(field => ({ boundary, role, field })))))(
+    'refuses $role best-header $field drift at $boundary after valid ancestry proofs', async ({ boundary, role, field }) => {
+      const h = harness();
+      if (boundary === 'completion closing') await h.armed(); else h.bind();
+      const key = role === 'primary' ? 'primaryBestHeader' : 'witnessBestHeader';
+      const before = header(h.state.tip.fullHeight + 2); h.state[key] = before;
+      const changedParent = id(before.height + 99);
+      const drift = () => { h.state[key] = field === 'id' ? { ...before, id: id(before.height + 100) }
+        : field === 'parentId' ? { ...before, parentId: changedParent } : header(before.height + 1); };
+      if (field === 'parentId') {
+        h.canonical.mockImplementation(async (...args) => {
+          const value = await h.canonicalResponse(...args);
+          if (args[0] === `${role}-double` && args[1].startsWith('/blocks/chainSlice')
+            && h.state[key]!.parentId === changedParent) {
+            const values = value as Header[];
+            values[values.length - 2] = { ...values[values.length - 2], id: changedParent };
+          }
+          return value;
+        });
+      }
+      if (boundary === 'Hold stability') {
+        const originalDelay = h.delay.getMockImplementation()!;
+        h.delay.mockImplementation(async duration => { await originalDelay(duration); drift(); });
+      } else {
+        const originalStatus = h.status.getMockImplementation()!; let statuses = 0;
+        h.status.mockImplementation(async (...args) => { const value = await originalStatus(...args); if (++statuses === 2) drift(); return value; });
+      }
+      const pending = boundary === 'Hold stability' ? h.api.hold(h.target) : h.api.complete(h.target, tx, h.state.now + 5_000);
+      await expect(pending).rejects.toThrow('canonical header changed'); await remainsFailed(h);
+    },
+  );
 
   it.each(['missing control', 'different child', 'wrong role', 'non-mining'])(
     'refuses binding %s before transport', fault => {
@@ -328,7 +465,7 @@ describe('transaction permit exact production target lifetime', () => {
   it('polls Pending and initial index lag without another Hold or Arm', async () => {
     const h = harness(); await h.armed();
     h.status.mockResolvedValueOnce({ completed: false, finalWatermark: null });
-    h.read.mockResolvedValueOnce({ ...snapshot(51), indexedHeight: 50 });
+    h.read.mockResolvedValueOnce(permitRead({ ...snapshot(51), indexedHeight: 50 }));
     await h.api.complete(h.target, tx, h.state.now + 5_000);
     expect(h.status).toHaveBeenCalledTimes(3); expect(h.delay.mock.calls.slice(1)).toEqual([[250], [250], [500]]);
     expect(h.hold).toHaveBeenCalledTimes(1); expect(h.arm).toHaveBeenCalledTimes(1);
@@ -338,7 +475,7 @@ describe('transaction permit exact production target lifetime', () => {
     'stops $poll polling when $revoke is revoked during its delay', async ({ poll, revoke }) => {
       const h = harness(); await h.armed();
       if (poll === 'Pending') h.status.mockResolvedValueOnce({ completed: false, finalWatermark: null });
-      else h.read.mockResolvedValueOnce({ ...snapshot(51), indexedHeight: 50 });
+      else h.read.mockResolvedValueOnce(permitRead({ ...snapshot(51), indexedHeight: 50 }));
       const gate = h.block('delay:1');
       const pending = h.api.complete(h.target, tx, h.state.now + 5_000);
       const refused = expect(pending).rejects.toThrow(); await gate.entered.promise;
@@ -359,15 +496,15 @@ describe('transaction permit exact production target lifetime', () => {
   it.each(['advanced full', 'index above full', 'same-height fork', 'canonical fork', 'canonical duplicate', 'stability index reversal', 'final index reversal', 'fresh Pending', 'fresh fork', 'fresh height'])(
     'refuses isolated completion %s without permitting another Arm', async fault => {
       const h = harness(); await h.armed();
-      if (fault === 'advanced full') h.read.mockResolvedValueOnce(snapshot(52));
-      if (fault === 'index above full') h.read.mockResolvedValueOnce({ ...snapshot(51), indexedHeight: 52 });
-      if (fault === 'same-height fork') h.read.mockResolvedValueOnce({ ...snapshot(51), headerIdHex: id(52) });
+      if (fault === 'advanced full') h.read.mockResolvedValueOnce(permitRead(snapshot(52)));
+      if (fault === 'index above full') h.read.mockResolvedValueOnce(permitRead({ ...snapshot(51), indexedHeight: 52 }));
+      if (fault === 'same-height fork') h.read.mockResolvedValueOnce(permitRead({ ...snapshot(51), headerIdHex: id(52) }));
       if (fault === 'canonical fork') h.canonical.mockResolvedValueOnce([id(52)]);
       if (fault === 'canonical duplicate') h.canonical.mockResolvedValueOnce([id(51), id(51)]);
       if (fault === 'stability index reversal' || fault === 'final index reversal') {
         let reads = 0; h.read.mockImplementation(async () => {
-          reads += 1; return reads === (fault === 'stability index reversal' ? 3 : 5)
-            ? { ...snapshot(51), indexedHeight: 50 } : snapshot(51);
+          reads += 1; return permitRead(reads === (fault === 'stability index reversal' ? 3 : 5)
+            ? { ...snapshot(51), indexedHeight: 50 } : snapshot(51));
         });
       }
       if (fault.startsWith('fresh')) {
@@ -383,6 +520,13 @@ describe('transaction permit exact production target lifetime', () => {
       const h = harness();
       if (boundary === 'completion closing') { await h.armed(); h.canonical.mockClear(); }
       else h.bind();
+      const originalRead = h.read.getMockImplementation()!;
+      let readCount = 0;
+      h.read.mockImplementation(async (...args) => {
+        const changed = ++readCount > (boundary === 'Hold stability' ? 2 : 4);
+        if (changed) h.state.primaryBestHeader = h.state.witnessBestHeader = { ...header(h.state.tip.fullHeight), parentId: id(1) };
+        return originalRead(...args);
+      });
       let slices = 0;
       h.canonical.mockImplementation(async (...args) => {
         const value = await h.canonicalResponse(...args);
@@ -469,6 +613,116 @@ describe('transaction permit exact production target lifetime', () => {
   });
 });
 
+describe('actual bounded transaction permit header ancestry helpers', () => {
+  function proof(mutation?: Mutation) {
+    return extract<{
+      width(heldHeight: number, tipHeight: number): number;
+      ancestry(value: unknown, held: Watermark, tip: Header): Header;
+    }>({ width: 'transactionPermitHeaderProofWidthV1', ancestry: 'assertTransactionPermitHeaderAncestryV1' }, constants, mutation);
+  }
+  function rows(): Record<string, unknown>[] { return [header(), header(41), header(42)]; }
+
+  it.each([1, 3, constants.MAX_TRANSACTION_PERMIT_HEADER_ROWS])('returns the exact held row for a dense %s-row ancestry', width => {
+    const values = Array.from({ length: width }, (_, index) => header(40 + index));
+    const result = proof().ancestry(values, watermark(), header(39 + width));
+    expect(result).toEqual(header()); expect(Object.isFrozen(result)).toBe(true);
+    expect(proof().width(40, 39 + width)).toBe(width);
+  });
+
+  it.each([
+    [0, 40], [-1, 40], [1.5, 40], [NaN, 40], [Infinity, 40],
+    [40, 39], [40, 40.5], [40, NaN], [40, Infinity], [40, Number.MAX_SAFE_INTEGER + 1],
+    [40, 40 + constants.MAX_TRANSACTION_PERMIT_HEADER_ROWS],
+    [2_147_483_647, 2_147_483_648], [2_147_483_648, 2_147_483_648],
+  ])('refuses the isolated width boundary held=%s tip=%s', (held, tip) => {
+    expect(() => proof().width(held, tip)).toThrow('bounded range');
+  });
+
+  it('accepts the maximum Scala Int height as a one-row proof', () => {
+    const maximum = 2_147_483_647;
+    expect(proof().width(maximum, maximum)).toBe(1);
+    expect(proof().ancestry([header(maximum)], watermark(maximum), header(maximum))).toEqual(header(maximum));
+  });
+
+  it.each(['not array', 'empty', 'truncated', 'extra', 'hole', 'null row', 'array row', 'inherited row fields',
+    'missing id', 'missing height', 'missing parentId', 'uppercase id', 'malformed parent', 'wrong height',
+    'self parent', 'duplicate id', 'broken link', 'wrong held id', 'first parent backedge', 'wrong tip id', 'wrong tip parent'])(
+    'refuses isolated ancestry %s', fault => {
+      const api = proof(); let value: unknown = rows(); const selected = value as Record<string, unknown>[];
+      let tip = header(42);
+      if (fault === 'not array') value = {};
+      if (fault === 'empty') value = [];
+      if (fault === 'truncated') selected.pop();
+      if (fault === 'extra') selected.push(header(43));
+      if (fault === 'hole') delete selected[1];
+      if (fault === 'null row') (selected as unknown[])[1] = null;
+      if (fault === 'array row') (selected as unknown[])[1] = [];
+      if (fault === 'inherited row fields') selected[1] = Object.create(header(41));
+      for (const name of ['id', 'height', 'parentId']) if (fault === `missing ${name}`) delete selected[1][name];
+      if (fault === 'uppercase id') selected[1].id = 'AB'.repeat(32);
+      if (fault === 'malformed parent') selected[1].parentId = 'bad';
+      if (fault === 'wrong height') selected[1].height = 41.5;
+      if (fault === 'self parent') selected[1].parentId = id(41);
+      if (fault === 'duplicate id') { selected[2].id = id(40); tip = { ...tip, id: id(40) }; }
+      if (fault === 'broken link') selected[1].parentId = id(5);
+      if (fault === 'wrong held id') { selected[0].id = id(5); selected[1].parentId = id(5); }
+      if (fault === 'first parent backedge') selected[0].parentId = id(42);
+      if (fault === 'wrong tip id') tip = { ...tip, id: id(5) };
+      if (fault === 'wrong tip parent') tip = { ...tip, parentId: id(5) };
+      expect(() => api.ancestry(value, watermark(), tip)).toThrow('header ancestry');
+      expect(api.ancestry(rows(), watermark(), header(42))).toEqual(header());
+    },
+  );
+
+  it.each(['array entry', 'id', 'height', 'parentId'])(
+    'refuses an accessor at ancestry %s without invoking it', field => {
+      const values = rows(); const get = vi.fn(() => { throw new Error('accessor invoked'); });
+      Object.defineProperty(field === 'array entry' ? values : values[1], field === 'array entry' ? '1' : field, { get });
+      expect(() => proof().ancestry(values, watermark(), header(42))).toThrow('header ancestry');
+      expect(get).not.toHaveBeenCalled();
+    },
+  );
+
+  it('refuses an inherited array entry rather than treating it as a dense row', () => {
+    const values = rows(); delete values[1];
+    Object.setPrototypeOf(values, Object.assign(Object.create(Array.prototype), { 1: header(41) }));
+    expect(() => proof().ancestry(values, watermark(), header(42))).toThrow('dense records');
+  });
+
+  const mutants = [
+    { name: 'Scala Int upper tip', before: '|| tipHeight > 2_147_483_647', after: '', fault: 'Scala Int upper tip' },
+    { name: 'row cap', before: '|| width > MAX_TRANSACTION_PERMIT_HEADER_ROWS', after: '', fault: 'row cap' },
+    { name: 'dense own array row', before: "const row: unknown = entry && Object.hasOwn(entry, 'value') ? entry.value : undefined;", after: 'const row: unknown = value[index];', fault: 'inherited array row' },
+    { name: 'own row fields', before: 'Object.getOwnPropertyDescriptor(row, name)', after: '({ value: (row as Record<string, unknown>)[name] })', fault: 'inherited row fields' },
+    { name: 'duplicate ID', before: '|| ids.has(id)', after: '', fault: 'duplicate ID' },
+    { name: 'parent link', before: '|| (previous !== undefined && parentId !== previous.id)', after: '', fault: 'parent link' },
+    { name: 'first parent backedge', before: '|| ids.has(first!.parentId)', after: '', fault: 'first parent backedge' },
+    { name: 'observed tip parent', before: '|| previous!.parentId !== bestHeader.parentId', after: '', fault: 'observed tip parent' },
+  ];
+  it.each(mutants)('kills omission of ancestry $name with an unchanged positive twin', ({ before, after, fault }) => {
+    const actual = proof(); const mutant = proof({ before, after });
+    for (const api of [actual, mutant]) expect(api.ancestry(rows(), watermark(), header(42))).toEqual(header());
+    if (fault === 'Scala Int upper tip' || fault === 'row cap') {
+      const held = fault === 'row cap' ? 40 : 2_147_483_647;
+      const tip = fault === 'row cap' ? 40 + constants.MAX_TRANSACTION_PERMIT_HEADER_ROWS : 2_147_483_648;
+      expect(() => actual.width(held, tip)).toThrow('bounded range');
+      expect(mutant.width(held, tip)).toBe(tip - held + 1);
+      return;
+    }
+    const values = rows(); let tip = header(42);
+    if (fault === 'inherited array row') {
+      delete values[1]; Object.setPrototypeOf(values, Object.assign(Object.create(Array.prototype), { 1: header(41) }));
+    }
+    if (fault === 'inherited row fields') values[1] = Object.create(header(41));
+    if (fault === 'duplicate ID') { values[2].id = id(40); tip = { ...tip, id: id(40) }; }
+    if (fault === 'parent link') values[1].parentId = id(5);
+    if (fault === 'first parent backedge') values[0].parentId = id(42);
+    if (fault === 'observed tip parent') tip = { ...tip, parentId: id(5) };
+    expect(() => actual.ancestry(values, watermark(), tip)).toThrow('header ancestry');
+    expect(mutant.ancestry(values, watermark(), tip)).toEqual(values[0]);
+  });
+});
+
 describe('actual old Pause and new exact held-index validators', () => {
   function input(): Validation { return { watermark: watermark(), primarySnapshot: snapshot(), witnessSnapshot: snapshot(),
     primaryHeaderIdsAtWatermark: [id(40)], witnessHeaderIdsAtWatermark: [id(40)] }; }
@@ -501,19 +755,19 @@ describe('actual deadline-aware snapshot and JSON helper bodies', () => {
   interface Reads {
     json(origin: string, path: string, deadline?: number, guard?: () => void): Promise<unknown>;
     snapshot(node: Node, settle?: boolean, deadline?: number, guard?: () => void): Promise<Snapshot>;
-    permit(node: Node, parent: Watermark, deadline: number, guard: () => void): Promise<Snapshot | undefined>;
+    permit(node: Node, parent: Watermark, deadline: number, guard: () => void): Promise<PermitRead | undefined>;
   }
   function reads(mutation?: Mutation) {
     const state = { now: 10, active: true };
     const guard = vi.fn(() => { if (!state.active) throw new Error('read lifetime revoked'); });
     const timeout = vi.fn((duration: number) => ({ duration }));
     const text = vi.fn(async (url: string) => JSON.stringify(url.endsWith('/info')
-      ? { network: 'devnet', fullHeight: 40 } : url.endsWith('/blocks/lastHeaders/1')
-        ? [{ height: 40, id: id(40) }] : { fullHeight: 40, indexedHeight: 40 }));
+      ? { network: 'devnet', fullHeight: 40, bestFullHeaderId: id(40) } : url.endsWith('/blocks/lastHeaders/1')
+        ? [header()] : { fullHeight: 40, indexedHeight: 40 }));
     const fetch = vi.fn(async (url: string, _init: RequestInit) => ({ ok: true, text: () => text(url) }));
     const api = extract<Reads>({ json: 'getJson', snapshot: 'readTargetSnapshot',
       permit: 'readTransactionPermitTargetSnapshot', record: 'plainRecord',
-      integer: 'nonnegativeInteger', hex: 'fixedHex' }, {
+      integer: 'nonnegativeInteger', hex: 'fixedHex', proofWidth: 'transactionPermitHeaderProofWidthV1' }, {
       ...constants, Buffer, performance: { now: () => state.now }, AbortSignal: { timeout }, fetch,
       SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN: 'primary-double',
       SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN: 'witness-double',
@@ -521,6 +775,66 @@ describe('actual deadline-aware snapshot and JSON helper bodies', () => {
     }, mutation);
     return { api, state, guard, timeout, text, fetch };
   }
+
+  it('joins the best-full header binding while a header-only extension is ahead', async () => {
+    const r = reads();
+    r.text.mockImplementation(async url => JSON.stringify(url.endsWith('/info')
+      ? { network: 'devnet', fullHeight: 40, bestFullHeaderId: id(40) }
+      : url.endsWith('/blocks/lastHeaders/1') ? [header(41)]
+        : { fullHeight: 40, indexedHeight: 40 }));
+    await expect(r.api.permit({ role: 'primary', mode: 'mining', child: {} }, watermark(), 110, r.guard))
+      .resolves.toEqual(permitRead(snapshot(), header(41)));
+  });
+
+  it('refuses a contradictory best-full header binding at the held height', async () => {
+    const r = reads();
+    r.text.mockImplementation(async url => JSON.stringify(url.endsWith('/info')
+      ? { network: 'devnet', fullHeight: 40, bestFullHeaderId: id(39) }
+      : url.endsWith('/blocks/lastHeaders/1') ? [header()]
+        : { fullHeight: 40, indexedHeight: 40 }));
+    await expect(r.api.permit({ role: 'primary', mode: 'mining', child: {} }, watermark(), 110, r.guard))
+      .rejects.toThrow();
+  });
+
+  it.each([undefined, null, 40, '', 'bad', 'AB'.repeat(32)])(
+    'requires the exact raw best-full header ID without header-tip fallback: %s', async bestFullHeaderId => {
+      const r = reads(); const original = r.text.getMockImplementation()!;
+      r.text.mockImplementation(async url => url.endsWith('/info')
+        ? JSON.stringify({ network: 'devnet', fullHeight: 40, bestFullHeaderId }) : original(url));
+      await expect(r.api.permit({ role: 'primary', mode: 'mining', child: {} }, watermark(), 110, r.guard))
+        .rejects.toThrow('best full header ID');
+      expect(r.fetch).toHaveBeenCalledTimes(3);
+    },
+  );
+
+  it.each([undefined, null, 39, '', 'bad', 'AB'.repeat(32)])(
+    'requires the exact raw best-header parent: %s', async parentId => {
+      const r = reads(); const original = r.text.getMockImplementation()!;
+      r.text.mockImplementation(async url => url.endsWith('/blocks/lastHeaders/1')
+        ? JSON.stringify([{ ...header(), parentId }]) : original(url));
+      await expect(r.api.permit({ role: 'primary', mode: 'mining', child: {} }, watermark(), 110, r.guard))
+        .rejects.toThrow('best header parent ID');
+      expect(r.fetch).toHaveBeenCalledTimes(3);
+    },
+  );
+
+  it('kills omission of raw best-full identity agreement with an unchanged positive twin', async () => {
+    const before = '|| (fullHeight === watermark.height && fullHeaderIdHex !== watermark.headerId)';
+    for (const r of [reads(), reads({ before, after: '' })]) {
+      await expect(r.api.permit({ role: 'primary', mode: 'mining', child: {} }, watermark(), 110, r.guard))
+        .resolves.toEqual(permitRead());
+    }
+    const actual = reads(); const mutant = reads({ before, after: '' });
+    for (const r of [actual, mutant]) {
+      const original = r.text.getMockImplementation()!;
+      r.text.mockImplementation(async url => url.endsWith('/info')
+        ? JSON.stringify({ network: 'devnet', fullHeight: 40, bestFullHeaderId: id(39) }) : original(url));
+    }
+    await expect(actual.api.permit({ role: 'primary', mode: 'mining', child: {} }, watermark(), 110, actual.guard))
+      .rejects.toThrow('contradicts its held parent');
+    await expect(mutant.api.permit({ role: 'primary', mode: 'mining', child: {} }, watermark(), 110, mutant.guard))
+      .resolves.toEqual(permitRead({ ...snapshot(), headerIdHex: id(39) }));
+  });
 
   const partialSamples = ['header before full', 'full before header', 'index before info', 'index behind full'] as const;
   function useRawLifetimeReader(h: ReturnType<typeof harness>, r: ReturnType<typeof reads>) {
@@ -531,10 +845,12 @@ describe('actual deadline-aware snapshot and JSON helper bodies', () => {
   }
   function sample(url: string, fault: string | undefined): string {
     if (url.endsWith('/info')) return JSON.stringify({ network: 'devnet',
+      bestFullHeaderId: id(fault === 'header before full' || fault === 'index before info' ? 39 : 40),
       fullHeight: fault === 'header before full' || fault === 'index before info' ? 39 : 40 });
     if (url.endsWith('/blocks/lastHeaders/1')) return JSON.stringify([
       { height: fault === 'full before header' ? 39 : 40,
-        id: fault === 'full before header' ? id(39) : id(40) },
+        id: fault === 'full before header' ? id(39) : id(40),
+        parentId: id(fault === 'full before header' ? 38 : 39) },
     ]);
     return JSON.stringify({ fullHeight: fault === 'header before full' ? 39 : 40,
       indexedHeight: fault === 'header before full' || fault === 'index behind full' ? 39 : 40 });
@@ -554,22 +870,24 @@ describe('actual deadline-aware snapshot and JSON helper bodies', () => {
 
   it.each(['primary', 'witness'])('keeps one deadline and guard for each raw held %s sample', async role => {
     const r = reads();
-    expect(await r.api.permit({ role, mode: 'non-mining', child: {} }, watermark(), 110, r.guard)).toEqual(snapshot());
+    expect(await r.api.permit({ role, mode: 'non-mining', child: {} }, watermark(), 110, r.guard)).toEqual(permitRead());
     expect(r.timeout.mock.calls).toEqual([[100], [100], [100]]);
     expect(r.guard).toHaveBeenCalledTimes(10);
   });
 
-  const rawRefusals = ['network', 'full above held', 'header above held', 'index full above held',
+  const rawRefusals = ['network', 'full above held', 'header range above bound', 'index full above held',
     'index above full', 'same-height fork', 'header cardinality', 'header ID', 'full type', 'header type',
     'index full type', 'indexed type'] as const;
   it.each(rawRefusals)('seals Hold on isolated actual raw %s before canonical lookup', async fault => {
     const h = harness(); const r = reads(); h.bind();
     r.text.mockImplementation(async url => {
       if (url.endsWith('/info')) return JSON.stringify({ network: fault === 'network' ? 'mainnet' : 'devnet',
+        bestFullHeaderId: id(40),
         fullHeight: fault === 'full above held' ? 41 : fault === 'full type' ? '40' : 40 });
       if (url.endsWith('/blocks/lastHeaders/1')) return JSON.stringify(fault === 'header cardinality' ? [] : [{
-        height: fault === 'header above held' ? 41 : fault === 'header type' ? 40.5 : 40,
+        height: fault === 'header range above bound' ? 40 + constants.MAX_TRANSACTION_PERMIT_HEADER_ROWS : fault === 'header type' ? 40.5 : 40,
         id: fault === 'header ID' ? 'bad' : fault === 'same-height fork' ? id(41) : id(40),
+        parentId: id(39),
       }]);
       return JSON.stringify({ fullHeight: fault === 'index full above held' ? 41
         : fault === 'index above full' ? 39 : fault === 'index full type' ? null : 40,
@@ -603,23 +921,42 @@ describe('actual deadline-aware snapshot and JSON helper bodies', () => {
   ])('kills omission of raw $fault refusal', async ({ before, after, fault }) => {
     const r = reads({ before, after });
     r.text.mockImplementation(async url => url.endsWith('/blocks/lastHeaders/1')
-      ? JSON.stringify([{ height: 40, id: fault === 'same-height fork' ? id(41) : id(40) }])
-      : url.endsWith('/info') ? JSON.stringify({ network: 'devnet', fullHeight: 40 })
+      ? JSON.stringify([{ height: 40, id: fault === 'same-height fork' ? id(41) : id(40), parentId: id(39) }])
+      : url.endsWith('/info') ? JSON.stringify({ network: 'devnet', fullHeight: 40, bestFullHeaderId: id(40) })
         : JSON.stringify({ fullHeight: fault === 'index above full' ? 39 : 40, indexedHeight: 40 }));
     const observed = await r.api.permit({ role: 'primary', mode: 'mining', child: {} }, watermark(), 110, r.guard);
-    expect(observed === undefined || observed.headerIdHex === id(41)).toBe(true);
+    expect(observed === undefined || observed.bestHeader.id === id(41)).toBe(true);
   });
 
   it.each(['primary', 'witness'])('does not hide the other peer fork behind raw %s lag', async pendingRole => {
     const h = harness(); const r = reads(); h.bind();
     r.text.mockImplementation(async url => url.startsWith(`${pendingRole}-double`)
       ? sample(url, 'header before full')
-      : url.endsWith('/blocks/lastHeaders/1') ? JSON.stringify([{ height: 40, id: id(41) }])
+      : url.endsWith('/blocks/lastHeaders/1') ? JSON.stringify([{ ...header(), id: id(41) }])
         : sample(url, undefined));
     useRawLifetimeReader(h, r);
     await expect(h.api.hold(h.target)).rejects.toThrow('contradicts its held parent');
     expect(h.delay).not.toHaveBeenCalled(); expect(h.canonical).not.toHaveBeenCalled(); await remainsFailed(h);
   });
+
+  it.each(['primary', 'witness'].flatMap(role => ['same peer', 'other peer'].map(lag => ({ role, lag }))))(
+    'refuses raw $role best-full identity contradiction before $lag index lag can defer it', async ({ role, lag }) => {
+      const h = harness(); const r = reads(); h.bind();
+      r.text.mockImplementation(async url => {
+        const selectedPeer = url.startsWith(`${role}-double`);
+        if (selectedPeer && url.endsWith('/info')) {
+          return JSON.stringify({ network: 'devnet', fullHeight: 40, bestFullHeaderId: id(39) });
+        }
+        if (url.endsWith('/blockchain/indexedHeight') && selectedPeer === (lag === 'same peer')) {
+          return JSON.stringify({ fullHeight: 40, indexedHeight: 39 });
+        }
+        return sample(url, undefined);
+      });
+      useRawLifetimeReader(h, r);
+      await expect(h.api.hold(h.target)).rejects.toThrow('contradicts its held parent');
+      expect(h.delay).not.toHaveBeenCalled(); expect(h.canonical).not.toHaveBeenCalled(); await remainsFailed(h);
+    },
+  );
 
   it('joins raw completion lag to exact indexing and fresh status before another Arm', async () => {
     const h = harness(); await h.armed(); const r = reads();
@@ -627,8 +964,8 @@ describe('actual deadline-aware snapshot and JSON helper bodies', () => {
     const start = h.state.now;
     r.text.mockImplementation(async url => {
       const lag = url.startsWith('witness-double') && h.state.now === start;
-      if (url.endsWith('/info')) return JSON.stringify({ network: 'devnet', fullHeight: lag ? 50 : 51 });
-      if (url.endsWith('/blocks/lastHeaders/1')) return JSON.stringify([{ height: 51, id: id(51) }]);
+      if (url.endsWith('/info')) return JSON.stringify({ network: 'devnet', fullHeight: lag ? 50 : 51, bestFullHeaderId: id(lag ? 50 : 51) });
+      if (url.endsWith('/blocks/lastHeaders/1')) return JSON.stringify([header(51)]);
       return JSON.stringify({ fullHeight: lag ? 50 : 51, indexedHeight: lag ? 50 : 51 });
     });
     useRawLifetimeReader(h, r);
@@ -647,8 +984,8 @@ describe('actual deadline-aware snapshot and JSON helper bodies', () => {
     const h = harness(); await h.armed(); const r = reads(); const start = h.state.now;
     r.text.mockImplementation(async url => {
       const lag = h.state.now > start;
-      if (url.endsWith('/info')) return JSON.stringify({ network: 'devnet', fullHeight: lag ? 50 : 51 });
-      if (url.endsWith('/blocks/lastHeaders/1')) return JSON.stringify([{ height: 51, id: id(51) }]);
+      if (url.endsWith('/info')) return JSON.stringify({ network: 'devnet', fullHeight: lag ? 50 : 51, bestFullHeaderId: id(lag ? 50 : 51) });
+      if (url.endsWith('/blocks/lastHeaders/1')) return JSON.stringify([header(51)]);
       return JSON.stringify({ fullHeight: lag ? 50 : 51, indexedHeight: lag ? 50 : 51 });
     });
     useRawLifetimeReader(h, r);

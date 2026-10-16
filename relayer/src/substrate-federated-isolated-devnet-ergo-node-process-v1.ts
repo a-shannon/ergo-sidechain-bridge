@@ -126,6 +126,7 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGE
   78 * 60_000;
 const STABILITY_DELAY_MS = 500;
 const MAX_RESPONSE_BYTES = 256 * 1024;
+const MAX_TRANSACTION_PERMIT_HEADER_ROWS = 16_384;
 const API_KEY = 'hello';
 const API_KEY_HASH_HEX =
   '324dcf027dd4a30a932c441f365a25e86b173defa4b8e58948253471b81b72cf';
@@ -281,6 +282,11 @@ interface TargetSnapshot {
   readonly fullHeight: number;
   readonly indexedHeight: number;
   readonly headerIdHex: string;
+}
+
+interface TransactionPermitTargetSnapshot {
+  readonly snapshot: Readonly<TargetSnapshot>;
+  readonly bestHeader: Readonly<{ id: string; height: number; parentId: string }>;
 }
 
 export interface SubstrateFederatedIsolatedDevnetMiningPauseObservationV1 {
@@ -4155,12 +4161,14 @@ function bindOwnedMiningTransactionPermit(
   };
   const readExact = async (watermark: Readonly<{ headerId: string; height: number }>) => {
     assertOriginalTarget();
-    const [primarySnapshot, witnessSnapshot] = await Promise.all([
+    const [primaryRead, witnessRead] = await Promise.all([
       readTransactionPermitTargetSnapshot(primary, watermark, deadline, assertOriginalTarget),
       readTransactionPermitTargetSnapshot(witness, watermark, deadline, assertOriginalTarget),
     ]);
     assertOriginalTarget();
-    if (primarySnapshot === undefined || witnessSnapshot === undefined) return undefined;
+    if (primaryRead === undefined || witnessRead === undefined) return undefined;
+    const primarySnapshot = primaryRead.snapshot;
+    const witnessSnapshot = witnessRead.snapshot;
     for (const snapshot of [primarySnapshot, witnessSnapshot]) {
       if (snapshot.fullHeight > watermark.height || snapshot.indexedHeight > snapshot.fullHeight
         || (snapshot.fullHeight === watermark.height && snapshot.headerIdHex !== watermark.headerId)) {
@@ -4170,20 +4178,30 @@ function bindOwnedMiningTransactionPermit(
     if ([primarySnapshot, witnessSnapshot].some(snapshot =>
       snapshot.fullHeight < watermark.height || snapshot.indexedHeight < watermark.height)) return undefined;
     const path = `/blocks/at/${watermark.height}`;
-    const canonicalPath = `/blocks/chainSlice?fromHeight=${watermark.height - 1}&toHeight=${watermark.height}`;
+    transactionPermitHeaderProofWidthV1(watermark.height, primaryRead.bestHeader.height);
+    transactionPermitHeaderProofWidthV1(watermark.height, witnessRead.bestHeader.height);
+    const primaryCanonicalPath = `/blocks/chainSlice?fromHeight=${watermark.height - 1}&toHeight=${primaryRead.bestHeader.height}`;
+    const witnessCanonicalPath = `/blocks/chainSlice?fromHeight=${watermark.height - 1}&toHeight=${witnessRead.bestHeader.height}`;
     const [primaryHeaderIdsAtWatermark, witnessHeaderIdsAtWatermark,
       primaryCanonicalHeaders, witnessCanonicalHeaders] = await settleCopiedErgoReads([
       getJson(SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN, path, deadline, assertOriginalTarget),
       getJson(SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN, path, deadline, assertOriginalTarget),
-      getJson(SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN, canonicalPath, deadline, assertOriginalTarget),
-      getJson(SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN, canonicalPath, deadline, assertOriginalTarget),
+      getJson(SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN, primaryCanonicalPath, deadline, assertOriginalTarget),
+      getJson(SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN, witnessCanonicalPath, deadline, assertOriginalTarget),
     ]);
     assertOriginalTarget();
+    const primaryHeldHeader = assertTransactionPermitHeaderAncestryV1(
+      primaryCanonicalHeaders, watermark, primaryRead.bestHeader,
+    );
+    const witnessHeldHeader = assertTransactionPermitHeaderAncestryV1(
+      witnessCanonicalHeaders, watermark, witnessRead.bestHeader,
+    );
     const canonicalHeader = assertSubstrateFederatedIsolatedDevnetTransactionPermitCanonicalSnapshotV1({
       watermark, primarySnapshot, witnessSnapshot, primaryHeaderIdsAtWatermark, witnessHeaderIdsAtWatermark,
-      primaryCanonicalHeaders, witnessCanonicalHeaders,
+      primaryCanonicalHeaders: [primaryHeldHeader], witnessCanonicalHeaders: [witnessHeldHeader],
     });
-    return Object.freeze({ snapshot: primarySnapshot, canonicalHeader });
+    return Object.freeze({ snapshot: primarySnapshot, canonicalHeader,
+      primaryBestHeader: primaryRead.bestHeader, witnessBestHeader: witnessRead.bestHeader });
   };
   const stableExact = async (watermark: Readonly<{ headerId: string; height: number }>) => {
     for (;;) {
@@ -4198,6 +4216,12 @@ function bindOwnedMiningTransactionPermit(
       assertExactSnapshot(after.snapshot, snapshot.snapshot, 'primary');
       assertSubstrateFederatedIsolatedDevnetTransactionPermitCanonicalHeaderStableV1(
         snapshot.canonicalHeader, after.canonicalHeader,
+      );
+      assertSubstrateFederatedIsolatedDevnetTransactionPermitCanonicalHeaderStableV1(
+        snapshot.primaryBestHeader, after.primaryBestHeader,
+      );
+      assertSubstrateFederatedIsolatedDevnetTransactionPermitCanonicalHeaderStableV1(
+        snapshot.witnessBestHeader, after.witnessBestHeader,
       );
       return snapshot;
     }
@@ -4262,6 +4286,12 @@ function bindOwnedMiningTransactionPermit(
           assertExactSnapshot(after.snapshot, snapshot.snapshot, 'primary');
           assertSubstrateFederatedIsolatedDevnetTransactionPermitCanonicalHeaderStableV1(
             snapshot.canonicalHeader, after.canonicalHeader,
+          );
+          assertSubstrateFederatedIsolatedDevnetTransactionPermitCanonicalHeaderStableV1(
+            snapshot.primaryBestHeader, after.primaryBestHeader,
+          );
+          assertSubstrateFederatedIsolatedDevnetTransactionPermitCanonicalHeaderStableV1(
+            snapshot.witnessBestHeader, after.witnessBestHeader,
           );
           phase = 'held';
           deadline = Infinity;
@@ -4346,6 +4376,59 @@ function assertSubstrateFederatedIsolatedDevnetTransactionPermitCanonicalHeaderS
   if (before.id !== after.id || before.height !== after.height || before.parentId !== after.parentId) {
     throw new Error('isolated Ergo transaction permit canonical header changed during observation');
   }
+}
+
+function transactionPermitHeaderProofWidthV1(heldHeight: number, tipHeight: number): number {
+  const width = tipHeight - heldHeight + 1;
+  if (!Number.isSafeInteger(heldHeight) || heldHeight < 1 || heldHeight > 2_147_483_647
+    || !Number.isSafeInteger(tipHeight) || tipHeight < heldHeight || tipHeight > 2_147_483_647
+    || !Number.isSafeInteger(width) || width > MAX_TRANSACTION_PERMIT_HEADER_ROWS) {
+    throw new Error('isolated Ergo transaction permit header ancestry exceeds its bounded range');
+  }
+  return width;
+}
+
+function assertTransactionPermitHeaderAncestryV1(
+  value: unknown,
+  watermark: Readonly<{ headerId: string; height: number }>,
+  bestHeader: Readonly<{ id: string; height: number; parentId: string }>,
+): Readonly<{ id: string; height: number; parentId: string }> {
+  const width = transactionPermitHeaderProofWidthV1(watermark.height, bestHeader.height);
+  if (!Array.isArray(value) || value.length !== width) {
+    throw new Error('isolated Ergo transaction permit header ancestry is incomplete');
+  }
+  const ids = new Set<string>();
+  let first: Readonly<{ id: string; height: number; parentId: string }> | undefined;
+  let previous: Readonly<{ id: string; height: number; parentId: string }> | undefined;
+  for (let index = 0; index < value.length; index += 1) {
+    const entry = Object.getOwnPropertyDescriptor(value, String(index));
+    const row: unknown = entry && Object.hasOwn(entry, 'value') ? entry.value : undefined;
+    if (row === null || typeof row !== 'object' || Array.isArray(row)) {
+      throw new Error('isolated Ergo transaction permit header ancestry requires dense records');
+    }
+    const fields = ['id', 'height', 'parentId'].map(name => Object.getOwnPropertyDescriptor(row, name));
+    if (fields.some(field => field === undefined || !Object.hasOwn(field, 'value'))) {
+      throw new Error('isolated Ergo transaction permit header ancestry requires own data fields');
+    }
+    const [id, height, parentId]: unknown[] = fields.map(field => field!.value);
+    if (typeof id !== 'string' || !/^[0-9a-f]{64}$/u.test(id)
+      || typeof parentId !== 'string' || !/^[0-9a-f]{64}$/u.test(parentId)
+      || typeof height !== 'number' || height !== watermark.height + index
+      || parentId === id || ids.has(id)
+      || (previous !== undefined && parentId !== previous.id)) {
+      throw new Error('isolated Ergo transaction permit header ancestry contradicts its held parent');
+    }
+    const current = Object.freeze({ id, height, parentId });
+    if (first === undefined) first = current;
+    previous = current;
+    ids.add(id);
+  }
+  if (first!.id !== watermark.headerId || ids.has(first!.parentId)
+    || previous!.id !== bestHeader.id || previous!.height !== bestHeader.height
+    || previous!.parentId !== bestHeader.parentId) {
+    throw new Error('isolated Ergo transaction permit header ancestry differs from its observed tips');
+  }
+  return first!;
 }
 
 export function isSubstrateFederatedIsolatedDevnetSetupSnapshotReadyV1(
@@ -4682,7 +4765,7 @@ async function readTransactionPermitTargetSnapshot(
   watermark: Readonly<{ headerId: string; height: number }>,
   deadline: number,
   assertActive: () => void,
-): Promise<Readonly<TargetSnapshot> | undefined> {
+): Promise<Readonly<TransactionPermitTargetSnapshot> | undefined> {
   const origin = node.role === 'primary'
     ? SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN
     : SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN;
@@ -4698,24 +4781,31 @@ async function readTransactionPermitTargetSnapshot(
     throw new Error(`${node.role} node did not identify the exact devnet network`);
   }
   const fullHeight = nonnegativeInteger(info.fullHeight, `${node.role} full height`);
+  const fullHeaderIdHex = fixedHex(info.bestFullHeaderId, 32, `${node.role} best full header ID`);
   if (!Array.isArray(headersValue) || headersValue.length !== 1) {
     throw new Error(`${node.role} best-header response is not singular`);
   }
   const header = plainRecord(headersValue[0], `${node.role} best header`);
   const headerHeight = nonnegativeInteger(header.height, `${node.role} header height`);
   const headerIdHex = fixedHex(header.id, 32, `${node.role} best header ID`);
+  const parentId = fixedHex(header.parentId, 32, `${node.role} best header parent ID`);
   const index = plainRecord(indexValue, `${node.role} indexed height`);
   const indexFullHeight = nonnegativeInteger(index.fullHeight, `${node.role} index full height`);
   const indexedHeight = nonnegativeInteger(index.indexedHeight, `${node.role} indexed height`);
-  if ([fullHeight, headerHeight, indexFullHeight, indexedHeight].some(height => height > watermark.height)
+  if ([fullHeight, indexFullHeight, indexedHeight].some(height => height > watermark.height)
     || indexedHeight > indexFullHeight
+    || (fullHeight === watermark.height && fullHeaderIdHex !== watermark.headerId)
     || (headerHeight === watermark.height && headerIdHex !== watermark.headerId)) {
     throw new Error('isolated Ergo transaction permit indexed tip contradicts its held parent');
   }
   if ([fullHeight, headerHeight, indexFullHeight, indexedHeight].some(height => height < watermark.height)) {
     return undefined;
   }
-  return Object.freeze({ network: 'devnet' as const, fullHeight, indexedHeight, headerIdHex });
+  transactionPermitHeaderProofWidthV1(watermark.height, headerHeight);
+  return Object.freeze({
+    snapshot: Object.freeze({ network: 'devnet' as const, fullHeight, indexedHeight, headerIdHex: fullHeaderIdHex }),
+    bestHeader: Object.freeze({ id: headerIdHex, height: headerHeight, parentId }),
+  });
 }
 
 async function readTargetSnapshot(

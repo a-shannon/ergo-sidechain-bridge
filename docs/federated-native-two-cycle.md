@@ -263,31 +263,45 @@ The existing confirmation check and fresh exact held-index completion must
 both finish within the original confirmation deadline before the next Arm.
 During that indexed join, independently sampled header, full-block and index
 heights can lag one another. A well-formed sample below the held watermark
-remains pending within the original deadline. No sample may exceed the held
-height, report an index beyond its own full height, or name a different header
-at the held height. Both nodes must reach the exact held header and fully
-indexed height, pass canonical-height lookups and remain exact across the
-stability observation before the join completes. Regression after that first
-exact observation refuses the operation.
+remains pending within the original deadline. Full-block and index heights
+must not exceed the held height or report an index beyond its own full height.
+At that height, `/info.bestFullHeaderId` must identify the authenticated held
+parent; a matching best-header response cannot substitute for it. Both nodes
+must reach that exact full block and fully indexed height before the join can
+complete. Regression after the first exact observation refuses the operation.
 
-The native transaction permit uses a dedicated proof of that exact held parent.
+The native transaction permit distinguishes the held full block from the
+best-header chain. Native Hold joins the best full block to the applied state;
+`/blocks/lastHeaders/1` can identify a later header without its block sections.
+Each node's best header must be at or above the held height. A later header
+requires a complete ascending `/blocks/chainSlice` from `H-1` to that node's
+observed header height. The exact row count, consecutive heights, unique IDs
+and every parent link must connect the held ID to the observed tip's complete
+ID/height/parent tuple. Sparse rows, inherited or accessor fields, self links,
+back edges, truncation and mismatched endpoints refuse. The inclusive range
+must fit the node's 16,384-header cap before proof requests begin; the existing
+response byte limit may impose a smaller effective range.
+
 Both height lists must be nonempty, contain distinct lowercase header IDs and
-put the held ID first. A sibling fork after that entry is allowed only when each
-node also returns exactly one header from
-`/blocks/chainSlice?fromHeight=H-1&toHeight=H`, with the held ID and height and
-the same valid, non-self parent ID. An absent, extra or mismatched row refuses
-the operation; the tuple must match even if the node route uses its best-header
-fallback. The full header tuple remains identical across
-the stable observation and the final completion re-read, as do the indexed
-snapshots. Ordinary index lag remains pending before these proof requests;
-contradictions refuse. All four height-list and slice reads drain before any
-failure escapes. The original absolute deadline, request limit and response
-byte limit remain unchanged.
+put the held ID first. The held row extracted from each ancestry proof must
+have the same ID, height and valid non-self parent on both nodes. Each peer's
+header tip may differ, but its own complete tuple, the paired held tuple and
+the full-block/indexed snapshots must remain exact across the stable observation
+and final completion re-read. Ordinary index lag remains pending before proof
+requests; contradictions refuse. All four height-list and slice reads drain
+before any failure escapes. The original absolute deadline, request limit and
+response byte limit remain unchanged. A route fallback is acceptable only if
+its actual rows satisfy this complete proof.
 
 This proof belongs to the authenticated native transaction permit. The mining
 pause validator and the earlier exact-snapshot export retain their singleton
 height-list rule. The caller receives the same held snapshot and gains no new
 submission, custody or fee authority.
+
+This distinction closes the native permit observation boundary. Downstream
+prior-confirmation revalidation and reward-input discovery retain their own
+exact held-tip checks. Acceptance of a header extension by the permit alone
+does not establish acceptance by those consumers or a complete deposit.
 
 Before discovering each deposit's fresh reward inputs, the root rechecks the
 exact prior confirmations on both owned nodes: all genesis issuance receipts
