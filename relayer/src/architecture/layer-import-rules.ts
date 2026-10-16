@@ -428,6 +428,9 @@ const REVIEWED_FEDERATED_GENESIS_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlySe
     'executeFrontierNativeProofBoundContinuationReservationV1', 'executeFrontierNativeProofBoundContinuationMintAndBurnV1',
   ])],
   ['../../ergo-settlement-core/strict-json.js', new Set(['assertNoDuplicateJsonKeys', 'canonicalJson'])],
+  ['../../ergo-settlement-core/ergo-full-block-observation-v1.js', new Set([
+    'parseErgoFullBlockObservationV1', 'assertErgoFullBlockHeaderProofV1',
+  ])],
   ['node:crypto', new Set(['createHash'])],
   ['node:fs', new Set(['mkdirSync', 'mkdtempSync', 'readFileSync', 'realpathSync', 'writeFileSync'])],
   ['node:path', new Set(['basename', 'dirname', 'join'])],

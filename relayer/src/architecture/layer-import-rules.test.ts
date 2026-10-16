@@ -230,6 +230,36 @@ describe('layer import rules', () => {
   });
 
   it.each([
+    'parseErgoFullBlockObservationV1',
+    'assertErgoFullBlockHeaderProofV1',
+  ])('admits the reviewed root full-block direct call %s', binding => {
+    const source = `import { ${binding} } from '../../ergo-settlement-core/ergo-full-block-observation-v1.js'; ${binding}(observation);`;
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, source))).toEqual([]);
+  });
+
+  it.each([
+    ['unknown exported constant', "import { ERGO_FULL_BLOCK_HEADER_PROOF_MAX_ROWS_V1 } from '../../ergo-settlement-core/ergo-full-block-observation-v1.js';",
+      'restricted capability import binding is not allowlisted: ../../ergo-settlement-core/ergo-full-block-observation-v1.js#ERGO_FULL_BLOCK_HEADER_PROOF_MAX_ROWS_V1'],
+    ['alias', "import { parseErgoFullBlockObservationV1 as parse } from '../../ergo-settlement-core/ergo-full-block-observation-v1.js'; parse(observation);",
+      'restricted capability import binding must not be aliased: ../../ergo-settlement-core/ergo-full-block-observation-v1.js#parseErgoFullBlockObservationV1'],
+    ['namespace', "import * as fullBlock from '../../ergo-settlement-core/ergo-full-block-observation-v1.js'; fullBlock.parseErgoFullBlockObservationV1(observation);",
+      'restricted capability import must use reviewed named bindings: ../../ergo-settlement-core/ergo-full-block-observation-v1.js'],
+    ['default', "import fullBlock from '../../ergo-settlement-core/ergo-full-block-observation-v1.js'; fullBlock(observation);",
+      'restricted capability import must use reviewed named bindings: ../../ergo-settlement-core/ergo-full-block-observation-v1.js'],
+    ['dynamic', "const fullBlock = await import('../../ergo-settlement-core/ergo-full-block-observation-v1.js'); fullBlock.parseErgoFullBlockObservationV1(observation);",
+      'restricted capability import must use reviewed named bindings: ../../ergo-settlement-core/ergo-full-block-observation-v1.js'],
+    ['re-export', "export { assertErgoFullBlockHeaderProofV1 } from '../../ergo-settlement-core/ergo-full-block-observation-v1.js';",
+      'restricted capability import must use reviewed named bindings: ../../ergo-settlement-core/ergo-full-block-observation-v1.js'],
+    ['runtime binding escape', "import { assertErgoFullBlockHeaderProofV1 } from '../../ergo-settlement-core/ergo-full-block-observation-v1.js'; const escaped = assertErgoFullBlockHeaderProofV1;",
+      'restricted capability binding must not escape its reviewed call: ../../ergo-settlement-core/ergo-full-block-observation-v1.js#assertErgoFullBlockHeaderProofV1'],
+  ])('rejects widening the root full-block import through %s', (_fault, source, expected) => {
+    const files = staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, source);
+    // Resolve non-import-declaration edges so the named-binding guard decides each fixture.
+    files['ergo-settlement-core/ergo-full-block-observation-v1.ts'] = 'export {};';
+    expect(inspect(files).map(violation => violation.message)).toContain(expected);
+  });
+
+  it.each([
     ['substrate-federated-native-two-cycle-root-phase-v1',
       'projectOwnSubstrateFederatedNativeTwoCycleRootFailurePhaseV1', false],
     ['substrate-federated-native-two-cycle-cycle-step-v1',

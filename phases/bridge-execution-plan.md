@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-10-15
+Updated: 2026-10-16
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,8 +28,21 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Bind the native transaction permit to the held full-block identity and
-prove any later best-header tip descends from it. Preserve paired canonical
+**Now:** Close the downstream full-block funding-anchor correction. Two pure
+extracted-production falsifiers demonstrated that the old prior-confirmation
+revalidation and V2 reward discovery rejected a coherent header-only extension
+above the held full block; discovery also accepted an absent `bestFullHeaderId`. Their baseline
+and the original funding-equality refusal for a later retained full anchor pass.
+The two cases now pass on the candidate. Root and V2 separately prove complete
+bounded ancestry from the full block to each captured header tip, retain exact
+full-anchor equality, and preserve cleanup, custody and all resource limits.
+Legacy V1 discovery is unchanged. Complete the isolated proof/IO/role/drift
+matrix, affected consumers and exact review before local promotion. No campaign
+or historical cause is established by this source result.
+
+The preceding native permit correction was locally promoted at
+`dbe2b816cd30ddb3751a8a8cb06f358aba42361d`. It binds the held full-block identity and
+proves any later best-header tip descends from it. Preserve paired canonical
 tuples, stable and closing observations, historical singleton validators and
 all resource and authority limits. Two exact-production reader regressions
 demonstrate the old mismatch: it rejects a header-only extension above the
@@ -2156,7 +2169,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Native held full block -> exact permit observation | Close the demonstrated best-full versus best-header correction with bounded ancestry, isolated refusals, exact review and local promotion | Downstream funding tip checks remain separate. No historical cause, complete deposit, lifecycle or execution authority follows; C24-C72 holds remain permanent, with no selected successor campaign, push or new CI |
+| **Now** | Held full block -> prior confirmations and V2 funding anchor | Close the demonstrated downstream header/full mismatch with shared bounded value proof, independent before/after full-anchor checks, V2-only discovery and unchanged funding equality | Two pure consumer cases are RED then GREEN; close exact field/role/IO/drift/budget/legacy consumers and review before local promotion. No historical cause or lifecycle authority; C24-C72 holds remain permanent, with no selected successor campaign, push or new CI |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Separately select and admit one local synthetic campaign after a deciding checkpoint, exact local source identity, applicable checks/review and fresh runtime/source/output/custody/fee gates; apply guarded publication and due exact-head CI at public promotion | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
@@ -2201,7 +2214,8 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Native held full-block observation (source correction in progress) | The permit binds `/info.bestFullHeaderId` to its authenticated full/index watermark and proves every header link to each peer's own best-header tip; exact paired held tuples and stable/closing proof remain mandatory | Two production-reader RED cases distinguish header-only advance from a conflicting full-block identity. Close direct reader, composed permit, isolated ancestry/drainage/drift refusals, unchanged legacy behavior, TypeScript and exact independent review before guarded local promotion. No historical cause or complete lifecycle is established |
+| Downstream held full-block funding anchor (source correction in progress) | Root prior-confirmation revalidation and V2 discovery prove complete ancestry from mandatory best-full ID to the observed header tip; retain the held full anchor, original funding equality, scopes and budgets | Two extracted-production cases are RED then GREEN, including absent-full-ID refusal and the unchanged funding-equality refusal of a later retained BEFORE anchor. Exact isolated proof/IO/role/drift, legacy V1, affected-consumer closure and independent review precede guarded promotion; no C72 cause or end-to-end claim |
+| Native held full-block observation (locally promoted at dbe2b816) | The permit binds `/info.bestFullHeaderId` to its authenticated full/index watermark and proves every header link to each peer's own best-header tip; exact paired held tuples and stable/closing proof remain mandatory | Direct298, legacy/canonical86, affected1,050 plus unchanged isolated surface-timeout replay, TypeScript/imports, exact independent four-file review and staged/hook/range guards closed the source candidate. Scopes overlap and are not summed; no historical cause or lifecycle authority |
 | Native permit canonical held watermark (source validated locally) | The authenticated permit rejoins exact paired indexing and canonical-first height lists through one-row identical ID/height/parent slices, stable through Hold and closing completion; historical singleton exports and all authority/resource guards remain | Original singleton twin passes and two valid sibling-fork inputs refuse. Dedicated pure/lifetime229 includes25 pure cases, four positive combinations, isolated field/role refusals, drift/drainage and six mutants with twins. Legacy Pause61, affected consumers/architecture/policy1037 with11 native-context cases inapplicable, standalone surface41, TypeScript and imports pass in distinct scopes. Exact independent review and guarded promotion gate the candidate before any new lifecycle preparation; no C70 cause or automatic campaign |
 | Deposit-funding entered-operation attribution (locally closed at1b135366) | Invocation-owned native primary metadata reaches optional bounded worker/parent companions with exact root/cycle-step lineage and strict false claims | All eight source operations in both root branches, hostile graph and codec refusals, create-only failure preservation, dangling-entry success contradiction and exact independent review passed. C68's optional detail was absent; no historical inner cause follows |
 | Held prior-confirmation ancestry (bounded range source validated locally) | Every issuance/payout receipt lies on the exact held tip's ancestry on both nodes, remains canonical-first and is revalidated through complete bounded pages within the original scopes before reward discovery | At dc2971 the singleton correction closed root564/helper66 and its scoped consumers. The new cost discriminator selects1024-header pages with exact counts, seams and every paired tuple retained. Two cost RED-to-GREEN cases, root626/helper128, architecture417, client35/transport7/surface41/policy8 and TypeScript/import checks pass; subset scopes are not summed. Exact independent review and guarded promotion remain explicit gates. The unchanged initial observer's singleton rule limits scope; no historical cause, campaign acceptance or automatic successor invocation |

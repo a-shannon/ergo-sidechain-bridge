@@ -212,7 +212,7 @@ describe('Substrate federated isolated-devnet reward input discovery V1', () => 
       .rejects.toThrow(/target changed during discovery/i);
   });
 
-  it('retries one torn info and best-header snapshot before accepting an exact pair', async () => {
+  it('retries one header-behind full-block snapshot before accepting an exact pair', async () => {
     const states = nodeStates({ delay1: delay1Boxes });
     installNodeMocks(states);
     const primaryInfoHeights: number[] = [];
@@ -224,10 +224,11 @@ describe('Substrate federated isolated-devnet reward input discovery V1', () => 
         const isPrimary = this.observationSourceId
           === SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN;
         const fullHeight = isPrimary && primaryInfoHeights.length === 0
-          ? current.tipHeight - 1
+          ? current.tipHeight + 1
           : current.tipHeight;
         if (isPrimary) primaryInfoHeights.push(fullHeight);
-        return { network: current.network, fullHeight };
+        return { network: current.network, fullHeight,
+          bestFullHeaderId: fullHeight === current.tipHeight ? current.tipHeaderIdHex : '33'.repeat(32) };
       });
 
     const report = await discoverSubstrateFederatedRewardInputsV2(signer());
@@ -236,7 +237,7 @@ describe('Substrate federated isolated-devnet reward input discovery V1', () => 
       tipHeight: 120,
       tipHeaderIdHex: TIP_HEADER_ID,
     });
-    expect(primaryInfoHeights).toEqual([119, 120, 120]);
+    expect(primaryInfoHeights).toEqual([121, 120, 120]);
   });
 
   it('fails closed after the bounded snapshot retry count is exhausted', async () => {
@@ -250,14 +251,15 @@ describe('Substrate federated isolated-devnet reward input discovery V1', () => 
         const current = states.get(this.observationSourceId)!;
         const isPrimary = this.observationSourceId
           === SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN;
-        const fullHeight = isPrimary ? current.tipHeight - 1 : current.tipHeight;
+        const fullHeight = isPrimary ? current.tipHeight + 1 : current.tipHeight;
         if (isPrimary) primaryInfoHeights.push(fullHeight);
-        return { network: current.network, fullHeight };
+        return { network: current.network, fullHeight,
+          bestFullHeaderId: fullHeight === current.tipHeight ? current.tipHeaderIdHex : '33'.repeat(32) };
       });
 
     await expect(discoverSubstrateFederatedRewardInputsV2(signer()))
-      .rejects.toThrow(/heights disagree after 3 bounded attempts/i);
-    expect(primaryInfoHeights).toEqual([119, 119, 119]);
+      .rejects.toThrow(/full-block observation remained behind after bounded attempts/i);
+    expect(primaryInfoHeights).toEqual([121, 121, 121]);
   });
 
   it('retries complete dual observations until both nodes expose one exact snapshot', async () => {
@@ -276,7 +278,8 @@ describe('Substrate federated isolated-devnet reward input discovery V1', () => 
           ? current.tipHeight - 1
           : current.tipHeight;
         if (isWitness) witnessInfoHeights.push(fullHeight);
-        return { network: current.network, fullHeight };
+        return { network: current.network, fullHeight,
+          bestFullHeaderId: fullHeight === current.tipHeight ? current.tipHeaderIdHex : '93'.repeat(32) };
       });
     vi.spyOn(
       AuthenticatedSpvTrackerReadOnlyNodeClient.prototype,
@@ -288,8 +291,8 @@ describe('Substrate federated isolated-devnet reward input discovery V1', () => 
       const isWitness = this.observationSourceId
         === SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN;
       return isWitness && witnessInfoHeights.length <= 2
-        ? { id: '93'.repeat(32), height: current.tipHeight - 1 }
-        : { id: current.tipHeaderIdHex, height: current.tipHeight };
+        ? { id: '93'.repeat(32), height: current.tipHeight - 1, parentId: '90'.repeat(32) }
+        : { id: current.tipHeaderIdHex, height: current.tipHeight, parentId: '90'.repeat(32) };
     });
 
     const report = await discoverSubstrateFederatedRewardInputsV2(signer());
@@ -353,7 +356,8 @@ describe('Substrate federated isolated-devnet reward input discovery V1', () => 
           throw new Error('primary observation failed');
         }
         await witnessGate;
-        return { network: current.network, fullHeight: current.tipHeight };
+        return { network: current.network, fullHeight: current.tipHeight,
+          bestFullHeaderId: current.tipHeaderIdHex };
       });
 
     const discovery = discoverSubstrateFederatedRewardInputsV2(signer());
@@ -377,7 +381,7 @@ describe('Substrate federated isolated-devnet reward input discovery V1', () => 
     ]);
     const states = nodeStates({ delay1: boxes });
     for (const current of states.values()) {
-      current.headerIdsByHeight.set(120, ['44'.repeat(32), TIP_HEADER_ID]);
+      current.headerIdsByHeight.set(120, [TIP_HEADER_ID, '44'.repeat(32)]);
     }
     installNodeMocks(states, PUBLIC_KEY_HEX, input => {
       const current = states.get(input.source)!;
@@ -408,6 +412,7 @@ describe('Substrate federated isolated-devnet reward input discovery V1', () => 
       name: 'same-height replacement',
       mutate: (state: MockNodeState) => {
         state.tipHeaderIdHex = '35'.repeat(32);
+        state.headerIdsByHeight.set(state.tipHeight, [state.tipHeaderIdHex]);
       },
     },
     {
@@ -415,6 +420,7 @@ describe('Substrate federated isolated-devnet reward input discovery V1', () => 
       mutate: (state: MockNodeState) => {
         state.tipHeight = 119;
         state.tipHeaderIdHex = '36'.repeat(32);
+        state.headerIdsByHeight.set(state.tipHeight, [state.tipHeaderIdHex]);
       },
     },
     {
@@ -608,6 +614,7 @@ function nodeStates(input: Readonly<{
     genesisHeaderIds: [GENESIS_HEADER_ID],
     headerIdsByHeight: new Map([
       [1, [GENESIS_HEADER_ID]],
+      [119, ['93'.repeat(32)]],
       [input.tipHeight ?? 120, [TIP_HEADER_ID]],
     ]),
     headersById: new Map(),
@@ -665,6 +672,7 @@ function appendHeader(
   });
   state.tipHeight = height;
   state.tipHeaderIdHex = id;
+  state.headerIdsByHeight.set(height, [id]);
   return id;
 }
 
@@ -698,14 +706,16 @@ function installNodeMocks(
       this: AuthenticatedSpvTrackerReadOnlyNodeClient,
     ) {
       const current = state(this);
-      return { network: current.network, fullHeight: current.tipHeight };
+      return { network: current.network, fullHeight: current.tipHeight,
+        bestFullHeaderId: current.tipHeaderIdHex };
     });
   vi.spyOn(AuthenticatedSpvTrackerReadOnlyNodeClient.prototype, 'getBestHeader')
     .mockImplementation(async function (
       this: AuthenticatedSpvTrackerReadOnlyNodeClient,
     ) {
       const current = state(this);
-      return { id: current.tipHeaderIdHex, height: current.tipHeight };
+      return current.headersById.get(current.tipHeaderIdHex)
+        ?? { id: current.tipHeaderIdHex, height: current.tipHeight, parentId: '90'.repeat(32) };
     });
   vi.spyOn(
     AuthenticatedSpvTrackerReadOnlyNodeClient.prototype,
@@ -719,6 +729,23 @@ function installNodeMocks(
       current.headerIdsByHeight.get(height)
       ?? (height === 1 ? current.genesisHeaderIds : [])
     )];
+  });
+  vi.spyOn(
+    AuthenticatedSpvTrackerReadOnlyNodeClient.prototype,
+    'getBlockHeaderChainSlice',
+  ).mockImplementation(async function (
+    this: AuthenticatedSpvTrackerReadOnlyNodeClient,
+    fromHeight,
+    toHeight,
+  ) {
+    const current = state(this);
+    return Array.from({ length: toHeight - fromHeight }, (_, index) => {
+      const height = fromHeight + index + 1;
+      const id = current.headerIdsByHeight.get(height)?.[0];
+      if (id === undefined) throw new Error(`missing fixture header at ${height}`);
+      return current.headersById.get(id)
+        ?? { id, height, parentId: '90'.repeat(32) };
+    });
   });
   vi.spyOn(
     AuthenticatedSpvTrackerReadOnlyNodeClient.prototype,

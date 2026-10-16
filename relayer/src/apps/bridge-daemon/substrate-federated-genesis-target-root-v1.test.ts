@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import ts from 'typescript';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parseErgoFullBlockObservationV1, assertErgoFullBlockHeaderProofV1 }
+  from '../../ergo-settlement-core/ergo-full-block-observation-v1.js';
 
 // Builds, compilers, observations and processes are stubs. Session/key custody,
 // root control flow, journal ownership, box codecs and bounded FED RPC decoding stay real.
@@ -780,9 +782,21 @@ function prepareRootFixture() {
     const heldIdAt = (height: number): string => heldDepositTip?.height === height ? heldDepositTip.id
       : receipts.find(receipt => receipt.confirmationHeight === height)?.confirmationHeaderIdHex
         ?? (height === 150 ? 'f1'.repeat(32) : height.toString(16).padStart(64, '0'));
+    // Native info and header observations share one fixture sample per bracket.
+    // Existing held-state fault hooks still advance once, rather than once per GET.
+    let pendingHeldTip: Promise<unknown> | undefined;
+    let fullProofMembershipPending = false;
     return {
       beginAuthenticatedTrackerReconstruction: () => { assertCustodyActive(); },
       endAuthenticatedTrackerReconstruction: () => {},
+      getInfo: async () => {
+        assertCustodyActive();
+        fullProofMembershipPending = heldDepositTip !== null;
+        pendingHeldTip = Promise.resolve().then(() => heldDepositTip === null
+          ? readErgoTip(origin) : readHeldDepositTip(origin, heldDepositTip));
+        const tip = await pendingHeldTip as { height: number; id: string };
+        return { network: 'devnet', fullHeight: tip.height, bestFullHeaderId: tip.id };
+      },
       getBlockHeaderById: async (id: string) => {
         assertCustodyActive();
         for (let height = heldDepositTip?.height ?? 0; height >= 1; height--) {
@@ -799,17 +813,25 @@ function prepareRootFixture() {
       },
       getBestHeader: async () => {
       assertCustodyActive();
-      const tip: any = heldDepositTip === null
+      const tip: any = pendingHeldTip !== undefined ? await pendingHeldTip : heldDepositTip === null
         ? await readErgoTip(origin) : await readHeldDepositTip(origin, heldDepositTip);
+      pendingHeldTip = undefined;
       if (tip && typeof tip.height === 'number' && typeof tip.id === 'string') {
         if (!observedTips.has(origin)) observedTips.set(origin, new Map());
         observedTips.get(origin)!.set(tip.height, tip.id);
       }
-      return tip;
+      return tip && typeof tip.height === 'number' && typeof tip.id === 'string'
+        ? { parentId: heldIdAt(tip.height - 1), ...tip } : tip;
     },
       getBoxByIdOrNull: async (id: string) => { assertCustodyActive(); return readErgoBox(origin, id); },
       getBlockHeaderIdsAtHeight: async (height: number) => {
         assertCustodyActive();
+        // Keep historical payout-receipt faults on the receipt revalidation
+        // GET, even when the same height is also the new full-state anchor.
+        if (fullProofMembershipPending && heldDepositTip !== null && height === heldDepositTip.height) {
+          fullProofMembershipPending = false;
+          return [heldDepositTip.id];
+        }
         return receipts.some(receipt => receipt.confirmationHeight === height) || (heldDepositTip !== null && height === 150)
           ? readErgoInclusion(origin, height) : readErgoAnchor(origin, height);
       } };
@@ -1416,6 +1438,7 @@ function heldDepositConfirmationHelperFixture(options: {
   ]);
   const membership = new Map<string, unknown>();
   const bestCalls = new Map<string, number>();
+  const infoCalls = new Map<string, number>();
   const membershipCalls: [string, number][] = [];
   const headerCalls: [string, string][] = [];
   const sliceCalls: [string, number, number][] = [];
@@ -1425,15 +1448,24 @@ function heldDepositConfirmationHelperFixture(options: {
     : confirmations.find(value => value.confirmationHeight === height)?.confirmationHeaderIdHex
       ?? height.toString(16).padStart(64, '0');
   const behavior: {
+    info(origin: string, call: number): Promise<unknown>;
     bestHeader(origin: string, call: number): Promise<unknown>;
     headers(origin: string, height: number): Promise<unknown>;
     blockHeader(origin: string, id: string): Promise<unknown>;
     slice(origin: string, fromHeight: number, toHeight: number): Promise<unknown>;
   } = {
-    bestHeader: async (origin, call) => tips.get(origin)![call],
+    info: async (origin, call) => {
+      const tip = tips.get(origin)![call] as { height: number; id: string };
+      return { network: 'devnet', fullHeight: tip.height, bestFullHeaderId: tip.id };
+    },
+    bestHeader: async (origin, call) => {
+      const tip = tips.get(origin)![call] as { height: number; id: string };
+      return { parentId: headerIdAt(tip.height - 1), ...tip };
+    },
     headers: async (_origin, height) => membership.has(String(height))
       ? membership.get(String(height))
-      : [confirmations.find(value => value.confirmationHeight === height)!.confirmationHeaderIdHex],
+      : height === held.fullHeight ? [held.headerIdHex]
+        : [confirmations.find(value => value.confirmationHeight === height)!.confirmationHeaderIdHex],
     blockHeader: async (_origin, id) => {
       if (!/^[0-9a-f]{64}$/.test(id)) return null;
       const height = id === held.headerIdHex ? held.fullHeight
@@ -1463,6 +1495,10 @@ function heldDepositConfirmationHelperFixture(options: {
   const createSource = vi.fn((origin: string) => ({
     beginAuthenticatedTrackerReconstruction: () => beginScope(origin),
     endAuthenticatedTrackerReconstruction: () => endScope(origin),
+    getInfo: vi.fn(async () => {
+      const call = infoCalls.get(origin) ?? 0; infoCalls.set(origin, call + 1);
+      return behavior.info(origin, call);
+    }),
     getBestHeader: vi.fn(async () => {
       const call = bestCalls.get(origin) ?? 0; bestCalls.set(origin, call + 1);
       return behavior.bestHeader(origin, call);
@@ -1477,6 +1513,11 @@ function heldDepositConfirmationHelperFixture(options: {
     }),
     getBlockHeaderChainSlice: vi.fn(async (fromHeight: number, toHeight: number) => {
       sliceCalls.push([origin, fromHeight, toHeight]);
+      // Old receipt-fault doubles belong to the retained ancestry walk. The
+      // separately validated full-state bracket gets a valid native W tuple.
+      if (fromHeight === held.fullHeight - 1 && toHeight === held.fullHeight) {
+        return [{ id: held.headerIdHex, height: held.fullHeight, parentId: headerIdAt(held.fullHeight - 1) }];
+      }
       return behavior.slice(origin, fromHeight, toHeight);
     }),
   }));
@@ -1485,10 +1526,10 @@ function heldDepositConfirmationHelperFixture(options: {
     return value;
   };
   const factory = new Function('assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1',
-    'createBoundedAuthenticatedSpvTrackerReadOnlySource', 'record',
+    'createBoundedAuthenticatedSpvTrackerReadOnlySource', 'record', 'parseErgoFullBlockObservationV1', 'assertErgoFullBlockHeaderProofV1',
     `${compiled}\nreturn assertHeldDepositConfirmationsV1;`);
-  const helper = factory(owned, createSource, recordValue) as HeldConfirmationHelper;
-  return { helper, target, held, confirmations, tips, membership, bestCalls, membershipCalls,
+  const helper = factory(owned, createSource, recordValue, parseErgoFullBlockObservationV1, assertErgoFullBlockHeaderProofV1) as HeldConfirmationHelper;
+  return { helper, target, held, confirmations, tips, membership, bestCalls, infoCalls, membershipCalls,
     headerCalls, sliceCalls, beginScope, endScope, headerIdAt, behavior, owned, assertCustody, createSource,
     loseActive: () => { active = false; }, loseCustody: () => { custody = false; } };
 }
@@ -1551,8 +1592,11 @@ describe('held deposit confirmation exact production helper', () => {
     await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, kind)).resolves.toBeUndefined();
     expect(h.createSource.mock.calls.map(call => call[0])).toEqual(['primary', 'witness']);
     expect(h.bestCalls).toEqual(new Map([['primary', 2], ['witness', 2]]));
-    expect(h.membershipCalls).toEqual([...h.confirmations].sort((a, b) => b.confirmationHeight - a.confirmationHeight)
-      .flatMap(value => ['primary', 'witness'].map(origin => [origin, value.confirmationHeight])));
+    expect(h.infoCalls).toEqual(new Map([['primary', 2], ['witness', 2]]));
+    const fullMembership = [['primary', 100], ['witness', 100]];
+    expect(h.membershipCalls).toEqual([...fullMembership, ...[...h.confirmations]
+      .sort((a, b) => b.confirmationHeight - a.confirmationHeight)
+      .flatMap(value => ['primary', 'witness'].map(origin => [origin, value.confirmationHeight])), ...fullMembership]);
     expect(h.beginScope.mock.calls).toEqual([['primary'], ['witness']]);
     expect(h.endScope.mock.calls).toEqual([['primary'], ['witness']]);
   });
@@ -1590,7 +1634,8 @@ describe('held deposit confirmation exact production helper', () => {
     const h = heldDepositConfirmationHelperFixture();
     h.confirmations.push(Object.freeze({ ...h.confirmations[0]! }));
     await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'issuance')).resolves.toBeUndefined();
-    expect(h.membershipCalls).toEqual([['primary', 80], ['witness', 80]]);
+    expect(h.membershipCalls).toEqual([['primary', 100], ['witness', 100],
+      ['primary', 80], ['witness', 80], ['primary', 100], ['witness', 100]]);
   });
 
   it('accepts unsorted distinct receipts and a receipt exactly at the held tip', async () => {
@@ -1598,15 +1643,17 @@ describe('held deposit confirmation exact production helper', () => {
     h.confirmations.unshift({ confirmationHeight: 100, confirmationHeaderIdHex: h.held.headerIdHex });
     h.confirmations.push({ confirmationHeight: 90, confirmationHeaderIdHex: '33'.repeat(32) });
     await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'issuance')).resolves.toBeUndefined();
-    expect(h.membershipCalls).toEqual([100, 90, 80].flatMap(height => ['primary', 'witness'].map(origin => [origin, height])));
+    expect(h.membershipCalls).toEqual([100, 100, 90, 80, 100].flatMap(height => ['primary', 'witness'].map(origin => [origin, height])));
   });
 
   it.each(['expected second', 'expected absent', 'witness chooses sibling'] as const)(
     'rejects canonical height ordering: %s', async fault => {
       const h = heldDepositConfirmationHelperFixture();
       const expected = h.confirmations[0]!.confirmationHeaderIdHex;
-      h.behavior.headers = async origin => fault === 'expected second' ? ['bb'.repeat(32), expected]
-        : fault === 'expected absent' || origin === 'witness' ? ['bb'.repeat(32)] : [expected];
+      const original = h.behavior.headers;
+      h.behavior.headers = async (origin, height) => height === h.held.fullHeight ? original(origin, height)
+        : fault === 'expected second' ? ['bb'.repeat(32), expected]
+          : fault === 'expected absent' || origin === 'witness' ? ['bb'.repeat(32)] : [expected];
       await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'payout')).rejects.toThrow('not canonical');
     });
 
@@ -1734,12 +1781,14 @@ describe('held deposit confirmation exact production helper', () => {
             ...(scenario === 'byte budget' ? { maxReconstructionBytes: 100 } : {}),
           });
         let bestCall = 0;
+        let infoCall = 0;
         (client as unknown as { client: { defaults: { adapter: unknown } } }).client.defaults.adapter = async (
           config: { url: string; params?: { fromHeight: number; toHeight: number } },
         ) => {
           rawReads++;
           let body: unknown;
-          if (config.url === '/blocks/lastHeaders/1') body = [await h.behavior.bestHeader(origin, bestCall++)];
+          if (config.url === '/info') body = await h.behavior.info(origin, infoCall++);
+          else if (config.url === '/blocks/lastHeaders/1') body = [await h.behavior.bestHeader(origin, bestCall++)];
           else if (config.url.startsWith('/blocks/at/')) body = await h.behavior.headers(origin, Number(config.url.slice(11)));
           else if (config.url === '/blocks/chainSlice') {
             const fromHeight = config.params!.fromHeight; const toHeight = config.params!.toHeight;
@@ -1793,11 +1842,14 @@ describe('held deposit confirmation exact production helper', () => {
           ) => {
             requests.set(origin, requests.get(origin)! + 1);
             let body: unknown;
-            if (config.url === '/blocks/lastHeaders/1') body = [header(heldHeight)];
+            if (config.url === '/info') body = { network: 'devnet', fullHeight: heldHeight, bestFullHeaderId: headerId(heldHeight) };
+            else if (config.url === '/blocks/lastHeaders/1') body = [header(heldHeight)];
             else if (config.url === '/blocks/at/100') body = [headerId(100), 'bb'.repeat(32)];
+            else if (config.url === `/blocks/at/${heldHeight}`) body = [headerId(heldHeight)];
             else if (config.url === '/blocks/chainSlice') {
-              expect(config.params).toEqual({ fromHeight: 99, toHeight: heldHeight });
-              body = Array.from({ length: heldHeight - 99 }, (_, index) => header(100 + index));
+              expect(config.params!.toHeight).toBe(heldHeight);
+              expect([99, heldHeight - 1]).toContain(config.params!.fromHeight);
+              body = Array.from({ length: heldHeight - config.params!.fromHeight }, (_, index) => header(config.params!.fromHeight + index + 1));
             } else {
               const match = /^\/blocks\/([0-9a-f]{64})\/header$/.exec(config.url);
               if (!match) throw new Error('unexpected raw ancestry cost fixture route');
@@ -1820,8 +1872,9 @@ describe('held deposit confirmation exact production helper', () => {
         observedCounts.push(requests.get('primary')!, requests.get('witness')!);
       }
       // The old walk passes137 but exceeds120s at138. Both complete tuples now
-      // fit the original scope through pre-tip/slice/membership/post-tip reads.
-      expect(observedCounts).toEqual([4, 4, 4, 4]);
+      // fit the original scope with both new four-GET full-state brackets and
+      // the unchanged ancestor slice and receipt membership reads.
+      expect(observedCounts).toEqual([10, 10, 10, 10]);
     });
 
   it.each([1123, 1124, 1125, 2150].flatMap(height =>
@@ -1829,14 +1882,16 @@ describe('held deposit confirmation exact production helper', () => {
     'validates complete bounded slice coverage through height %s for %s', async (height, kind) => {
       const h = heldDepositConfirmationHelperFixture({ heldHeight: height, confirmationHeight: 100 });
       await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, kind)).resolves.toBeUndefined();
-      const expected: [string, number, number][] = [];
+      const fullProof: [string, number, number][] = [['primary', height - 1, height], ['witness', height - 1, height]];
+      const expected: [string, number, number][] = [...fullProof];
       for (let upper = height; upper >= 100;) {
         const from = Math.max(99, upper - 1024);
         expected.push(['primary', from, upper], ['witness', from, upper]);
         upper = from;
       }
-      expect(h.sliceCalls).toEqual(expected);
-      expect(h.membershipCalls).toEqual([['primary', 100], ['witness', 100]]);
+      expect(h.sliceCalls).toEqual([...expected, ...fullProof]);
+      expect(h.membershipCalls).toEqual([['primary', height], ['witness', height],
+        ['primary', 100], ['witness', 100], ['primary', height], ['witness', height]]);
       expect(h.endScope.mock.calls).toEqual([['primary'], ['witness']]);
     });
 
@@ -1855,7 +1910,7 @@ describe('held deposit confirmation exact production helper', () => {
     const h = heldDepositConfirmationHelperFixture({ heldHeight: 2150, confirmationHeight: 100 });
     installHeldSliceFault(h, fault);
     await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'issuance')).rejects.toThrow('custody lost');
-    expect(h.sliceCalls).toHaveLength(2);
+    expect(h.sliceCalls).toHaveLength(4);
     expect(h.endScope.mock.calls).toEqual([['primary'], ['witness']]);
   });
 
@@ -1870,12 +1925,12 @@ describe('held deposit confirmation exact production helper', () => {
     { fault: 'page seam', needle: 'header.id !== currentId', replacement: 'false' },
     { fault: 'canonical first', needle: 'headers[0] !== confirmationId', replacement: 'false' },
     { fault: 'custody', needle: 'assertCustody();', replacement: '' },
-    { fault: 'tip height before', needle: 'tip.height !== held.fullHeight', replacement: 'false' },
-    { fault: 'tip height after', needle: 'tip.height !== held.fullHeight', replacement: 'false' },
-    { fault: 'tip id before', needle: 'tip.id !== held.headerIdHex', replacement: 'false' },
-    { fault: 'tip id after', needle: 'tip.id !== held.headerIdHex', replacement: 'false' },
+    { fault: 'tip height before', needle: 'observation.fullHeight !== held.fullHeight', replacement: 'false' },
+    { fault: 'tip height after', needle: 'observation.fullHeight !== held.fullHeight', replacement: 'false' },
+    { fault: 'tip id before', needle: 'observation.fullHeaderIdHex !== held.headerIdHex', replacement: 'false' },
+    { fault: 'tip id after', needle: 'observation.fullHeaderIdHex !== held.headerIdHex', replacement: 'false' },
   ].flatMap(rule => (['issuance', 'payout'] as const).map(kind => [rule.fault, kind, rule] as const)))(
-    'isolates the %s guard in %s ancestry with an accepted mutant and valid twin', async (_fault, kind, rule) => {
+    'isolates the %s guard in %s ancestry with an independently checked mutant and valid twin', async (_fault, kind, rule) => {
       const options = rule.fault === 'page seam' ? { heldHeight: 2150, confirmationHeight: 100 } : {};
       const original = heldDepositConfirmationHelperFixture(options);
       installHeldSliceFault(original, rule.fault);
@@ -1888,8 +1943,17 @@ describe('held deposit confirmation exact production helper', () => {
         return source.replace(rule.needle, rule.replacement);
       } });
       installHeldSliceFault(mutant, rule.fault);
-      await expect(mutant.helper(mutant.target, mutant.held, mutant.confirmations, mutant.assertCustody, kind))
-        .resolves.toBeUndefined();
+      if (rule.fault.startsWith('tip ')) {
+        // Omitting this early guard now reaches the independently strict proof.
+        // A second check must not be weakened to recover obsolete acceptance.
+        await expect(mutant.helper(mutant.target, mutant.held, mutant.confirmations, mutant.assertCustody, kind)).rejects.toThrow();
+        const fullCalls = (h: typeof mutant) => h.membershipCalls.filter(([origin, height]) => origin === 'witness' && height === h.held.fullHeight).length;
+        expect(fullCalls(mutant)).toBe(fullCalls(original) + 1);
+        const proofCalls = (h: typeof mutant) => h.sliceCalls.filter(([origin, from]) => origin === 'witness' && from === h.held.fullHeight - 1).length;
+        expect(proofCalls(mutant)).toBe(proofCalls(original) + 1);
+      } else {
+        await expect(mutant.helper(mutant.target, mutant.held, mutant.confirmations, mutant.assertCustody, kind)).resolves.toBeUndefined();
+      }
       expect(mutant.endScope).toHaveBeenCalledTimes(2);
       const twin = heldDepositConfirmationHelperFixture(options);
       await expect(twin.helper(twin.target, twin.held, twin.confirmations, twin.assertCustody, kind))
@@ -1922,10 +1986,12 @@ describe('held deposit confirmation exact production helper', () => {
     const h = heldDepositConfirmationHelperFixture();
     const call = stage === 'before' ? 0 : 1;
     h.tips.get(role)![call] = field === 'height'
-      ? { height: 101, id: 'aa'.repeat(32) } : { height: 100, id: 'bb'.repeat(32) };
+      ? { height: 101, id: 'aa'.repeat(32), parentId: h.headerIdAt(h.held.fullHeight - 1) }
+      : { height: 100, id: 'bb'.repeat(32) };
     await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'payout'))
       .rejects.toThrow('confirmation is not canonical');
-    expect(h.membershipCalls).toHaveLength(stage === 'before' ? 0 : 2);
+    expect(h.membershipCalls.filter(([, height]) => height === 80)).toHaveLength(stage === 'before' ? 0 : 2);
+    expect(h.membershipCalls.filter(([, height]) => height === 100)).toHaveLength(stage === 'before' ? 1 : 3);
   });
 
   it.each(['custody', 'target'] as const)('rejects pre-entry %s loss before node I/O', async loss => {
@@ -1949,7 +2015,7 @@ describe('held deposit confirmation exact production helper', () => {
       } else {
         const original = h.behavior.headers;
         h.behavior.headers = async (origin, height) => {
-          const value = await original(origin, height); if (origin === 'primary') lose(); return value;
+          const value = await original(origin, height); if (origin === 'primary' && height !== h.held.fullHeight) lose(); return value;
         };
       }
       await expect(h.helper(h.target, h.held, h.confirmations, h.assertCustody, 'payout'))
@@ -1963,7 +2029,9 @@ describe('held deposit confirmation exact production helper', () => {
     let entered!: () => void;
     const enteredPromise = new Promise<void>(resolve => { entered = resolve; });
     const gate = new Promise<void>(resolve => { release = resolve; });
-    h.behavior.headers = async origin => {
+    const original = h.behavior.headers;
+    h.behavior.headers = async (origin, height) => {
+      if (height === h.held.fullHeight) return original(origin, height);
       if (origin === 'primary') throw trigger;
       entered(); await gate; return ['11'.repeat(32)];
     };

@@ -8,6 +8,8 @@ import {
 } from '../../adapters/federated-genesis-operator-v1.js';
 import { observeFederatedGenesisTargetsV1 } from '../../adapters/federated-genesis-target-observation-v1.js';
 import { assertNoDuplicateJsonKeys, canonicalJson } from '../../ergo-settlement-core/strict-json.js';
+import { parseErgoFullBlockObservationV1, assertErgoFullBlockHeaderProofV1 }
+  from '../../ergo-settlement-core/ergo-full-block-observation-v1.js';
 import { createBoundedAuthenticatedSpvTrackerReadOnlySource } from '../../authenticated-spv-tracker-read-only-node-client.js';
 import { StateTracker } from '../../state-tracker.js';
 import type { StateTracker as NativeJournalState } from '../../state-tracker.js';
@@ -1466,14 +1468,29 @@ async function assertHeldDepositConfirmationsV1(
   const clients = [target.primaryNodeOrigin, target.witnessNodeOrigin]
     .map(origin => createBoundedAuthenticatedSpvTrackerReadOnlySource(origin));
   const assertHeldTips = async () => {
-    await settleReads(clients.map(async client => {
+    const tips = await settleReads(clients.map(async client => {
+      const read = async (operation: () => Promise<unknown>) => {
+        assertActive();
+        const value = await operation();
+        assertActive();
+        return value;
+      };
+      const [info, header] = await settleReads([
+        read(() => client.getInfo()), read(() => client.getBestHeader()),
+      ]);
       assertActive();
-      const raw = await client.getBestHeader();
+      const observation = parseErgoFullBlockObservationV1(info, header);
+      if (observation === undefined || observation.fullHeight !== held.fullHeight
+        || observation.fullHeaderIdHex !== held.headerIdHex) throw refuse();
+      const [ids, ancestry] = await settleReads([
+        read(() => client.getBlockHeaderIdsAtHeight(held.fullHeight)),
+        read(() => client.getBlockHeaderChainSlice(held.fullHeight - 1, observation.bestHeader.height)),
+      ]);
       assertActive();
-      const tip = record(raw);
-      if (tip.height !== held.fullHeight || tip.id !== held.headerIdHex) throw refuse();
+      return assertErgoFullBlockHeaderProofV1(observation, ids, ancestry);
     }));
     assertActive();
+    if (tips[0]!.parentId !== tips[1]!.parentId) throw refuse();
   };
   const begun: typeof clients = [];
   let failed = false;

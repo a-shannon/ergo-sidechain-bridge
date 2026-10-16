@@ -9,6 +9,8 @@ import {
   computeErgoHeaderId,
   parseErgoHeaderIdentity,
 } from './ergo-settlement-core/ergo-header-id.js';
+import { parseErgoFullBlockObservationV1, assertErgoFullBlockHeaderProofV1 }
+  from './ergo-settlement-core/ergo-full-block-observation-v1.js';
 import {
   canonicalJson,
   sha256CanonicalJson,
@@ -661,7 +663,7 @@ async function observeSourceWithinBudgetV2(
   client: AuthenticatedSpvTrackerReadOnlyNodeClient,
   signer: Readonly<SubstrateFederatedRewardSignerBindingV1>,
 ): Promise<Readonly<SourceObservation>> {
-  const before = await observeSnapshot(client);
+  const before = await observeFullSnapshotV2(client);
   const sampledProfiles = await Promise.all(REWARD_DELAYS.map(async rewardDelayBlocks => {
     const rewardInputErgoTreeHex = rewardDelayBlocks === 1
       ? signer.rewardInputErgoTrees.delay1
@@ -702,7 +704,7 @@ async function observeSourceWithinBudgetV2(
       ),
     });
   }));
-  const after = await observeSnapshot(client);
+  const after = await observeFullSnapshotV2(client);
   for (const profile of sampledProfiles) {
     if (profile.maxObservedCreationHeight > after.tipHeight) {
       throw new Error(
@@ -798,6 +800,41 @@ async function observeSnapshot(
     });
   }
   throw new Error('fixed Ergo node snapshot attempt bound is unreachable');
+}
+
+async function observeFullSnapshotV2(
+  client: AuthenticatedSpvTrackerReadOnlyNodeClient,
+): Promise<TargetSnapshot> {
+  for (let attempt = 1; attempt <= MAX_STABLE_SNAPSHOT_ATTEMPTS; attempt += 1) {
+    const info = await client.getInfo();
+    const header = await client.getBestHeader();
+    const observation = parseErgoFullBlockObservationV1(info, header);
+    if (observation === undefined) {
+      if (attempt < MAX_STABLE_SNAPSHOT_ATTEMPTS) continue;
+      throw new Error('fixed Ergo full-block observation remained behind after bounded attempts');
+    }
+    const proofs = await Promise.allSettled([
+      Promise.resolve().then(() => client.getBlockHeaderIdsAtHeight(observation.fullHeight)),
+      Promise.resolve().then(() => client.getBlockHeaderChainSlice(
+        observation.fullHeight - 1, observation.bestHeader.height,
+      )),
+    ]);
+    const ids = proofs[0]!; const ancestry = proofs[1]!;
+    if (ids.status === 'rejected') throw ids.reason;
+    if (ancestry.status === 'rejected') throw ancestry.reason;
+    assertErgoFullBlockHeaderProofV1(observation, ids.value, ancestry.value);
+    const genesisHeaderIds = await client.getBlockHeaderIdsAtHeight(GENESIS_HEADER_HEIGHT);
+    if (genesisHeaderIds.length !== 1) {
+      throw new Error('fixed Ergo target must expose exactly one height-1 header');
+    }
+    return Object.freeze({
+      network: observation.network,
+      genesisHeaderIdHex: fixedHex32(genesisHeaderIds[0], 'fixed Ergo genesis header ID'),
+      tipHeight: observation.fullHeight,
+      tipHeaderIdHex: observation.fullHeaderIdHex,
+    });
+  }
+  throw new Error('fixed Ergo full-block snapshot attempt bound is unreachable');
 }
 
 async function assertCanonicalSnapshotExtension(

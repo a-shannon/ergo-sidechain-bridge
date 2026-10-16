@@ -299,9 +299,9 @@ height-list rule. The caller receives the same held snapshot and gains no new
 submission, custody or fee authority.
 
 This distinction closes the native permit observation boundary. Downstream
-prior-confirmation revalidation and reward-input discovery retain their own
-exact held-tip checks. Acceptance of a header extension by the permit alone
-does not establish acceptance by those consumers or a complete deposit.
+prior-confirmation revalidation and V2 reward-input discovery independently
+prove their full-block anchors as described below. Acceptance of a header
+extension by any one observer alone does not establish a complete deposit.
 
 Before discovering each deposit's fresh reward inputs, the root rechecks the
 exact prior confirmations on both owned nodes: all genesis issuance receipts
@@ -322,13 +322,23 @@ Both nodes must
 agree on every requested ID, exact height and parent ID; each retained receipt
 must occur on that ancestry. Missing headers, discontinuities, repeated IDs or
 node disagreement refuse even when the expected ID appears in a height list.
-Both nodes' visible tips must equal the held height and header before and after
-those reads. The funding observation must still independently match that held
-tip. Height ordering alone cannot establish this canonical-chain relationship.
+Before and after those reads, both nodes' `/info.fullHeight` and mandatory
+`bestFullHeaderId` must equal the authenticated held block. Each node's separately
+observed best-header tip may be later only with a complete dense ancestry from
+that full block to its own captured header tuple. The held ID must also be
+first in a distinct, well-formed height list. Each observation is bounded to
+1,024 inclusive headers before proof requests begin; truncation, cycles,
+non-data fields and mismatched endpoints refuse. Both peers must agree on the
+held row's parent. Header-only tips may advance independently between the two
+brackets while the full block remains held. The funding observation must still
+independently match that full block. Height ordering alone cannot establish
+this canonical-chain relationship.
 For an inclusive ancestry span of `N` headers and `U` distinct receipt heights,
-the check uses `2 + ceil(N / 1024) + U` requests per node: two tip reads, bounded
-chain-slice reads, and one canonical-first height-list read at each receipt
-height. Every intervening header tuple is still checked. The raw range method
+the check uses `8 + ceil(N / 1024) + U` requests per node: each of the two
+full-block brackets reads info, best header, the full-height ID list and its
+complete header ancestry; the remaining requests reconstruct receipt ancestry
+and check the canonical-first list at each receipt height. Every intervening
+header tuple is still checked. The raw range method
 uses the existing guarded GET transport and accepts only explicit, nonnegative
 Scala-Int query heights and an exact-length array. It adds no retry or cache.
 The check uses
@@ -342,6 +352,21 @@ This fixes revalidation of existing receipts. The earlier confirmation observer
 and the one-way mining-pause validator still require singleton height lists.
 Complete fork compatibility and a successful packaged lifecycle require
 separate evidence.
+
+V2 reward-input discovery also uses the paired `/info.fullHeight` and
+`bestFullHeaderId` as its retained anchor. It proves the captured best header
+descends from that full block through the same bounded value checks, preserving
+the singleton genesis lookup and original reconstruction budgets. A well-formed
+header below the full block may retry within the original three attempts;
+contradictions refuse. Both concurrent proof reads drain before failure returns.
+The two sources must still agree on the retained full snapshot and reward
+inventory. Creation-height filtering and maturity use that anchor; later full
+blocks require the existing canonical extension proof. The legacy V1 stopped,
+stable reader is unchanged. These observations provide no consensus or funds
+authority. Both deposit branches still require the retained full anchor to
+equal the authenticated held snapshot; a discovery anchored on a later full
+block refuses that equality. A retained anchor is not an atomic observation of
+current node or UTXO state.
 
 Before attesting either checkpoint, the original owned mining target requests
 its one-way submission pause. The node drains the exact pending submitted
