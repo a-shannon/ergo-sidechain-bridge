@@ -43,9 +43,15 @@ vi.mock('../../substrate-federated-isolated-devnet-ergo-node-process-v1.js', asy
   revalidateSubstrateFederatedIsolatedDevnetMiningPauseObservationV1: mocked.pauseRevalidate,
   projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1: mocked.projectStartupPhase,
 }));
-vi.mock('../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js', () => ({
+vi.mock('../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js')>(),
   discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1: mocked.discover,
   assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1: mocked.fundingOwned,
+  discoverSubstrateFederatedDepositFundingForOwnedExecutionTargetV1: mocked.discover,
+  assertSubstrateFederatedIsolatedDevnetOwnedDepositFundingDiscoveryV1: (...args: unknown[]) => {
+    const observation = mocked.fundingOwned(...args);
+    return { ...observation, requirements: args[2], fundingInput: observation.genesisInputs.tracker };
+  },
 }));
 vi.mock('../../substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js', () => ({
   collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2: mocked.history,
@@ -916,9 +922,10 @@ function prepareRootFixture() {
   });
   mocked.packet.mockImplementation(async value => {
     order.push('packet');
-    expect(Object.keys(value).sort()).toEqual(['batch', 'target', 'sourceFundingInput', 'sourceIntent', 'depositorErgoTreeHex', 'creationHeights'].sort());
+    expect(Object.keys(value).sort()).toEqual(['batch', 'target', 'sourceFundingInput', 'sourceIntent', 'depositorErgoTreeHex', 'creationHeights', 'fees'].sort());
     expect(value.batch).toBe(batch); expect(value.target).toBe(target);
     expect(value.sourceFundingInput).toBe(funding.observation.genesisInputs.tracker);
+    expect(value.fees).toEqual({ sourceLockCreationNanoErg: '1100000', reserveTransitionNanoErg: '1100000' });
     const profile = compiled.candidate.runtimeProfile;
     expect(value.sourceIntent).toEqual({ formatVersion: 2, sourceNetworkIdHex: profile.sourceNetworkIdHex,
       sidechainIdHex: profile.sidechainIdHex, bridgeAddressHex: profile.bridgeAddressHex,
@@ -934,6 +941,7 @@ function prepareRootFixture() {
     expect(value.previousPacket).toBe(packet); expect(value.withdrawal.check).toBe(returnValues.payoutCheck);
     expect(value.withdrawal.attempt).toBe(returnValues.payoutAttempt);
     expect(value.sourceFundingInput).toBe(continuationFunding.observation.genesisInputs.tracker);
+    expect(value.fees).toEqual({ sourceLockCreationNanoErg: '1100000', reserveTransitionNanoErg: '1100000' });
     expect(value.creationHeights).toEqual({ currentErgoHeight: 166, sourceLockCreation: 166, reserveTransition: 166 });
     return continuationPacket;
   });

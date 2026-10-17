@@ -45,7 +45,10 @@ import { createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2, assertSubstrat
   holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1,
   revalidateSubstrateFederatedIsolatedDevnetMiningPauseObservationV1,
   projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1 } from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
-import { discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1, assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1 } from '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js';
+import { discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1,
+  createSubstrateFederatedDepositFundingRequirementsV1,
+  discoverSubstrateFederatedDepositFundingForOwnedExecutionTargetV1,
+  assertSubstrateFederatedIsolatedDevnetOwnedDepositFundingDiscoveryV1 } from '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2,
   claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2,
@@ -422,12 +425,15 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
           await assertHeldDepositConfirmationsV1(target, heldDepositSnapshot, transactions, assertActive, 'issuance');
           markDepositFundingSubstage('post-revalidation-owner-custody-guard');
           assertActive();
+          const depositFundingRequirements = createSubstrateFederatedDepositFundingRequirementsV1('20000000');
           markDepositFundingSubstage('owned-reward-input-discovery');
-          const ownedFunding = await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(setup.signer, target);
+          const ownedFunding = await discoverSubstrateFederatedDepositFundingForOwnedExecutionTargetV1(
+            setup.signer, target, depositFundingRequirements);
           markDepositFundingSubstage('post-discovery-owner-custody-guard');
           assertActive();
           markDepositFundingSubstage('owned-reward-input-provenance');
-          const funding = assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1(ownedFunding, target);
+          const funding = assertSubstrateFederatedIsolatedDevnetOwnedDepositFundingDiscoveryV1(
+            ownedFunding, target, depositFundingRequirements);
           markDepositFundingSubstage('held-funding-equality');
           if (funding.target.genesisHeaderIdHex !== batch.request.target.genesisHeaderIdHex
             || funding.target.tipHeight !== heldDepositSnapshot.fullHeight
@@ -438,17 +444,19 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
           const profile = candidate.runtimeProfile;
           markStep('deposit-construction');
           const packet = await buildSubstrateFederatedNativeGenesisPegInPacketV1({
-            batch, target, sourceFundingInput: funding.genesisInputs.tracker,
+            batch, target, sourceFundingInput: funding.fundingInput,
             sourceIntent: {
               formatVersion: 2, sourceNetworkIdHex: profile.sourceNetworkIdHex,
               sidechainIdHex: profile.sidechainIdHex, bridgeAddressHex: profile.bridgeAddressHex,
               tokenAddressHex: profile.tokenAddressHex, settlementProfileIdHex: profile.settlementProfileIdHex,
               admissionProfileIdHex: profile.lineageProfileIdHex, sourceAssetIdHex: '00'.repeat(32),
-              amountNanoErg: '20000000', recipientAddressHex: retainedOperator.addressHex,
+              amountNanoErg: depositFundingRequirements.sourceAmountNanoErg, recipientAddressHex: retainedOperator.addressHex,
             },
             depositorErgoTreeHex: setup.signer.p2pkErgoTreeHex,
             creationHeights: { currentErgoHeight: funding.target.tipHeight,
               sourceLockCreation: funding.target.tipHeight, reserveTransition: funding.target.tipHeight },
+            fees: { sourceLockCreationNanoErg: depositFundingRequirements.sourceLockCreationFeeNanoErg,
+              reserveTransitionNanoErg: depositFundingRequirements.reserveTransitionFeeNanoErg },
           });
           assertActive();
           markStep('source-lock');
@@ -1020,12 +1028,15 @@ async function completeFirstNativeReturn(input: Readonly<{
       }], readCustody, 'payout');
       markDepositFundingSubstage('post-revalidation-owner-custody-guard');
       readCustody();
+      const depositFundingRequirements = createSubstrateFederatedDepositFundingRequirementsV1('20000000');
       markDepositFundingSubstage('owned-reward-input-discovery');
-      const ownedFunding = await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(setup.signer, target);
+      const ownedFunding = await discoverSubstrateFederatedDepositFundingForOwnedExecutionTargetV1(
+        setup.signer, target, depositFundingRequirements);
       markDepositFundingSubstage('post-discovery-owner-custody-guard');
       readCustody();
       markDepositFundingSubstage('owned-reward-input-provenance');
-      const funding = assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1(ownedFunding, target);
+      const funding = assertSubstrateFederatedIsolatedDevnetOwnedDepositFundingDiscoveryV1(
+        ownedFunding, target, depositFundingRequirements);
       markDepositFundingSubstage('held-funding-equality');
       if (funding.target.genesisHeaderIdHex !== genesisHeaderIdHex
         || funding.target.tipHeight !== heldDepositSnapshot.fullHeight
@@ -1038,17 +1049,19 @@ async function completeFirstNativeReturn(input: Readonly<{
       const secondPacket = await buildSubstrateFederatedNativeContinuationPegInPacketV1({
         batch: prepared.batch, target, previousPacket: prepared.packet,
         withdrawal: { check: checked, attempt: payoutAttempt },
-        sourceFundingInput: funding.genesisInputs.tracker,
+        sourceFundingInput: funding.fundingInput,
         sourceIntent: {
           formatVersion: 2, sourceNetworkIdHex: profile.sourceNetworkIdHex,
           sidechainIdHex: profile.sidechainIdHex, bridgeAddressHex: profile.bridgeAddressHex,
           tokenAddressHex: profile.tokenAddressHex, settlementProfileIdHex: profile.settlementProfileIdHex,
           admissionProfileIdHex: profile.lineageProfileIdHex, sourceAssetIdHex: '00'.repeat(32),
-          amountNanoErg: '20000000', recipientAddressHex: input.operator.addressHex,
+          amountNanoErg: depositFundingRequirements.sourceAmountNanoErg, recipientAddressHex: input.operator.addressHex,
         },
         depositorErgoTreeHex: setup.signer.p2pkErgoTreeHex,
         creationHeights: { currentErgoHeight: funding.target.tipHeight,
           sourceLockCreation: funding.target.tipHeight, reserveTransition: funding.target.tipHeight },
+        fees: { sourceLockCreationNanoErg: depositFundingRequirements.sourceLockCreationFeeNanoErg,
+          reserveTransitionNanoErg: depositFundingRequirements.reserveTransitionFeeNanoErg },
       });
       readCustody();
       markStep('source-lock');

@@ -381,6 +381,26 @@ equal the authenticated held snapshot; a discovery anchored on a later full
 block refuses that equality. A retained anchor is not an atomic observation of
 current node or UTXO state.
 
+Genesis setup requires three distinct reward inputs for tracker, duplicate
+prevention and reserve issuance. Each later deposit uses a separate discovery
+path that selects one mature reward input from the same agreed full-block
+snapshot. It retains the existing reward-tree, canonical box, unspent inventory
+and unique reward-delay profile checks.
+
+The selected input must cover the deposit amount, source-lock creation fee and
+reserve-transition fee. Change must be zero or at least 1,000,000 nanoERG.
+For the campaign's 20,000,000 nanoERG deposit and two 1,100,000 nanoERG
+construction fees, an input of 22,200,000 is an exact fit; a larger input must
+leave at least 1,000,000 nanoERG. Selection skips insufficient and dust-producing
+inputs, then orders eligible inputs by creation height and box ID.
+
+Both deposit branches share one frozen requirement value across discovery,
+owned-target provenance and packet construction. Deposit observations have
+their own schema, digest domain and process-local provenance; a genesis report
+or copied report cannot substitute for them. Discovery grants no signing or
+submission authority. The two separately confirmed external fee inputs required
+before each checkpoint remain distinct from these construction fees.
+
 Before attesting either checkpoint, the original owned mining target requests
 its one-way submission pause. The node drains the exact pending submitted
 header before acknowledging the pause; an acknowledgment alone does not prove

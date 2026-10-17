@@ -376,6 +376,9 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
   ['substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.ts', new Set([
     'discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1',
     'assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1',
+    'createSubstrateFederatedDepositFundingRequirementsV1',
+    'discoverSubstrateFederatedDepositFundingForOwnedExecutionTargetV1',
+    'assertSubstrateFederatedIsolatedDevnetOwnedDepositFundingDiscoveryV1',
   ])],
   ['substrate-federated-isolated-devnet-setup-check-runner-v2.ts', new Set([
     'createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2',

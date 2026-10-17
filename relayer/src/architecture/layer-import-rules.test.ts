@@ -260,6 +260,56 @@ describe('layer import rules', () => {
   });
 
   it.each([
+    ['createSubstrateFederatedDepositFundingRequirementsV1', "'20000000'"],
+    ['discoverSubstrateFederatedDepositFundingForOwnedExecutionTargetV1',
+      'signer, target, requirements'],
+    ['assertSubstrateFederatedIsolatedDevnetOwnedDepositFundingDiscoveryV1',
+      'owned, target, requirements'],
+  ])('admits the reviewed root deposit funding discovery call %s',
+    (binding, argumentsSource) => {
+      const specifier =
+        '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js';
+      const source = `import { ${binding} } from '${specifier}'; ${binding}(${argumentsSource});`;
+      expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, source)))
+        .toEqual([]);
+    });
+
+  it.each([
+    ['unknown exported constant',
+      "import { SUBSTRATE_FEDERATED_ISOLATED_DEVNET_OWNED_DEPOSIT_FUNDING_DISCOVERY_V1_SCHEMA } from '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js';",
+      'restricted capability import binding is not allowlisted: ../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js#SUBSTRATE_FEDERATED_ISOLATED_DEVNET_OWNED_DEPOSIT_FUNDING_DISCOVERY_V1_SCHEMA'],
+    ['normalizer',
+      "import { normalizeSubstrateFederatedDepositFundingRequirementsV1 } from '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js'; normalizeSubstrateFederatedDepositFundingRequirementsV1(requirements);",
+      'restricted capability import binding is not allowlisted: ../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js#normalizeSubstrateFederatedDepositFundingRequirementsV1'],
+    ['alias',
+      "import { createSubstrateFederatedDepositFundingRequirementsV1 as createRequirements } from '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js'; createRequirements('20000000');",
+      'restricted capability import binding must not be aliased: ../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js#createSubstrateFederatedDepositFundingRequirementsV1'],
+    ['namespace',
+      "import * as funding from '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js'; funding.createSubstrateFederatedDepositFundingRequirementsV1('20000000');",
+      'restricted capability import must use reviewed named bindings: ../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js'],
+    ['default',
+      "import funding from '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js'; funding('20000000');",
+      'restricted capability import must use reviewed named bindings: ../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js'],
+    ['dynamic',
+      "const funding = await import('../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js'); funding.createSubstrateFederatedDepositFundingRequirementsV1('20000000');",
+      'restricted capability import must use reviewed named bindings: ../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js'],
+    ['re-export',
+      "export { discoverSubstrateFederatedDepositFundingForOwnedExecutionTargetV1 } from '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js';",
+      'restricted capability import must use reviewed named bindings: ../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js'],
+    ['runtime binding escape',
+      "import { assertSubstrateFederatedIsolatedDevnetOwnedDepositFundingDiscoveryV1 } from '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js'; const escaped = assertSubstrateFederatedIsolatedDevnetOwnedDepositFundingDiscoveryV1;",
+      'restricted capability binding must not escape its reviewed call: ../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js#assertSubstrateFederatedIsolatedDevnetOwnedDepositFundingDiscoveryV1'],
+  ])('rejects widening the root deposit funding discovery import through %s',
+    (_fault, source, expected) => {
+      const files = staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, source);
+      // Dynamic imports and re-exports need a real resolved target so the
+      // reviewed named-binding guard, rather than resolution, decides them.
+      files['substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.ts'] =
+        'export {};';
+      expect(inspect(files).map(violation => violation.message)).toContain(expected);
+    });
+
+  it.each([
     ['substrate-federated-native-two-cycle-root-phase-v1',
       'projectOwnSubstrateFederatedNativeTwoCycleRootFailurePhaseV1', false],
     ['substrate-federated-native-two-cycle-cycle-step-v1',

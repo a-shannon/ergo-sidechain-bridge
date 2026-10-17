@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-10-16
+Updated: 2026-10-17
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,19 +28,27 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Close native Hold initial-snapshot drainage. Both peer snapshots and
-all six started raw reads must settle before a failed Hold changes phase. The
-holder retains the original first observed error, including when that peer's
-remaining body finishes after the other peer's later error. Ten exact-production
-cases cover all six source/route faults, both temporal error orders, validation
-failure with a pending peer and a valid complete Hold. Nine cases fail against
-the original source; all ten pass after correction. The complete lifetime suite
-passes 308 cases, TypeScript and the 138-module/933-source import check pass,
-and the exact code/test review passes. Original target, deadline, request and
-byte guards and successful observations remain unchanged. Final candidate
-review and guarded local promotion apply before source closure. This error-path
-correction does not establish a historical campaign cause, successful funding
-or a reason to select another campaign.
+**Now:** Close purpose-specific deposit funding selection. Both deposit branches
+used the three-input genesis selector even though source-lock creation consumes
+one fresh reward input. The original consumer rejects sufficient one/two-box
+inventories and can select an insufficient oldest input when a later input
+covers the deposit. A separate deposit selector preserves the genesis contract
+and selects one input covering the amount and both construction fees, with zero
+or at least minimum-box change. The same frozen requirements bind discovery,
+owned-target provenance and packet construction in both branches. Exact root
+regressions, isolated value/provenance refusals, the existing root suite and
+named-import guards pass; TypeScript and imports pass. Final exact-candidate
+review and guarded local promotion apply before source closure. This source
+counterexample does not identify a historical campaign cause or establish a
+successful deposit. Reassess the next executable consumer after this closure;
+no successor campaign is selected.
+
+Native Hold initial-snapshot drainage was locally promoted at
+`65ee918235de19eb3f9d144574eee76e97826d7f`. Both snapshots and all six started raw
+reads settle before failure changes phase, preserving the first observed error.
+Ten exact-production cases and the full 308-case lifetime suite pass. Original
+target, deadline, request and byte guards and successful observations remain
+unchanged.
 
 V2 reward-inventory scope drainage was locally promoted at
 `1f8d80db10f71e8bfe25905c0fe7e24b842a30f4`. Its two concurrent reward-delay
@@ -2184,13 +2192,13 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Held full block -> prior confirmations and V2 funding anchor | Close the demonstrated downstream header/full mismatch with shared bounded value proof, independent before/after full-anchor checks, V2-only discovery and unchanged funding equality | Two pure consumer cases are RED then GREEN; close exact field/role/IO/drift/budget/legacy consumers and review before local promotion. No historical cause or lifecycle authority; C24-C72 holds remain permanent, with no selected successor campaign, push or new CI |
+| **Now** | Reward inventory -> one deposit funding input | Close the demonstrated genesis-purpose mismatch with a separate one-input selector bound to the amount and both construction fees; retain genesis3, full-anchor equality and owned provenance | Six original consumer failures become green; isolated requirements/value/provenance and both root branches, existing root orchestration and exact named-import guards pass. Final independent candidate review and guarded local promotion remain gates; no historical cause, lifecycle authority or automatic successor campaign |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Separately select and admit one local synthetic campaign after a deciding checkpoint, exact local source identity, applicable checks/review and fresh runtime/source/output/custody/fee gates; apply guarded publication and due exact-head CI at public promotion | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns 24–72 remain consumed or held. C42 is incomplete/ambiguous without a
+Campaigns 24–73 remain consumed or held. C42 is incomplete/ambiguous without a
 parent terminal artifact; C43–C51 failed once as recorded in Current Focus and
 the active handoff. None authorizes retry, resume or custody reuse. The earlier
 timing, tracker-phase and source-lock checkpoints are closed; the selected
@@ -2229,7 +2237,8 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Native Hold initial-snapshot drainage (source validated locally) | Drain both snapshots and all six started raw reads before the failed Hold changes phase; retain the identical first observed error and original guards | Ten exact-production cases cover six isolated source/route faults, both temporal orders, validation failure with a pending peer and valid Hold. Nine original failures become green; full lifetime308, TypeScript, imports and scoped code/test review pass. Final exact-candidate review and guarded local promotion apply before source closure; no historical cause or successful funding claim |
+| Deposit-specific funding selection (source validated locally) | Select one mature reward input covering the same canonical amount and two construction fees used by each deposit packet; reject underfunding/dust, foreign provenance and held-anchor drift while preserving genesis3 | Six original exact-consumer failures become green. Direct selection/requirements/provenance41, root join31, root orchestration626 and architecture437 pass in distinct scopes; TypeScript/imports pass. Exact independent candidate review and guarded local promotion bind closure; no historical cause or packaged lifecycle claim |
+| Native Hold initial-snapshot drainage (locally promoted at65ee9182) | Drain both snapshots and all six started raw reads before the failed Hold changes phase; retain the identical first observed error and original guards | Ten exact-production cases cover six isolated source/route faults, both temporal orders, validation failure with a pending peer and valid Hold. Nine original failures become green; full lifetime308, TypeScript, imports, exact independent review and guarded local promotion closed this source boundary; no historical cause or successful funding claim |
 | V2 reward-inventory scope drainage (locally promoted at1f8d80db) | Both started reward-delay lanes settle before either reconstruction scope closes; preserve the first observed error, successful values and all original limits | Nine exact-production cases and twenty direct discovery cases pass. Six original failure-path cases demonstrate premature scope closure, resumed reads and both temporal error orders; the valid twin and outer peer controls isolate the inner boundary. TypeScript, exact independent review and guarded local promotion passed; no historical cause or lifecycle claim |
 | Downstream held full-block funding anchor (locally promoted at48a86d12) | Root prior-confirmation revalidation and V2 discovery prove complete ancestry from mandatory best-full ID to the observed header tip; retain the held full anchor, original funding equality, scopes and budgets | Two extracted-production cases are RED then GREEN, including absent-full-ID refusal and the unchanged funding-equality refusal of a later retained BEFORE anchor. Exact isolated proof/IO/role/drift, legacy V1, affected-consumer closure, independent review and guarded promotion closed the source boundary; no C72 cause or end-to-end claim |
 | Native held full-block observation (locally promoted at dbe2b816) | The permit binds `/info.bestFullHeaderId` to its authenticated full/index watermark and proves every header link to each peer's own best-header tip; exact paired held tuples and stable/closing proof remain mandatory | Direct298, legacy/canonical86, affected1,050 plus unchanged isolated surface-timeout replay, TypeScript/imports, exact independent four-file review and staged/hook/range guards closed the source candidate. Scopes overlap and are not summed; no historical cause or lifecycle authority |

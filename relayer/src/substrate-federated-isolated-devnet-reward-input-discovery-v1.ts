@@ -36,6 +36,8 @@ export const SUBSTRATE_FEDERATED_REWARD_INPUT_DISCOVERY_V1_SCHEMA =
   'e2s.substrate-federated-reward-input-discovery.v1' as const;
 export const SUBSTRATE_FEDERATED_REWARD_INPUT_DISCOVERY_V2_SCHEMA =
   'e2s.substrate-federated-reward-input-discovery.v2' as const;
+export const SUBSTRATE_FEDERATED_DEPOSIT_FUNDING_DISCOVERY_V1_SCHEMA =
+  'e2s.substrate-federated-deposit-funding-discovery.v1' as const;
 export const SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN =
   'http://127.0.0.1:9051' as const;
 export const SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN =
@@ -53,6 +55,10 @@ const REPORT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_REWARD_INPUT_DISCOVERY_V1';
 const REPORT_V2_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_REWARD_INPUT_DISCOVERY_V2';
+const DEPOSIT_FUNDING_REPORT_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_DEPOSIT_FUNDING_DISCOVERY_V1';
+const MIN_BOX_VALUE = 1_000_000n;
+const ERGO_POSITIVE_LONG_MAX = 0x7fff_ffff_ffff_ffffn;
 const MAX_CANONICAL_EXTENSION_HEADERS = 4_096;
 const MAX_STABLE_SNAPSHOT_ATTEMPTS = 3;
 const MAX_MATCHING_DUAL_OBSERVATION_ATTEMPTS = 40;
@@ -61,6 +67,7 @@ const DUAL_OBSERVATION_RECONSTRUCTION_DEADLINE_MS = 12_000;
 const REWARD_DELAYS = [1, 720] as const;
 const DISCOVERIES = new WeakSet<object>();
 const DISCOVERIES_V2 = new WeakSet<object>();
+const DEPOSIT_FUNDING_DISCOVERIES = new WeakSet<object>();
 
 type RewardDelay = (typeof REWARD_DELAYS)[number];
 
@@ -183,6 +190,55 @@ export interface SubstrateFederatedRewardInputDiscoveryV2 {
     readonly exactCanonicalBoxIdsRecomputed: true;
     readonly exactRewardTreeMatched: true;
     readonly pairwiseDistinctPureErgRegisterFreeInputs: true;
+    readonly targetBinaryRevalidationRequired: true;
+    readonly signerOrWalletMaterialRead: false;
+    readonly sessionSignerProvenanceAuthenticated: false;
+    readonly tipAndUtxoObservedAtomically: false;
+    readonly nodeExecutableIdentityAuthenticated: false;
+    readonly independentNodeControlVerified: false;
+    readonly canonicalConsensusEstablished: false;
+  }>;
+  readonly authorization: SubstrateFederatedRewardInputDiscoveryV1['authorization'];
+}
+
+export interface SubstrateFederatedDepositFundingRequirementsV1 {
+  readonly sourceAmountNanoErg: string;
+  readonly sourceLockCreationFeeNanoErg: string;
+  readonly reserveTransitionFeeNanoErg: string;
+}
+
+export interface SubstrateFederatedDepositFundingDiscoveryV1 {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_DEPOSIT_FUNDING_DISCOVERY_V1_SCHEMA;
+  readonly status:
+    'agreed_non_authorizing_snapshot_anchored_deposit_funding';
+  readonly reportDigestHex: string;
+  readonly observedAt: string;
+  readonly requirements:
+    Readonly<SubstrateFederatedDepositFundingRequirementsV1>;
+  readonly sources: SubstrateFederatedRewardInputDiscoveryV2['sources'];
+  readonly target: SubstrateFederatedRewardInputDiscoveryV2['target'];
+  readonly signer: SubstrateFederatedRewardInputDiscoveryV2['signer'];
+  readonly inventory: Readonly<{
+    readonly anchorRewardBoxCount: number;
+    readonly matureRewardBoxCount: number;
+    readonly usableRewardBoxCount: number;
+    readonly requiredAgeBlocks: number;
+  }>;
+  readonly fundingBoxId: string;
+  readonly fundingInput: Readonly<Eip12Box>;
+  readonly boundary: Readonly<{
+    readonly fixedDualLoopbackOrigins: true;
+    readonly getOnlyNodeRequests: true;
+    readonly exactPublicSignerBinding: true;
+    readonly matchingSnapshotAnchor: true;
+    readonly canonicalExtensionBeyondAnchorAllowed: true;
+    readonly discoveryAnchorRetained: true;
+    readonly postAnchorRewardBoxesExcluded: true;
+    readonly exactCanonicalBoxIdsRecomputed: true;
+    readonly exactRewardTreeMatched: true;
+    readonly singlePureErgRegisterFreeFundingInput: true;
+    readonly exactDepositFundingEquation: true;
     readonly targetBinaryRevalidationRequired: true;
     readonly signerOrWalletMaterialRead: false;
     readonly sessionSignerProvenanceAuthenticated: false;
@@ -573,6 +629,213 @@ export function assertSubstrateFederatedRewardInputDiscoveryV2Provenance(
       !== reportDigestHex
   ) {
     throw new Error('snapshot-anchored reward-input discovery content drifted');
+  }
+}
+
+export function normalizeSubstrateFederatedDepositFundingRequirementsV1(
+  value: unknown,
+): Readonly<SubstrateFederatedDepositFundingRequirementsV1> {
+  const record = exactDataRecord(value, [
+    'sourceAmountNanoErg',
+    'sourceLockCreationFeeNanoErg',
+    'reserveTransitionFeeNanoErg',
+  ], 'substrate federated deposit funding requirements');
+  const sourceAmountNanoErg = canonicalPositiveLongString(
+    record.sourceAmountNanoErg,
+    'substrate federated deposit source amount',
+  );
+  const sourceLockCreationFeeNanoErg = canonicalPositiveLongString(
+    record.sourceLockCreationFeeNanoErg,
+    'substrate federated deposit source-lock creation fee',
+  );
+  const reserveTransitionFeeNanoErg = canonicalPositiveLongString(
+    record.reserveTransitionFeeNanoErg,
+    'substrate federated deposit reserve-transition fee',
+  );
+  if (BigInt(sourceAmountNanoErg) < MIN_BOX_VALUE) {
+    throw new Error(
+      'substrate federated deposit source amount is below the minimum box value',
+    );
+  }
+  const requiredTotal = BigInt(sourceAmountNanoErg)
+    + BigInt(sourceLockCreationFeeNanoErg)
+    + BigInt(reserveTransitionFeeNanoErg);
+  if (requiredTotal > ERGO_POSITIVE_LONG_MAX) {
+    throw new Error(
+      'substrate federated deposit funding total exceeds the positive Ergo Long range',
+    );
+  }
+  return deepFreeze({
+    sourceAmountNanoErg,
+    sourceLockCreationFeeNanoErg,
+    reserveTransitionFeeNanoErg,
+  });
+}
+
+export function createSubstrateFederatedDepositFundingRequirementsV1(
+  sourceAmountNanoErg: string,
+): Readonly<SubstrateFederatedDepositFundingRequirementsV1> {
+  return normalizeSubstrateFederatedDepositFundingRequirementsV1({
+    sourceAmountNanoErg,
+    sourceLockCreationFeeNanoErg: MINER_FEE.toString(),
+    reserveTransitionFeeNanoErg: MINER_FEE.toString(),
+  });
+}
+
+/**
+ * Select one snapshot-anchored signer reward input that exactly funds a
+ * pooled-reserve deposit's source-lock creation topology.
+ */
+export async function discoverSubstrateFederatedDepositFundingV1(
+  signerInput: Readonly<SubstrateFederatedRewardSignerBindingV1>,
+  requirementsInput: Readonly<SubstrateFederatedDepositFundingRequirementsV1>,
+): Promise<Readonly<SubstrateFederatedDepositFundingDiscoveryV1>> {
+  const requirements =
+    normalizeSubstrateFederatedDepositFundingRequirementsV1(requirementsInput);
+  const signer = normalizeSigner(signerInput);
+  const primary = new AuthenticatedSpvTrackerReadOnlyNodeClient(
+    SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+    {
+      reconstructionDeadlineMs:
+        DUAL_OBSERVATION_RECONSTRUCTION_DEADLINE_MS,
+    },
+  );
+  const witness = new AuthenticatedSpvTrackerReadOnlyNodeClient(
+    SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+    {
+      reconstructionDeadlineMs:
+        DUAL_OBSERVATION_RECONSTRUCTION_DEADLINE_MS,
+    },
+  );
+  const primaryObservation = await observeMatchingSourcesV2(
+    primary,
+    witness,
+    signer,
+  );
+  const requiredTotal = BigInt(requirements.sourceAmountNanoErg)
+    + BigInt(requirements.sourceLockCreationFeeNanoErg)
+    + BigInt(requirements.reserveTransitionFeeNanoErg);
+  const qualifying = primaryObservation.profiles.map(profile => {
+    const requiredAgeBlocks = profile.rewardDelayBlocks
+      + REWARD_MATURITY_SAFETY_BLOCKS;
+    const mature = profile.boxes.filter(box =>
+      box.creationHeight <= primaryObservation.snapshot.tipHeight
+        - requiredAgeBlocks
+    );
+    const usable = mature.filter(box => {
+      const change = BigInt(box.value) - requiredTotal;
+      return change === 0n || change >= MIN_BOX_VALUE;
+    });
+    return { profile, mature, usable, requiredAgeBlocks };
+  }).filter(candidate => candidate.usable.length >= 1);
+  if (qualifying.length !== 1) {
+    throw new Error(
+      qualifying.length === 0
+        ? 'snapshot anchor does not expose a usable mature signer deposit funding input'
+        : 'snapshot anchor exposes ambiguous deposit funding reward-delay profiles',
+    );
+  }
+  const selectedProfile = qualifying[0]!;
+  const fundingInput = [...selectedProfile.usable]
+    .sort((left, right) => left.creationHeight - right.creationHeight
+      || left.boxId.localeCompare(right.boxId))[0]!;
+  const withoutDigest = {
+    schema: SUBSTRATE_FEDERATED_DEPOSIT_FUNDING_DISCOVERY_V1_SCHEMA,
+    status:
+      'agreed_non_authorizing_snapshot_anchored_deposit_funding' as const,
+    observedAt: new Date().toISOString(),
+    requirements,
+    sources: {
+      primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+      witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+    },
+    target: {
+      ...primaryObservation.snapshot,
+      genesisHeaderHeight: GENESIS_HEADER_HEIGHT as 1,
+    },
+    signer: {
+      publicKeyHex: signer.publicKeyHex,
+      p2pkErgoTreeHex: signer.p2pkErgoTreeHex,
+      rewardDelayBlocks: selectedProfile.profile.rewardDelayBlocks,
+      rewardInputErgoTreeHex: selectedProfile.profile.rewardInputErgoTreeHex,
+      rewardAddress: selectedProfile.profile.rewardAddress,
+    },
+    inventory: {
+      anchorRewardBoxCount: selectedProfile.profile.boxes.length,
+      matureRewardBoxCount: selectedProfile.mature.length,
+      usableRewardBoxCount: selectedProfile.usable.length,
+      requiredAgeBlocks: selectedProfile.requiredAgeBlocks,
+    },
+    fundingBoxId: fundingInput.boxId,
+    fundingInput,
+    boundary: {
+      fixedDualLoopbackOrigins: true as const,
+      getOnlyNodeRequests: true as const,
+      exactPublicSignerBinding: true as const,
+      matchingSnapshotAnchor: true as const,
+      canonicalExtensionBeyondAnchorAllowed: true as const,
+      discoveryAnchorRetained: true as const,
+      postAnchorRewardBoxesExcluded: true as const,
+      exactCanonicalBoxIdsRecomputed: true as const,
+      exactRewardTreeMatched: true as const,
+      singlePureErgRegisterFreeFundingInput: true as const,
+      exactDepositFundingEquation: true as const,
+      targetBinaryRevalidationRequired: true as const,
+      signerOrWalletMaterialRead: false as const,
+      sessionSignerProvenanceAuthenticated: false as const,
+      tipAndUtxoObservedAtomically: false as const,
+      nodeExecutableIdentityAuthenticated: false as const,
+      independentNodeControlVerified: false as const,
+      canonicalConsensusEstablished: false as const,
+    },
+    authorization: {
+      constructSetup: false as const,
+      check: false as const,
+      sign: false as const,
+      submit: false as const,
+      broadcast: false as const,
+      deploy: false as const,
+      activate: false as const,
+      fundsAuthority: false as const,
+      gate5Closed: false as const,
+      productionReady: false as const,
+    },
+  };
+  const report = deepFreeze({
+    ...withoutDigest,
+    reportDigestHex: sha256CanonicalJson(
+      withoutDigest,
+      DEPOSIT_FUNDING_REPORT_DIGEST_DOMAIN,
+    ),
+  });
+  DEPOSIT_FUNDING_DISCOVERIES.add(report);
+  return report;
+}
+
+export function assertSubstrateFederatedDepositFundingV1Provenance(
+  value: unknown,
+): asserts value is Readonly<SubstrateFederatedDepositFundingDiscoveryV1> {
+  if (
+    value === null
+    || typeof value !== 'object'
+    || !DEPOSIT_FUNDING_DISCOVERIES.has(value)
+  ) {
+    throw new Error(
+      'deposit funding discovery was not produced in this process',
+    );
+  }
+  const report = value as SubstrateFederatedDepositFundingDiscoveryV1;
+  const { reportDigestHex, ...withoutDigest } = report;
+  if (
+    report.schema !== SUBSTRATE_FEDERATED_DEPOSIT_FUNDING_DISCOVERY_V1_SCHEMA
+    || report.status
+      !== 'agreed_non_authorizing_snapshot_anchored_deposit_funding'
+    || sha256CanonicalJson(
+      withoutDigest,
+      DEPOSIT_FUNDING_REPORT_DIGEST_DOMAIN,
+    ) !== reportDigestHex
+  ) {
+    throw new Error('deposit funding discovery content drifted');
   }
 }
 
@@ -1057,6 +1320,17 @@ function nonnegativeSafeInteger(value: unknown, label: string): number {
     throw new Error(`${label} must be a nonnegative safe integer`);
   }
   return Number(value);
+}
+
+function canonicalPositiveLongString(value: unknown, label: string): string {
+  if (typeof value !== 'string' || !/^[1-9][0-9]*$/.test(value)) {
+    throw new Error(`${label} must be a canonical positive decimal string`);
+  }
+  const amount = BigInt(value);
+  if (amount > ERGO_POSITIVE_LONG_MAX) {
+    throw new Error(`${label} exceeds the positive Ergo Long range`);
+  }
+  return amount.toString();
 }
 
 function deepFreeze<T>(value: T): T {
