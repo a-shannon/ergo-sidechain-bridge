@@ -751,6 +751,146 @@ describe('actual old Pause and new exact held-index validators', () => {
   });
 });
 
+describe('initial snapshot drainage through actual Hold and raw JSON bodies', () => {
+  type Peer = 'primary' | 'witness';
+  type InitialPath = '/info' | '/blocks/lastHeaders/1' | '/blockchain/indexedHeight';
+  type BodyInput = { peer: Peer; path: InitialPath; failure?: Error; gated?: boolean };
+  const initialPaths: InitialPath[] = ['/info', '/blocks/lastHeaders/1', '/blockchain/indexedHeight'];
+
+  function rawHolder(inputs: BodyInput[] = [], invalidNetworkPeer?: Peer) {
+    const target = Object.freeze({});
+    const primary: Node = { role: 'primary', mode: 'mining', child: {} };
+    const witness: Node = { role: 'witness', mode: 'non-mining', child: {} };
+    const targets = new WeakMap<object, Binding>();
+    const processGuard = vi.fn();
+    const state = { now: 0, settled: false };
+    const controls = inputs.map(input => ({ ...input, entered: deferred(), finished: deferred(), gate: deferred() }));
+    const startedBodies: Promise<void>[] = [];
+    const bodyCounts = new Map<string, number>();
+    const actorHold = vi.fn(async () => ({ parent: watermark() }));
+    const control = Object.freeze({ hold: actorHold, arm: vi.fn(), status: vi.fn() });
+    const timeout = vi.fn((duration: number) => ({ duration }));
+    const fetch = vi.fn(async (url: string, _init: RequestInit) => {
+      const peer: Peer = url.startsWith('primary-double') ? 'primary' : 'witness';
+      const selectedPath = url.slice(`${peer}-double`.length);
+      return { ok: true, text: async () => {
+        const key = `${peer}:${selectedPath}`;
+        const count = (bodyCounts.get(key) ?? 0) + 1;
+        bodyCounts.set(key, count);
+        const selected = count === 1 ? controls.find(input => input.peer === peer && input.path === selectedPath) : undefined;
+        const completed = deferred(); startedBodies.push(completed.promise);
+        selected?.entered.resolve();
+        try {
+          if (selected?.gated) await selected.gate.promise;
+          if (selected?.failure) throw selected.failure;
+          if (selectedPath === '/info') return JSON.stringify({
+            network: peer === invalidNetworkPeer ? 'mainnet' : 'devnet', fullHeight: 40, bestFullHeaderId: id(40),
+          });
+          if (selectedPath === '/blocks/lastHeaders/1') return JSON.stringify([header()]);
+          if (selectedPath === '/blockchain/indexedHeight') return JSON.stringify({ fullHeight: 40, indexedHeight: 40 });
+          if (selectedPath === '/blocks/at/40') return JSON.stringify([id(40), 'ef'.repeat(32)]);
+          expect(selectedPath).toBe('/blocks/chainSlice?fromHeight=39&toHeight=40');
+          return JSON.stringify([header()]);
+        } finally { completed.resolve(); selected?.finished.resolve(); }
+      } };
+    });
+    const api = extract<API>({ ...names, json: 'getJson', permitReader: 'readTransactionPermitTargetSnapshot',
+      record: 'plainRecord', integer: 'nonnegativeInteger', hex: 'fixedHex', settle: 'settleCopiedErgoReads' }, {
+      ...constants, Buffer, performance: { now: () => state.now }, fetch, AbortSignal: { timeout },
+      delay: vi.fn(async (duration: number) => { state.now += duration; }),
+      OWNED_EXECUTION_TARGET_BINDINGS: new WeakMap([[target, { assertActiveProcesses: processGuard }]]),
+      ACTIVE_OWNED_EXECUTION_TARGETS: new WeakSet([target]), OWNED_MINING_TRANSACTION_PERMIT_TARGETS: targets,
+      OWNED_MINING_SUBMISSION_CONTROLS: new WeakMap([[primary.child, { transactionPermits: control }]]),
+      assertLive: vi.fn(), assertOwnedErgoMiningTransactionPermitControlV1: (value: unknown) => expect(value).toBe(control),
+      SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN: 'primary-double',
+      SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN: 'witness-double',
+    });
+    api.bind(target, primary, witness, processGuard);
+    // Handle both outcomes immediately, including the uncorrected early rejection.
+    const outcome = api.hold(target).then(value => {
+      state.settled = true; return { status: 'fulfilled' as const, value };
+    }, error => { state.settled = true; return { status: 'rejected' as const, error }; });
+    return { target, targets, state, controls, fetch, timeout, actorHold, outcome,
+      guard: () => targets.get(target)!.assertActive(),
+      async releaseAndDrain() {
+        for (const input of controls) input.gate.resolve();
+        await Promise.allSettled(startedBodies);
+        await outcome;
+        // Drain the fixed post-body continuations even when old Hold has already rejected.
+        for (let turn = 0; turn < 12; turn += 1) await Promise.resolve();
+      } };
+  }
+
+  async function checkpoint(h: ReturnType<typeof rawHolder>) {
+    for (let turn = 0; turn < 12; turn += 1) await Promise.resolve();
+    expect.soft(h.state.settled).toBe(false);
+    expect.soft(h.guard).not.toThrow();
+  }
+  async function expectOriginalFailedHolder(h: ReturnType<typeof rawHolder>, failure: Error) {
+    const outcome = await h.outcome;
+    expect(outcome.status).toBe('rejected');
+    if (outcome.status === 'rejected') expect(outcome.error).toBe(failure);
+    expect(h.guard).toThrow('target failed');
+    expect(h.actorHold).toHaveBeenCalledTimes(1);
+  }
+
+  it('initial snapshot drainage valid twin completes both stable brackets and all canonical proofs', async () => {
+    const h = rawHolder([{ peer: 'primary', path: '/blocks/lastHeaders/1', gated: true }]);
+    try { await h.controls[0].entered.promise; await checkpoint(h); }
+    finally { await h.releaseAndDrain(); }
+    const outcome = await h.outcome;
+    expect(outcome.status).toBe('fulfilled');
+    if (outcome.status === 'fulfilled') expect(outcome.value).toEqual(snapshot());
+    expect(h.guard).not.toThrow();
+    expect(h.actorHold).toHaveBeenCalledTimes(1);
+    expect(h.fetch).toHaveBeenCalledTimes(20);
+    expect(h.fetch.mock.calls.filter(([url]) => initialPaths.some(route => url.endsWith(route)))).toHaveLength(12);
+    expect(h.timeout.mock.calls.every(([duration]) => duration > 0)).toBe(true);
+  });
+
+  it.each((['primary', 'witness'] as const).flatMap(peer => initialPaths.map(route => ({ peer, route }))))(
+    'initial snapshot drainage preserves $peer $route failure while its sibling raw body is pending', async ({ peer, route }) => {
+      const original = new Error(`${peer} ${route} original`);
+      const pendingRoute = initialPaths[(initialPaths.indexOf(route) + 1) % initialPaths.length];
+      const h = rawHolder([{ peer, path: route, failure: original }, { peer, path: pendingRoute, gated: true }]);
+      try {
+        await Promise.all(h.controls.map(input => input.entered.promise));
+        await checkpoint(h);
+      } finally { await h.releaseAndDrain(); }
+      await expectOriginalFailedHolder(h, original);
+    });
+
+  it.each(['primary', 'witness'] as const)(
+    'initial snapshot drainage preserves the global first Error when %s fails early but drains late', async firstPeer => {
+      const otherPeer: Peer = firstPeer === 'primary' ? 'witness' : 'primary';
+      const first = new Error(`${firstPeer} temporal first`);
+      const later = new Error(`${otherPeer} temporal later`);
+      const h = rawHolder([
+        { peer: firstPeer, path: '/info', failure: first },
+        { peer: firstPeer, path: '/blocks/lastHeaders/1', gated: true },
+        { peer: otherPeer, path: '/info', failure: later, gated: true },
+      ]);
+      try {
+        await Promise.all(h.controls.map(input => input.entered.promise));
+        await checkpoint(h);
+        h.controls[2].gate.resolve();
+        await h.controls[2].finished.promise;
+        await checkpoint(h);
+      } finally { await h.releaseAndDrain(); }
+      await expectOriginalFailedHolder(h, first);
+    });
+
+  it('initial snapshot drainage keeps the holder active for an opposite-peer body after a completed snapshot validation fault', async () => {
+    const h = rawHolder([{ peer: 'witness', path: '/blocks/lastHeaders/1', gated: true }], 'primary');
+    try { await h.controls[0].entered.promise; await checkpoint(h); }
+    finally { await h.releaseAndDrain(); }
+    const outcome = await h.outcome;
+    expect(outcome.status).toBe('rejected');
+    if (outcome.status === 'rejected') expect(outcome.error.message).toBe('primary node did not identify the exact devnet network');
+    expect(h.guard).toThrow('target failed');
+  });
+});
+
 describe('actual deadline-aware snapshot and JSON helper bodies', () => {
   interface Reads {
     json(origin: string, path: string, deadline?: number, guard?: () => void): Promise<unknown>;

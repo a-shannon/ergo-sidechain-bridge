@@ -293,6 +293,14 @@ before any failure escapes. The original absolute deadline, request limit and
 response byte limit remain unchanged. A route fallback is acceptable only if
 its actual rows satisfy this complete proof.
 
+The initial snapshot bracket also drains all six started `/info`, best-header
+and indexed-height reads before a failed Hold changes its phase. The holder
+waits for both snapshot promises and their raw response bodies, then rethrows
+the same first observed error. This includes validation failure after one
+peer's responses arrive while the other peer still has a pending body. The
+original target and request guards remain active until the reads settle;
+successful snapshots and all existing limits are unchanged.
+
 This proof belongs to the authenticated native transaction permit. The mining
 pause validator and the earlier exact-snapshot export retain their singleton
 height-list rule. The caller receives the same held snapshot and gains no new

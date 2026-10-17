@@ -4161,10 +4161,15 @@ function bindOwnedMiningTransactionPermit(
   };
   const readExact = async (watermark: Readonly<{ headerId: string; height: number }>) => {
     assertOriginalTarget();
-    const [primaryRead, witnessRead] = await Promise.all([
-      readTransactionPermitTargetSnapshot(primary, watermark, deadline, assertOriginalTarget),
-      readTransactionPermitTargetSnapshot(witness, watermark, deadline, assertOriginalTarget),
-    ]);
+    const startedReads: Promise<unknown>[] = [];
+    const pendingSnapshots = [
+      readTransactionPermitTargetSnapshot(primary, watermark, deadline, assertOriginalTarget, startedReads),
+      readTransactionPermitTargetSnapshot(witness, watermark, deadline, assertOriginalTarget, startedReads),
+    ];
+    const [primaryRead, witnessRead] = await Promise.all(pendingSnapshots).catch(async error => {
+      await Promise.allSettled([...pendingSnapshots, ...startedReads]);
+      throw error;
+    });
     assertOriginalTarget();
     if (primaryRead === undefined || witnessRead === undefined) return undefined;
     const primarySnapshot = primaryRead.snapshot;
@@ -4765,15 +4770,18 @@ async function readTransactionPermitTargetSnapshot(
   watermark: Readonly<{ headerId: string; height: number }>,
   deadline: number,
   assertActive: () => void,
+  startedReads?: Promise<unknown>[],
 ): Promise<Readonly<TransactionPermitTargetSnapshot> | undefined> {
   const origin = node.role === 'primary'
     ? SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN
     : SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN;
-  const [infoValue, headersValue, indexValue] = await Promise.all([
+  const reads = [
     getJson(origin, '/info', deadline, assertActive),
     getJson(origin, '/blocks/lastHeaders/1', deadline, assertActive),
     getJson(origin, '/blockchain/indexedHeight', deadline, assertActive),
-  ]);
+  ];
+  startedReads?.push(...reads);
+  const [infoValue, headersValue, indexValue] = await Promise.all(reads);
   assertActive();
   const info = plainRecord(infoValue, `${node.role} node info`);
   const network = info.network ?? info.networkType;

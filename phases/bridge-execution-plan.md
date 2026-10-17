@@ -28,16 +28,25 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Validate and promote V2 reward-inventory scope drainage. The two
-concurrent reward-delay lanes must settle before the dual-source reconstruction
-scopes close, including failure. The correction retains the original first
-observed error and keeps all started reads within their existing aggregate
-deadline, request and byte limits. Nine exact-production cases cover the valid
-twin, each source and delay role, both temporal error orders and both outer
-peer controls; the six original failures now pass, as do twenty direct discovery
-cases. Legacy V1 and successful observation values and request order are
-unchanged. Exact independent review and guarded local promotion remain required.
-No historical campaign cause, complete deposit or lifecycle follows.
+**Now:** Close native Hold initial-snapshot drainage. Both peer snapshots and
+all six started raw reads must settle before a failed Hold changes phase. The
+holder retains the original first observed error, including when that peer's
+remaining body finishes after the other peer's later error. Ten exact-production
+cases cover all six source/route faults, both temporal error orders, validation
+failure with a pending peer and a valid complete Hold. Nine cases fail against
+the original source; all ten pass after correction. The complete lifetime suite
+passes 308 cases, TypeScript and the 138-module/933-source import check pass,
+and the exact code/test review passes. Original target, deadline, request and
+byte guards and successful observations remain unchanged. Final candidate
+review and guarded local promotion apply before source closure. This error-path
+correction does not establish a historical campaign cause, successful funding
+or a reason to select another campaign.
+
+V2 reward-inventory scope drainage was locally promoted at
+`1f8d80db10f71e8bfe25905c0fe7e24b842a30f4`. Its two concurrent reward-delay
+lanes settle before the reconstruction scopes close and preserve the first
+observed error. Nine exact-production and twenty direct discovery cases pass;
+legacy V1, successful values, request order and original limits are unchanged.
 
 The downstream full-block funding-anchor correction was locally promoted at
 `48a86d12dc25222d8bd61f2c8afdbdba2cf9b5c0`. Root and V2 separately prove complete
@@ -2220,7 +2229,8 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| V2 reward-inventory scope drainage (source validated locally) | Both started reward-delay lanes settle before either reconstruction scope closes; preserve the first observed error, successful values and all original limits | Nine exact-production cases and twenty direct discovery cases pass. Six original failure-path cases demonstrate premature scope closure, resumed reads and both temporal error orders; the valid twin and outer peer controls isolate the inner boundary. TypeScript, exact independent review and guarded promotion apply before source closure; no historical cause or lifecycle claim |
+| Native Hold initial-snapshot drainage (source validated locally) | Drain both snapshots and all six started raw reads before the failed Hold changes phase; retain the identical first observed error and original guards | Ten exact-production cases cover six isolated source/route faults, both temporal orders, validation failure with a pending peer and valid Hold. Nine original failures become green; full lifetime308, TypeScript, imports and scoped code/test review pass. Final exact-candidate review and guarded local promotion apply before source closure; no historical cause or successful funding claim |
+| V2 reward-inventory scope drainage (locally promoted at1f8d80db) | Both started reward-delay lanes settle before either reconstruction scope closes; preserve the first observed error, successful values and all original limits | Nine exact-production cases and twenty direct discovery cases pass. Six original failure-path cases demonstrate premature scope closure, resumed reads and both temporal error orders; the valid twin and outer peer controls isolate the inner boundary. TypeScript, exact independent review and guarded local promotion passed; no historical cause or lifecycle claim |
 | Downstream held full-block funding anchor (locally promoted at48a86d12) | Root prior-confirmation revalidation and V2 discovery prove complete ancestry from mandatory best-full ID to the observed header tip; retain the held full anchor, original funding equality, scopes and budgets | Two extracted-production cases are RED then GREEN, including absent-full-ID refusal and the unchanged funding-equality refusal of a later retained BEFORE anchor. Exact isolated proof/IO/role/drift, legacy V1, affected-consumer closure, independent review and guarded promotion closed the source boundary; no C72 cause or end-to-end claim |
 | Native held full-block observation (locally promoted at dbe2b816) | The permit binds `/info.bestFullHeaderId` to its authenticated full/index watermark and proves every header link to each peer's own best-header tip; exact paired held tuples and stable/closing proof remain mandatory | Direct298, legacy/canonical86, affected1,050 plus unchanged isolated surface-timeout replay, TypeScript/imports, exact independent four-file review and staged/hook/range guards closed the source candidate. Scopes overlap and are not summed; no historical cause or lifecycle authority |
 | Native permit canonical held watermark (source validated locally) | The authenticated permit rejoins exact paired indexing and canonical-first height lists through one-row identical ID/height/parent slices, stable through Hold and closing completion; historical singleton exports and all authority/resource guards remain | Original singleton twin passes and two valid sibling-fork inputs refuse. Dedicated pure/lifetime229 includes25 pure cases, four positive combinations, isolated field/role refusals, drift/drainage and six mutants with twins. Legacy Pause61, affected consumers/architecture/policy1037 with11 native-context cases inapplicable, standalone surface41, TypeScript and imports pass in distinct scopes. Exact independent review and guarded promotion gate the candidate before any new lifecycle preparation; no C70 cause or automatic campaign |
