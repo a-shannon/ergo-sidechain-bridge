@@ -664,7 +664,7 @@ async function observeSourceWithinBudgetV2(
   signer: Readonly<SubstrateFederatedRewardSignerBindingV1>,
 ): Promise<Readonly<SourceObservation>> {
   const before = await observeFullSnapshotV2(client);
-  const sampledProfiles = await Promise.all(REWARD_DELAYS.map(async rewardDelayBlocks => {
+  const pendingProfiles = REWARD_DELAYS.map(async rewardDelayBlocks => {
     const rewardInputErgoTreeHex = rewardDelayBlocks === 1
       ? signer.rewardInputErgoTrees.delay1
       : signer.rewardInputErgoTrees.delay720;
@@ -703,7 +703,11 @@ async function observeSourceWithinBudgetV2(
         repeatedBoxes.maxObservedCreationHeight,
       ),
     });
-  }));
+  });
+  const sampledProfiles = await Promise.all(pendingProfiles).catch(async error => {
+    await Promise.allSettled(pendingProfiles);
+    throw error;
+  });
   const after = await observeFullSnapshotV2(client);
   for (const profile of sampledProfiles) {
     if (profile.maxObservedCreationHeight > after.tipHeight) {

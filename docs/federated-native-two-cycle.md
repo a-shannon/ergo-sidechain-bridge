@@ -359,6 +359,11 @@ descends from that full block through the same bounded value checks, preserving
 the singleton genesis lookup and original reconstruction budgets. A well-formed
 header below the full block may retry within the original three attempts;
 contradictions refuse. Both concurrent proof reads drain before failure returns.
+The two reward-delay inventory lanes also settle before either source's
+reconstruction scope closes. If a lane fails, discovery waits for all started
+lanes and rethrows the original first observed error. The pending lane's later
+reads therefore remain subject to the existing aggregate deadline, request and
+byte limits. Successful observation values and request order are unchanged.
 The two sources must still agree on the retained full snapshot and reward
 inventory. Creation-height filtering and maturity use that anchor; later full
 blocks require the existing canonical extension proof. The legacy V1 stopped,
