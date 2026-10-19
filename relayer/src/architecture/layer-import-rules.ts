@@ -506,6 +506,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
       'substrate-federated-isolated-devnet-genesis-revalidator-v1.ts',
       'substrate-federated-isolated-devnet-peg-in-candidate-v1.ts',
       'substrate-federated-isolated-devnet-peg-in-candidate-v2.ts',
+      'substrate-federated-isolated-devnet-peg-in-candidate-v3.ts',
       'substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.ts',
       'substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.ts',
       'substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.ts',
@@ -950,6 +951,9 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
       ['substrate-federated-isolated-devnet-peg-in-candidate-v2.ts', new Set([
         'assertSubstrateFederatedNativeGenesisPegInPacketV1',
       ])],
+      ['substrate-federated-isolated-devnet-peg-in-candidate-v3.ts', new Set([
+        'assertSubstrateFederatedNativeGenesisPegInPacketV3',
+      ])],
       [
         'substrate-federated-isolated-devnet-checked-submission-transport-v1.ts',
         new Set([
@@ -1001,6 +1005,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         new Set([
           'createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1',
           'createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV1',
+          'createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV3',
         ]),
       ],
       [
@@ -1011,6 +1016,8 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
           'SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1',
           'observeSubstrateFederatedNativeGenesisPegInSourceLockOutputsV1',
           'assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1',
+          'observeSubstrateFederatedNativeGenesisPegInSourceLockOutputsV3',
+          'assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV3',
         ]),
       ],
       [
@@ -1473,6 +1480,7 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
         new Set([
           'createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1',
           'createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV1',
+          'createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV3',
         ]),
       ],
       [
@@ -1482,6 +1490,8 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
           'observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutputsV1',
           'observeSubstrateFederatedNativeGenesisPegInSourceLockOutputsV1',
           'assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1',
+          'observeSubstrateFederatedNativeGenesisPegInSourceLockOutputsV3',
+          'assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV3',
         ]),
       ],
       [
@@ -1833,6 +1843,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'executeSubstrateFederatedNativeGenesisBatchV1',
       'executeSubstrateFederatedNativeGenesisBatchV3',
       'executeSubstrateFederatedNativeGenesisPegInSourceLockV1',
+      'executeSubstrateFederatedNativeGenesisPegInSourceLockV3',
       'executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1',
       'executeSubstrateFederatedNativeContinuationPegInSourceLockV1',
       'executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1',

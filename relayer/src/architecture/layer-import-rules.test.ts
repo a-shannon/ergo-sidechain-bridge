@@ -1373,6 +1373,7 @@ describe('layer import rules', () => {
 
   it.each([
     'executeSubstrateFederatedNativeContinuationPegInSourceLockV1',
+    'executeSubstrateFederatedNativeGenesisPegInSourceLockV3',
     'executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1',
     'executeSubstrateFederatedNativeGenesisBatchV3',
   ])('limits the continuation execution export %s to the reviewed native root', binding => {

@@ -175,6 +175,15 @@ observation. The next separate batch must connect the V3 check, authorizer,
 journal, transport and confirmed output in an owned operational root; it may
 not borrow the V1 worker or imply a completed deposit.
 
+An owned V3 genesis source-lock root now connects that retained check to two
+owned funding observations, the V3 authorizer, journal reconciliation before
+transport, and V3 output custody after confirmation. The established V1 and
+continuation routes remain separate. Focused root tests pass 92/92, layered
+import rules pass 444/444, TypeScript noEmit passes, and independent source
+review found no blocking defect. These are source-only results: the V3
+committed-vault route, worker consumption, genuine two-cycle and later
+recovery/operator/FED7 evidence are still open.
+
 C74 is consumed and permanently held; no successor campaign is selected. The
 purpose-specific deposit selector was locally promoted at
 `9e70f876a46999383f6fc975ce47d816ada5d235` after exact independent review and

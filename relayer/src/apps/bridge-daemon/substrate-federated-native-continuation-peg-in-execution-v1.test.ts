@@ -19,13 +19,16 @@ import { tagNativeTwoCycleCycleStepFailureV1 }
 
 const mocked = vi.hoisted(() => ({
   assertOwnedTarget: vi.fn(),
+  completeOwnedMining: vi.fn(),
   assertPacket: vi.fn(),
+  assertPacketV3: vi.fn(),
   discoverFunding: vi.fn(),
   promoteSource: vi.fn(),
   promoteVault: vi.fn(),
   createObserver: vi.fn(),
   projectProgress: vi.fn(),
   createSourceAuthorizer: vi.fn(),
+  createSourceAuthorizerV3: vi.fn(),
   createVaultAuthorization: vi.fn(),
   createSourceJournal: vi.fn(),
   createVaultJournal: vi.fn(),
@@ -33,6 +36,8 @@ const mocked = vi.hoisted(() => ({
   createVaultTransport: vi.fn(),
   observeSourceOutputs: vi.fn(),
   assertSourceOutputs: vi.fn(),
+  observeSourceOutputsV3: vi.fn(),
+  assertSourceOutputsV3: vi.fn(),
   observeVaultOutputs: vi.fn(),
   assertVaultOutputs: vi.fn(),
 }));
@@ -40,11 +45,17 @@ const mocked = vi.hoisted(() => ({
 vi.mock('../../substrate-federated-isolated-devnet-ergo-node-process-v1.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../substrate-federated-isolated-devnet-ergo-node-process-v1.js')>()),
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1: mocked.assertOwnedTarget,
+  completeSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1: mocked.completeOwnedMining,
 }));
 
 vi.mock('../../substrate-federated-isolated-devnet-peg-in-candidate-v2.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../substrate-federated-isolated-devnet-peg-in-candidate-v2.js')>()),
   assertSubstrateFederatedNativeGenesisPegInPacketV1: mocked.assertPacket,
+}));
+
+vi.mock('../../substrate-federated-isolated-devnet-peg-in-candidate-v3.js', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../substrate-federated-isolated-devnet-peg-in-candidate-v3.js')>()),
+  assertSubstrateFederatedNativeGenesisPegInPacketV3: mocked.assertPacketV3,
 }));
 
 vi.mock('../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js', () => ({
@@ -66,6 +77,7 @@ vi.mock('../../substrate-federated-isolated-devnet-genesis-confirmation-observer
 vi.mock('../../substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.js')>()),
   createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV1: mocked.createSourceAuthorizer,
+  createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV3: mocked.createSourceAuthorizerV3,
 }));
 
 vi.mock('../../substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.js', async importOriginal => ({
@@ -91,6 +103,8 @@ vi.mock('../../substrate-federated-isolated-devnet-peg-in-source-lock-output-obs
   ...(await importOriginal<typeof import('../../substrate-federated-isolated-devnet-peg-in-source-lock-output-observer-v1.js')>()),
   observeSubstrateFederatedNativeGenesisPegInSourceLockOutputsV1: mocked.observeSourceOutputs,
   assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1: mocked.assertSourceOutputs,
+  observeSubstrateFederatedNativeGenesisPegInSourceLockOutputsV3: mocked.observeSourceOutputsV3,
+  assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV3: mocked.assertSourceOutputsV3,
 }));
 
 vi.mock('../../substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js', async importOriginal => ({
@@ -104,6 +118,7 @@ import {
   executeSubstrateFederatedNativeContinuationPegInSourceLockV1,
   executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1,
   executeSubstrateFederatedNativeGenesisPegInSourceLockV1,
+  executeSubstrateFederatedNativeGenesisPegInSourceLockV3,
 } from './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
 
 const hex = (value: string) => value.repeat(64).slice(0, 64);
@@ -145,7 +160,9 @@ describe('native continuation peg-in execution transport', () => {
     });
 
     mocked.assertOwnedTarget.mockReturnValue(CURRENT_TARGET_BINDING);
+    mocked.completeOwnedMining.mockResolvedValue(undefined);
     mocked.assertPacket.mockImplementation(packet => packet);
+    mocked.assertPacketV3.mockImplementation(packet => packet);
     mocked.discoverFunding.mockImplementation(async (_signer, _target) => ({ observation: fundingObservation() }));
     mocked.promoteSource.mockImplementation(receipt => sourceExecutionCheck(receipt));
     mocked.promoteVault.mockImplementation(receipt => vaultExecutionCheck(receipt));
@@ -154,6 +171,10 @@ describe('native continuation peg-in execution transport', () => {
       observe: vi.fn(async () => confirmation),
     });
     mocked.createSourceAuthorizer.mockReturnValue({
+      revalidationDigestHex: hex('1'),
+      authorize: vi.fn(revalidated => ({ authorizationDigestHex: hex('2'), authorizationArtifact: { revalidated } })),
+    });
+    mocked.createSourceAuthorizerV3.mockReturnValue({
       revalidationDigestHex: hex('1'),
       authorize: vi.fn(revalidated => ({ authorizationDigestHex: hex('2'), authorizationArtifact: { revalidated } })),
     });
@@ -182,6 +203,12 @@ describe('native continuation peg-in execution transport', () => {
       expect(value).toBeDefined();
       mocked.assertPacket(retainedPacket, batch, target);
     });
+    mocked.observeSourceOutputsV3.mockImplementation(async () => sourceOutput);
+    mocked.assertSourceOutputsV3.mockImplementation((value, target, batch, retainedPacket) => {
+      expect(value).toBe(sourceOutput);
+      mocked.assertPacketV3(retainedPacket, batch, target);
+      return retainedPacket;
+    });
     mocked.observeVaultOutputs.mockImplementation(async () => vaultOutput);
     mocked.assertVaultOutputs.mockImplementation((value, target, batch, retainedPacket) => {
       expect(value).toBe(vaultOutput);
@@ -208,6 +235,83 @@ describe('native continuation peg-in execution transport', () => {
     expect(mocked.createSourceJournal.mock.results[0]?.value.revalidateConfirmed)
       .toHaveBeenCalledWith(mocked.createObserver.mock.results[0]?.value,
         fixture.packet.transactions.sourceLockCreation.txId);
+  });
+
+  it('routes the exact V3 source-lock packet through its check, authorizer and output custody', async () => {
+    const fixture = v3SourceFixture();
+    const result = await executeSubstrateFederatedNativeGenesisPegInSourceLockV3(fixture.sourceInput as never);
+
+    expect(fixture.session.checkNativePegInSourceLockRetainingSignerV3).toHaveBeenCalledOnce();
+    expect(fixture.session.checkNativePegInSourceLockRetainingSignerV3)
+      .toHaveBeenCalledWith(fixture.packet, fixture.target);
+    expect(fixture.session.checkNativePegInSourceLockRetainingSignerV1).not.toHaveBeenCalled();
+    expect(fixture.session.checkNativeContinuationPegInSourceLockRetainingSignerV1).not.toHaveBeenCalled();
+    expect(mocked.createSourceAuthorizerV3).toHaveBeenCalledWith(expect.objectContaining({
+      target: fixture.target, batch: fixture.batch, packet: fixture.packet,
+      executionCheck: mocked.promoteSource.mock.results[0]?.value,
+    }));
+    expect(mocked.createSourceAuthorizer).not.toHaveBeenCalled();
+    expect(mocked.createSourceJournal.mock.calls[0]?.[0].reconciliationIdentityDigestHex)
+      .toBe(CURRENT_TARGET_BINDING.executionTargetIdentityDigestHex);
+    expect(mocked.createSourceTransport.mock.results[0]?.value.submit).toHaveBeenCalledOnce();
+    expect(mocked.observeSourceOutputsV3).toHaveBeenCalledWith(expect.objectContaining({
+      target: fixture.target, batch: fixture.batch, packet: fixture.packet,
+    }));
+    expect(mocked.assertSourceOutputsV3).toHaveBeenCalledWith(
+      sourceOutput, fixture.target, fixture.batch, fixture.packet,
+    );
+    expect(mocked.observeSourceOutputs).not.toHaveBeenCalled();
+    expect(result.outputObservation).toBe(sourceOutput);
+  });
+
+  it('rejects a cloned V3 packet before the native source-lock check', async () => {
+    const fixture = v3SourceFixture();
+    mocked.assertPacketV3.mockImplementation(value => {
+      if (value !== fixture.packet) throw new Error('foreign V3 packet');
+      return value;
+    });
+
+    await expect(executeSubstrateFederatedNativeGenesisPegInSourceLockV3({
+      ...fixture.sourceInput, packet: structuredClone(fixture.packet),
+    } as never)).rejects.toThrow('foreign V3 packet');
+    expect(fixture.session.checkNativePegInSourceLockRetainingSignerV3).not.toHaveBeenCalled();
+    expect(mocked.discoverFunding).not.toHaveBeenCalled();
+    expect(mocked.createSourceJournal).not.toHaveBeenCalled();
+    expect(mocked.createSourceTransport).not.toHaveBeenCalled();
+  });
+
+  it('stops after asynchronous V3 custody revocation before funding or transport', async () => {
+    const fixture = v3SourceFixture();
+    const revoked = new Error('V3 packet custody revoked');
+    let lost = false;
+    fixture.session.checkNativePegInSourceLockRetainingSignerV3.mockImplementation(async () => {
+      lost = true;
+      return sourceReceipt(fixture.packet);
+    });
+    mocked.assertPacketV3.mockImplementation(value => {
+      if (lost) throw revoked;
+      return value;
+    });
+
+    await expect(executeSubstrateFederatedNativeGenesisPegInSourceLockV3(
+      fixture.sourceInput as never,
+    )).rejects.toBe(revoked);
+    expect(mocked.discoverFunding).not.toHaveBeenCalled();
+    expect(mocked.promoteSource).not.toHaveBeenCalled();
+    expect(mocked.createSourceJournal).not.toHaveBeenCalled();
+    expect(mocked.createSourceTransport).not.toHaveBeenCalled();
+  });
+
+  it('refuses a prior V3 source-lock journal attempt without another transport', async () => {
+    const fixture = v3SourceFixture();
+    sourcePrior = 'confirmed';
+
+    await expect(executeSubstrateFederatedNativeGenesisPegInSourceLockV3(
+      fixture.sourceInput as never,
+    )).rejects.toThrow(/prior native source-lock attempt/);
+    expect(mocked.createSourceJournal).toHaveBeenCalledOnce();
+    expect(mocked.createSourceTransport).not.toHaveBeenCalled();
+    expect(mocked.observeSourceOutputsV3).not.toHaveBeenCalled();
   });
 
   it('uses the continuation committed-vault check and forwards the original source observation', async () => {
@@ -638,6 +742,30 @@ function executionFixture() {
     sourceInput: { target, batch, packet: currentPacket, setupSession: session, state: {} },
     vaultInput: { target, batch, packet: currentPacket, sourceLockObservation: sourceObservation,
       setupSession: session, state: {} },
+  };
+}
+
+function v3SourceFixture() {
+  const base = executionFixture();
+  const v3Packet = Object.freeze({
+    ...base.packet,
+    schema: 'e2s.substrate-federated-pooled-reserve-deposit.v3' as const,
+    version: 3 as const,
+  });
+  const v3Batch = Object.freeze({
+    ...base.batch,
+    profile: 'fed-native-height-zero-v3-reserve-v7' as const,
+  });
+  const session = Object.freeze({
+    ...base.session,
+    checkNativePegInSourceLockRetainingSignerV3: vi.fn(async () => sourceReceipt(v3Packet)),
+  });
+  return {
+    ...base,
+    batch: v3Batch,
+    packet: v3Packet,
+    session,
+    sourceInput: { target: base.target, batch: v3Batch, packet: v3Packet, setupSession: session, state: {} },
   };
 }
 
