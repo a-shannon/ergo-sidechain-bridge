@@ -60,7 +60,9 @@ import { assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1,
   assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3,
   assertSubstrateFederatedNativeGenesisSetupReadCustodyV3,
   assertSubstrateFederatedNativeGenesisPegInSourceLockExecutionCheckV3,
-  promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1 }
+  assertSubstrateFederatedNativeGenesisPegInCommittedVaultExecutionCheckV3,
+  promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1,
+  promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1 }
   from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import { createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2 }
   from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
@@ -71,6 +73,8 @@ import { buildSubstrateFederatedNativeGenesisPegInPacketV3 as buildNativePegInV3
   assertSubstrateFederatedNativeGenesisPegInPacketV3 as assertNativePegInV3,
   assertSubstrateFederatedNativeGenesisPegInReadCustodyV3 as assertNativeReadCustodyV3 }
   from './substrate-federated-isolated-devnet-peg-in-candidate-v3.js';
+import { createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV3 }
+  from './substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.js';
 import { buildBridgeValidityTrackerCanonicalHeaderContextV1 }
   from './bridge-validity-tracker-header-context-v1.js';
 import * as helpers from './ergo-helpers.js';
@@ -510,6 +514,30 @@ describe('observed FED genesis V3 compilation and retained execution', () => {
     expect(vault.sourceLockBoxIdHex).toBe(pegInPacket.boxes.sourceLock.boxId);
     expect(vault.boundaries.broadcastAuthorityEstablished).toBe(false);
     expect(helpers.ncheck).toHaveBeenCalledTimes(12);
+    expect(uncheckedSameTxPacket.transactions.reserveTransition.txId)
+      .toBe(pegInPacket.transactions.reserveTransition.txId);
+    expect(() => promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1(
+      { ...vault }, target)).toThrow(/exact execution provenance/);
+    const promotedVault = promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1(
+      vault, target);
+    expect(() => promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1(
+      vault, target)).toThrow(/exact execution provenance/);
+    expect(() => assertSubstrateFederatedNativeGenesisPegInCommittedVaultExecutionCheckV3(
+      promotedVault, uncheckedSameTxPacket, batch, target)).toThrow(/exact packet custody/);
+    expect(() => assertSubstrateFederatedNativeGenesisPegInCommittedVaultExecutionCheckV3(
+      { ...promotedVault }, pegInPacket, batch, target)).toThrow(/exact packet custody/);
+    expect(() => assertSubstrateFederatedNativeGenesisPegInCommittedVaultExecutionCheckV3(
+      promotedSourceLock as never, pegInPacket, batch, target)).toThrow(/exact packet custody/);
+    expect(() => assertSubstrateFederatedNativeGenesisPegInCommittedVaultExecutionCheckV3(
+      promotedVault, pegInPacket, { ...batch }, target)).toThrow(/exact packet custody/);
+    expect(() => assertSubstrateFederatedNativeGenesisPegInCommittedVaultExecutionCheckV3(
+      promotedVault, pegInPacket, batch, { ...target })).toThrow(/exact packet custody/);
+    expect(() => assertSubstrateFederatedNativeGenesisPegInCommittedVaultExecutionCheckV3(
+      promotedVault, pegInPacket, batch, target)).not.toThrow();
+    expect(() => createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV3({
+      target, batch, packet: uncheckedSameTxPacket, executionCheck: promotedVault,
+      sourceLockObservation: {} as never,
+    })).toThrow(/exact packet custody/);
     const root = mkdtempSync(join(tmpdir(), 'e2s-v3-native-issuance-'));
     const markers = join(root, 'markers');
     mkdirSync(markers);
@@ -575,6 +603,8 @@ describe('observed FED genesis V3 compilation and retained execution', () => {
       .toThrow();
     expect(() => assertNativePegInV3(pegInPacket, batch, target)).toThrow();
     expect(() => assertNativeReadCustodyV3(pegInPacket, batch, target)).toThrow();
+    expect(() => assertSubstrateFederatedNativeGenesisPegInCommittedVaultExecutionCheckV3(
+      promotedVault, pegInPacket, batch, target)).toThrow(/inactive/);
   }, 120_000);
 
   it.each(['setup clone', 'source clone', 'discovery clone', 'history clone',

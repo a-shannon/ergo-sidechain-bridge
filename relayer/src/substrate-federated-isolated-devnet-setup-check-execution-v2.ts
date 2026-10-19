@@ -644,6 +644,13 @@ const PEG_IN_COMMITTED_VAULT_EXECUTION_CHECKS = new WeakMap<
     assertActive?: () => void;
   }>
 >();
+type NativeV3CommittedVaultCheckIdentity = Readonly<{
+  packet: Readonly<SubstrateFederatedPooledReserveDepositV3Packet>;
+  batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV3>;
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+}>;
+const NATIVE_V3_COMMITTED_VAULT_RECEIPTS = new WeakMap<object, NativeV3CommittedVaultCheckIdentity>();
+const NATIVE_V3_COMMITTED_VAULT_EXECUTION_CHECKS = new WeakMap<object, NativeV3CommittedVaultCheckIdentity>();
 
 export interface SubstrateFederatedIsolatedDevnetTrackerTransportExecutionCheckV1 {
   readonly receipt: Readonly<
@@ -1340,6 +1347,7 @@ export function promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
 ): Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1> {
   const material = PEG_IN_COMMITTED_VAULT_CHECK_MATERIAL.get(receipt);
+  const nativeV3Identity = NATIVE_V3_COMMITTED_VAULT_RECEIPTS.get(receipt);
   material?.assertActive?.();
   const current =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
@@ -1376,6 +1384,10 @@ export function promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV
     binding: current,
     assertActive: material.assertActive,
   }));
+  if (nativeV3Identity !== undefined) {
+    NATIVE_V3_COMMITTED_VAULT_EXECUTION_CHECKS.set(promoted, nativeV3Identity);
+    NATIVE_V3_COMMITTED_VAULT_RECEIPTS.delete(receipt);
+  }
   return promoted;
 }
 
@@ -1410,11 +1422,27 @@ export function assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecuti
   return current;
 }
 
+/** Preserve the exact V3 packet checked by this live committed-vault session. */
+export function assertSubstrateFederatedNativeGenesisPegInCommittedVaultExecutionCheckV3(
+  check: Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1>,
+  packet: Readonly<SubstrateFederatedPooledReserveDepositV3Packet>,
+  batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV3>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1> {
+  const retained = NATIVE_V3_COMMITTED_VAULT_EXECUTION_CHECKS.get(check);
+  if (retained === undefined || retained.packet !== packet || retained.batch !== batch
+    || retained.target !== target) {
+    throw new Error('native FED V3 committed-vault execution check lacks exact packet custody');
+  }
+  return assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1(check, target);
+}
+
 export function discardSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1(
   receipt:
     Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Receipt>,
 ): void {
   PEG_IN_COMMITTED_VAULT_CHECK_MATERIAL.delete(receipt);
+  NATIVE_V3_COMMITTED_VAULT_RECEIPTS.delete(receipt);
 }
 
 export interface SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2 {
@@ -2692,6 +2720,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
           unsignedTransaction: packet.transactions.reserveTransition,
         }, target, signer, activeMnemonic, assertActive);
         assertActive();
+        NATIVE_V3_COMMITTED_VAULT_RECEIPTS.set(checked, Object.freeze({ packet, batch: ownBatch, target }));
         return checked;
       }, 'native-v3-vault-checked'),
       checkNativePegInSourceLockRetainingSignerV1: async (

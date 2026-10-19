@@ -184,6 +184,21 @@ review found no blocking defect. These are source-only results: the V3
 committed-vault route, worker consumption, genuine two-cycle and later
 recovery/operator/FED7 evidence are still open.
 
+The V3 committed-vault check now transfers private packet, batch and target
+identity to its promoted check. A separate V3 committed-vault authorizer requires
+that exact identity, the retained source-lock observation and read custody,
+while reusing the bounded native two-node and fresh JVM revalidation. Its scope
+and digest domains are distinct from V1. A second real V3 packet with the same
+transaction ID is rejected at the authorizer entry. Focused authorizer tests
+pass 126/126, the real V3 integration file passes 9/9, TypeScript and layered
+imports pass, and independent four-file review found no blocking defect. The
+first focused authorizer run failed two new assertions that expected a later
+one-shot error before the earlier revoked-provenance error; the corrected test
+restores the guard before checking the failed one-shot state. A positive V3
+authorizer join with a real committed-vault output observation, an owned
+committed-vault root and worker remain due. These source-only checks do not
+establish transport, node acceptance or a complete two-cycle.
+
 C74 is consumed and permanently held; no successor campaign is selected. The
 purpose-specific deposit selector was locally promoted at
 `9e70f876a46999383f6fc975ce47d816ada5d235` after exact independent review and

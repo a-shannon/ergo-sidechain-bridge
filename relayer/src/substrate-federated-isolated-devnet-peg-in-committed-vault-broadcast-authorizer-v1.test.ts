@@ -6,6 +6,10 @@ const mocks = vi.hoisted(() => ({
   assertNativePacket: vi.fn(),
   assertReadCustody: vi.fn(),
   assertNativeSource: vi.fn(),
+  assertNativePacketV3: vi.fn(),
+  assertReadCustodyV3: vi.fn(),
+  assertNativeSourceV3: vi.fn(),
+  assertExecutionCheckV3: vi.fn(),
   assertExecutionCheck: vi.fn(),
   assertHandleBinding: vi.fn(),
   assertHandle: vi.fn(),
@@ -76,6 +80,10 @@ vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v2.js', () => ({
   assertSubstrateFederatedNativeGenesisPegInPacketV1: mocks.assertNativePacket,
   assertSubstrateFederatedNativeGenesisPegInReadCustodyV1: mocks.assertReadCustody,
 }));
+vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v3.js', () => ({
+  assertSubstrateFederatedNativeGenesisPegInPacketV3: mocks.assertNativePacketV3,
+  assertSubstrateFederatedNativeGenesisPegInReadCustodyV3: mocks.assertReadCustodyV3,
+}));
 vi.mock(
   './substrate-federated-isolated-devnet-peg-in-source-lock-output-observer-v1.js',
   () => ({
@@ -84,6 +92,7 @@ vi.mock(
     assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationForCandidateV2:
       mocks.assertSourceLockObservationV2,
     assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1: mocks.assertNativeSource,
+    assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV3: mocks.assertNativeSourceV3,
   }),
 );
 vi.mock(
@@ -98,6 +107,8 @@ vi.mock(
 vi.mock('./substrate-federated-isolated-devnet-setup-check-execution-v2.js', () => ({
   assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1:
     mocks.assertExecutionCheck,
+  assertSubstrateFederatedNativeGenesisPegInCommittedVaultExecutionCheckV3:
+    mocks.assertExecutionCheckV3,
 }));
 vi.mock('./unsigned-ergo-transaction.js', () => ({
   normalizeEip12Box: mocks.normalizeEip12Box,
@@ -108,6 +119,7 @@ import {
   createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1,
   createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV2,
   createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV1,
+  createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV3,
 } from './substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.js';
 import {
   PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
@@ -1038,6 +1050,108 @@ describe('native committed-vault observation scheduling (mocked provenance and n
     expect(mocks.readBox).toHaveBeenCalledTimes(8);
     expect(mocks.checkSignedTransaction).not.toHaveBeenCalled();
   });
+});
+
+describe('native V3 committed-vault authorization boundary (mocked upstream provenance)', () => {
+  function fixtureV3() {
+    const f = fixture();
+    const packet = f.input.candidate.depositPacket;
+    const batch = Object.freeze({
+      ...f.input.batch,
+      receipt: Object.freeze({ receiptDigestHex: hex('81') }),
+      targetBinding: BINDING,
+    });
+    const input = Object.freeze({
+      target: TARGET, packet, batch,
+      executionCheck: f.executionCheck,
+      sourceLockObservation: f.input.sourceLockObservation,
+    });
+    const assertPacket = (value: unknown, valueBatch: unknown, target: unknown) => {
+      if (value !== packet || valueBatch !== batch || target !== TARGET) {
+        throw new Error('V3 packet provenance lost');
+      }
+      return packet;
+    };
+    mocks.assertNativePacketV3.mockImplementation(assertPacket);
+    mocks.assertReadCustodyV3.mockImplementation(assertPacket);
+    mocks.assertExecutionCheckV3.mockImplementation((check, value, valueBatch, target) => {
+      if (check !== f.executionCheck || value !== packet || valueBatch !== batch || target !== TARGET) {
+        throw new Error('V3 exact committed-vault check custody lost');
+      }
+      return BINDING;
+    });
+    mocks.assertNativeSourceV3.mockImplementation((observation, target, valueBatch, value) => {
+      if (observation !== input.sourceLockObservation || target !== TARGET
+        || valueBatch !== batch || value !== packet) {
+        throw new Error('V3 source-lock observation custody lost');
+      }
+      return packet;
+    });
+    mocks.tipIdHex = mocks.tipHeight.toString(16).padStart(64, '0');
+    return { ...f, input };
+  }
+
+  it('revalidates the exact V3 tuple through two nodes and authorizes once in a separate scope', async () => {
+    const f = fixtureV3();
+    const session = createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV3(
+      f.input as never);
+    const revalidation = await session.revalidator.revalidate(f.checked as never);
+    const revalidated = Object.freeze({
+      checked: f.checked, revalidationDigestHex: revalidation.revalidationDigestHex,
+    });
+    const authorization = session.broadcastAuthorizer.authorize(revalidated as never);
+    expect(authorization.authorizationArtifact).toMatchObject({
+      authorizationScope: 'fed-6-native-v3-local-synthetic-peg-in-committed-vault-transition-only',
+      expectedTxId: f.input.packet.transactions.reserveTransition.txId,
+    });
+    expect(() => assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1(
+      session.broadcastAuthorizer, { revalidated, ...authorization } as never,
+    )).not.toThrow();
+    expect(session.takePreTransportObservation()).toMatchObject({ observedTipHeight: 101 });
+    expect(() => session.takePreTransportObservation()).toThrow(/consumed/);
+    expect(() => session.broadcastAuthorizer.authorize(revalidated as never)).toThrow(/one-shot/);
+    expect(mocks.readBox).toHaveBeenCalledTimes(16);
+    expect(mocks.checkSignedTransaction).toHaveBeenCalledOnce();
+    expect(mocks.assertNativePacket).not.toHaveBeenCalled();
+    expect(mocks.assertNativeSource).not.toHaveBeenCalled();
+  });
+
+  it('rejects a different V3 packet with the same txId when the check retained the original', () => {
+    const f = fixtureV3();
+    const other = Object.freeze({ ...f.input.packet });
+    expect(other.transactions.reserveTransition.txId)
+      .toBe(f.input.packet.transactions.reserveTransition.txId);
+    mocks.assertNativePacketV3.mockImplementation((value, valueBatch, target) => {
+      if (value !== other || valueBatch !== f.input.batch || target !== TARGET) {
+        throw new Error('V3 packet provenance lost');
+      }
+      return other;
+    });
+    expect(() => createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV3({
+      ...f.input, packet: other,
+    } as never)).toThrow(/exact committed-vault check custody/);
+    expect(mocks.checkSignedTransaction).not.toHaveBeenCalled();
+  });
+
+  it.each(['check', 'source observation', 'read custody'] as const)(
+    'fails closed when V3 %s provenance is revoked across the fresh JVM await', async boundary => {
+      const f = fixtureV3();
+      const session = createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV3(
+        f.input as never);
+      const guard = boundary === 'check' ? mocks.assertExecutionCheckV3
+        : boundary === 'source observation' ? mocks.assertNativeSourceV3 : mocks.assertReadCustodyV3;
+      const originalGuard = guard.getMockImplementation()!;
+      mocks.checkSignedTransaction.mockImplementationOnce(async () => {
+        guard.mockImplementation(() => { throw new Error('V3 retained provenance revoked'); });
+        return f.freshCheck;
+      });
+      await expect(session.revalidator.revalidate(f.checked as never))
+        .rejects.toThrow(/V3 retained provenance revoked/);
+      guard.mockImplementation(originalGuard);
+      expect(() => session.takePreTransportObservation()).toThrow(/unavailable or consumed/);
+      expect(mocks.checkSignedTransaction).toHaveBeenCalledOnce();
+    },
+  );
 });
 
 describe('isolated committed-vault V2 authorization boundary (mocked provenance and node fields)', () => {
