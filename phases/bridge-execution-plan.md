@@ -110,6 +110,16 @@ node acceptance or a complete two-cycle. An operational root and worker route,
 genuine two-cycle run, recovery, operator/FED7 and external acceptance remain
 due. C74 stays held; no successor campaign is selected.
 
+A separate V3 pooled-reserve deposit builder now authenticates the actual
+process-owned V3/V7 family compiler receipt before applying the shared unsigned
+deposit equations. It emits a distinct V3 packet with a separate provenance
+set and keeps every signing, node, finality and funds boundary false. Four
+focused tests pass with a pinned JVM receipt, including copied and cross-version
+refusals; TypeScript, layered imports and independent exact-source review pass.
+The packet is not yet bound to the retained V3 setup batch and target. That
+producer-to-consumer join, the operational route and genuine node acceptance
+remain separate work; no campaign is selected.
+
 C74 is consumed and permanently held; no successor campaign is selected. The
 purpose-specific deposit selector was locally promoted at
 `9e70f876a46999383f6fc975ce47d816ada5d235` after exact independent review and
