@@ -1374,6 +1374,7 @@ describe('layer import rules', () => {
   it.each([
     'executeSubstrateFederatedNativeContinuationPegInSourceLockV1',
     'executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1',
+    'executeSubstrateFederatedNativeGenesisBatchV3',
   ])('limits the continuation execution export %s to the reviewed native root', binding => {
     expect(inspect({ [GENESIS_SETUP_ROOT]: `export async function ${binding}() {}` })).toEqual([]);
     expect(inspect({ [TRACKER_V2_CAMPAIGN_ROOT]: `export async function ${binding}() {}` })
@@ -2323,6 +2324,9 @@ describe('layer import rules', () => {
     ['substrate-federated-isolated-devnet-genesis-revalidator-v1', 'createSubstrateFederatedNativeGenesisRevalidatorV1'],
     ['substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1', 'createSubstrateFederatedNativeGenesisBroadcastAuthorizerV1'],
     ['substrate-federated-isolated-devnet-checked-submission-transport-v1', 'createSubstrateFederatedNativeGenesisCheckedSubmissionTransportV1'],
+    ['substrate-federated-isolated-devnet-genesis-revalidator-v1', 'createSubstrateFederatedNativeGenesisRevalidatorV3'],
+    ['substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1', 'createSubstrateFederatedNativeGenesisBroadcastAuthorizerV3'],
+    ['substrate-federated-isolated-devnet-checked-submission-transport-v1', 'createSubstrateFederatedNativeGenesisCheckedSubmissionTransportV3'],
     ['substrate-federated-isolated-devnet-genesis-revalidator-v1', 'createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV2'],
     ['substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1', 'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2'],
     ['substrate-federated-isolated-devnet-checked-submission-transport-v1', 'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2'],

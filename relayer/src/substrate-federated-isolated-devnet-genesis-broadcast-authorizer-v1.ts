@@ -26,9 +26,11 @@ import {
   assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV1,
   assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV2,
   assertSubstrateFederatedNativeGenesisRevalidationArtifactV1,
+  assertSubstrateFederatedNativeGenesisRevalidationArtifactV3,
   type SubstrateFederatedIsolatedDevnetGenesisRevalidatorV1,
   type SubstrateFederatedIsolatedDevnetGenesisRevalidatorV2,
   type SubstrateFederatedNativeGenesisRevalidatorV1,
+  type SubstrateFederatedNativeGenesisRevalidatorV3,
 } from './substrate-federated-isolated-devnet-genesis-revalidator-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
@@ -39,9 +41,11 @@ import {
   assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
   assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
   assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1,
+  assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3,
   type SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
   type SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
   type SubstrateFederatedNativeGenesisSetupExecutionBatchV1,
+  type SubstrateFederatedNativeGenesisSetupExecutionBatchV3,
   type SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 
@@ -51,11 +55,14 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_BROADCAST_AUTHORIZER_V2
   'e2s.substrate-federated-isolated-devnet-genesis-broadcast-authorizer.v2' as const;
 export const SUBSTRATE_FEDERATED_NATIVE_GENESIS_BROADCAST_AUTHORIZER_V1_SCHEMA =
   'e2s.substrate-federated-native-genesis-broadcast-authorizer.v1' as const;
+export const SUBSTRATE_FEDERATED_NATIVE_GENESIS_BROADCAST_AUTHORIZER_V3_SCHEMA =
+  'e2s.substrate-federated-native-genesis-broadcast-authorizer.v3' as const;
 
 const WITNESS_ORIGIN = 'http://127.0.0.1:9052' as const;
 const AUTHORIZATION_SCOPE =
   'fed-6-lab-local-synthetic-genesis-setup-only' as const;
 const NATIVE_AUTHORIZATION_SCOPE = 'fed-native-local-synthetic-genesis-setup-only' as const;
+const NATIVE_V3_AUTHORIZATION_SCOPE = 'fed-native-v3-local-synthetic-genesis-setup-only' as const;
 const AUTHORIZATION_PROFILES = Object.freeze({
   1: Object.freeze({
     version: 1 as const, scope: AUTHORIZATION_SCOPE,
@@ -71,6 +78,11 @@ const AUTHORIZATION_PROFILES = Object.freeze({
     version: 1 as const, scope: NATIVE_AUTHORIZATION_SCOPE,
     schema: SUBSTRATE_FEDERATED_NATIVE_GENESIS_BROADCAST_AUTHORIZER_V1_SCHEMA,
     domain: 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_BROADCAST_AUTHORIZATION_V1',
+  }),
+  'native-v3': Object.freeze({
+    version: 3 as const, scope: NATIVE_V3_AUTHORIZATION_SCOPE,
+    schema: SUBSTRATE_FEDERATED_NATIVE_GENESIS_BROADCAST_AUTHORIZER_V3_SCHEMA,
+    domain: 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_BROADCAST_AUTHORIZATION_V3',
   }),
 });
 const ROLE_ORDER = Object.freeze([
@@ -125,14 +137,31 @@ extends Omit<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifa
   readonly schema: typeof SUBSTRATE_FEDERATED_NATIVE_GENESIS_BROADCAST_AUTHORIZER_V1_SCHEMA;
   readonly authorizationScope: typeof NATIVE_AUTHORIZATION_SCOPE;
 }
+export interface SubstrateFederatedNativeGenesisBroadcastAuthorizerV3
+extends Omit<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1, 'schema'> {
+  readonly schema: typeof SUBSTRATE_FEDERATED_NATIVE_GENESIS_BROADCAST_AUTHORIZER_V3_SCHEMA;
+}
+export interface SubstrateFederatedNativeGenesisBroadcastAuthorizationArtifactV3
+extends Omit<SubstrateFederatedNativeGenesisBroadcastAuthorizationArtifactV1,
+  'schema' | 'version' | 'authorizationScope'> {
+  readonly schema: typeof SUBSTRATE_FEDERATED_NATIVE_GENESIS_BROADCAST_AUTHORIZER_V3_SCHEMA;
+  readonly version: 3;
+  readonly authorizationScope: typeof NATIVE_V3_AUTHORIZATION_SCOPE;
+}
 
 type AuthorizerVersion = keyof typeof AUTHORIZATION_PROFILES;
 type Authorizer = Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1
-  | SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2 | SubstrateFederatedNativeGenesisBroadcastAuthorizerV1>;
+  | SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2
+  | SubstrateFederatedNativeGenesisBroadcastAuthorizerV1
+  | SubstrateFederatedNativeGenesisBroadcastAuthorizerV3>;
 type SetupBatch = Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2
-  | SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3 | SubstrateFederatedNativeGenesisSetupExecutionBatchV1>;
+  | SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3
+  | SubstrateFederatedNativeGenesisSetupExecutionBatchV1
+  | SubstrateFederatedNativeGenesisSetupExecutionBatchV3>;
 type Revalidator = Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidatorV1
-  | SubstrateFederatedIsolatedDevnetGenesisRevalidatorV2 | SubstrateFederatedNativeGenesisRevalidatorV1>;
+  | SubstrateFederatedIsolatedDevnetGenesisRevalidatorV2
+  | SubstrateFederatedNativeGenesisRevalidatorV1
+  | SubstrateFederatedNativeGenesisRevalidatorV3>;
 
 export interface SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationExpectationV1 {
   readonly revalidated:
@@ -225,6 +254,16 @@ export function createSubstrateFederatedNativeGenesisBroadcastAuthorizerV1(
     Readonly<SubstrateFederatedNativeGenesisBroadcastAuthorizerV1>;
 }
 
+export function createSubstrateFederatedNativeGenesisBroadcastAuthorizerV3(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV3>,
+  revalidator: Readonly<SubstrateFederatedNativeGenesisRevalidatorV3>,
+  confirmationObserver: Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>,
+): Readonly<SubstrateFederatedNativeGenesisBroadcastAuthorizerV3> {
+  return createAuthorizer(target, batch, revalidator, confirmationObserver, 'native-v3') as
+    Readonly<SubstrateFederatedNativeGenesisBroadcastAuthorizerV3>;
+}
+
 // Public factories select the reviewed provenance profile, never a caller callback.
 function assertSetupBatch(batch: SetupBatch,
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
@@ -232,6 +271,8 @@ function assertSetupBatch(batch: SetupBatch,
 ) {
   if (version === 'native') return assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(
     batch as Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>, target);
+  if (version === 'native-v3') return assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3(
+    batch as Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV3>, target);
   return version === 1
     ? assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2(
       batch as Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2>, target)
@@ -442,6 +483,13 @@ export function assertSubstrateFederatedNativeGenesisSetupConfirmedV1(
   assertSetupConfirmed(authorizer, target, 'native');
 }
 
+export function assertSubstrateFederatedNativeGenesisSetupConfirmedV3(
+  authorizer: Readonly<SubstrateFederatedNativeGenesisBroadcastAuthorizerV3>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): void {
+  assertSetupConfirmed(authorizer, target, 'native-v3');
+}
+
 function assertSetupConfirmed(authorizer: Authorizer,
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   version: AuthorizerVersion,
@@ -474,6 +522,13 @@ export function assertSubstrateFederatedNativeGenesisBroadcastAuthorizerV1(
   assertAuthorizerVersion(authorizer, 'native', target);
 }
 
+export function assertSubstrateFederatedNativeGenesisBroadcastAuthorizerV3(
+  authorizer: Readonly<SubstrateFederatedNativeGenesisBroadcastAuthorizerV3>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): void {
+  assertAuthorizerVersion(authorizer, 'native-v3', target);
+}
+
 export function assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1(
   authorizer:
     Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1>,
@@ -498,6 +553,14 @@ export function assertSubstrateFederatedNativeGenesisBroadcastAuthorizationArtif
   expectation: Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationExpectationV1>,
 ): void {
   assertAuthorizationArtifact(authorizer, artifact, expectation, 'native');
+}
+
+export function assertSubstrateFederatedNativeGenesisBroadcastAuthorizationArtifactV3(
+  authorizer: Readonly<SubstrateFederatedNativeGenesisBroadcastAuthorizerV3>,
+  artifact: object,
+  expectation: Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationExpectationV1>,
+): void {
+  assertAuthorizationArtifact(authorizer, artifact, expectation, 'native-v3');
 }
 
 function assertAuthorizationArtifact(authorizer: Authorizer, artifact: object,
@@ -526,6 +589,7 @@ function assertAuthorizationArtifact(authorizer: Authorizer, artifact: object,
     SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1
     | SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV2
     | SubstrateFederatedNativeGenesisBroadcastAuthorizationArtifactV1
+    | SubstrateFederatedNativeGenesisBroadcastAuthorizationArtifactV3
   >;
   if (
     exact.schema !== AUTHORIZATION_PROFILES[version].schema
@@ -709,7 +773,11 @@ function assertRevalidationEvidence(
       evidence.sourceBoxSigmaSerializedSha256Hex,
     observationDigestHex: evidence.observationDigestHex,
   };
-  if (material.version === 'native') {
+  if (material.version === 'native-v3') {
+    assertSubstrateFederatedNativeGenesisRevalidationArtifactV3(
+      material.revalidator as Readonly<SubstrateFederatedNativeGenesisRevalidatorV3>,
+      evidence.revalidationArtifact, expectation);
+  } else if (material.version === 'native') {
     assertSubstrateFederatedNativeGenesisRevalidationArtifactV1(
       material.revalidator as Readonly<SubstrateFederatedNativeGenesisRevalidatorV1>,
       evidence.revalidationArtifact, expectation);

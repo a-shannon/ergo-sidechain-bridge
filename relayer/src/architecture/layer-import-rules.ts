@@ -919,7 +919,9 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
           'SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2',
           'SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3',
           'SubstrateFederatedNativeGenesisSetupExecutionBatchV1',
+          'SubstrateFederatedNativeGenesisSetupExecutionBatchV3',
           'assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1',
+          'assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3',
           'SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1',
           'SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2',
           'SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1Receipt',
@@ -952,6 +954,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         'substrate-federated-isolated-devnet-checked-submission-transport-v1.ts',
         new Set([
           'createSubstrateFederatedNativeGenesisCheckedSubmissionTransportV1',
+          'createSubstrateFederatedNativeGenesisCheckedSubmissionTransportV3',
           'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1',
           'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2',
           'createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1',
@@ -1014,8 +1017,11 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         'substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.ts',
         new Set([
           'assertSubstrateFederatedNativeGenesisSetupConfirmedV1',
+          'assertSubstrateFederatedNativeGenesisSetupConfirmedV3',
           'createSubstrateFederatedNativeGenesisBroadcastAuthorizerV1',
+          'createSubstrateFederatedNativeGenesisBroadcastAuthorizerV3',
           'SubstrateFederatedNativeGenesisBroadcastAuthorizerV1',
+          'SubstrateFederatedNativeGenesisBroadcastAuthorizerV3',
           'assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1',
           'assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV2',
           'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1',
@@ -1037,6 +1043,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         'substrate-federated-isolated-devnet-genesis-revalidator-v1.ts',
         new Set(['createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1',
           'createSubstrateFederatedNativeGenesisRevalidatorV1',
+          'createSubstrateFederatedNativeGenesisRevalidatorV3',
           'createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV2']),
       ],
       [
@@ -1410,6 +1417,7 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
         new Set([
           'assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3',
           'assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1',
+          'assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3',
           'assertSubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1',
           'assertSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1',
           'claimSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1',
@@ -1420,12 +1428,14 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
           'promoteSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1',
           'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_CHECK_V1_SCHEMA',
           'SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1Receipt',
+          'SubstrateFederatedNativeGenesisSetupExecutionBatchV3',
         ]),
       ],
       [
         '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js',
         new Set([
           'createSubstrateFederatedNativeGenesisCheckedSubmissionTransportV1',
+          'createSubstrateFederatedNativeGenesisCheckedSubmissionTransportV3',
           'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1',
           'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2',
           'createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1',
@@ -1478,7 +1488,10 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
         '../../substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js',
         new Set([
           'assertSubstrateFederatedNativeGenesisSetupConfirmedV1',
+          'assertSubstrateFederatedNativeGenesisSetupConfirmedV3',
           'createSubstrateFederatedNativeGenesisBroadcastAuthorizerV1',
+          'createSubstrateFederatedNativeGenesisBroadcastAuthorizerV3',
+          'SubstrateFederatedNativeGenesisBroadcastAuthorizerV3',
           'assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1',
           'assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV2',
           'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1',
@@ -1497,6 +1510,7 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
         '../../substrate-federated-isolated-devnet-genesis-revalidator-v1.js',
         new Set(['createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1',
           'createSubstrateFederatedNativeGenesisRevalidatorV1',
+          'createSubstrateFederatedNativeGenesisRevalidatorV3',
           'createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV2']),
       ],
       [
@@ -1817,6 +1831,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V4',
       'runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1',
       'executeSubstrateFederatedNativeGenesisBatchV1',
+      'executeSubstrateFederatedNativeGenesisBatchV3',
       'executeSubstrateFederatedNativeGenesisPegInSourceLockV1',
       'executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1',
       'executeSubstrateFederatedNativeContinuationPegInSourceLockV1',

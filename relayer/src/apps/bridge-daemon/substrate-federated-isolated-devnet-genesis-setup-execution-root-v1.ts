@@ -245,6 +245,7 @@ import type {
   SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
   SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
   SubstrateFederatedNativeGenesisSetupExecutionBatchV1,
+  SubstrateFederatedNativeGenesisSetupExecutionBatchV3,
   SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1,
   SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2,
   SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1Receipt,
@@ -252,6 +253,7 @@ import type {
 import {
   assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
   assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1,
+  assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3,
   assertSubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1,
   assertSubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV2,
   assertSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1,
@@ -275,6 +277,7 @@ import {
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1,
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2,
   createSubstrateFederatedNativeGenesisCheckedSubmissionTransportV1,
+  createSubstrateFederatedNativeGenesisCheckedSubmissionTransportV3,
   createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1,
   createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1,
   submitSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
@@ -338,12 +341,15 @@ import {
   assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1,
   assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV2,
   assertSubstrateFederatedNativeGenesisSetupConfirmedV1,
+  assertSubstrateFederatedNativeGenesisSetupConfirmedV3,
   createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1,
   createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2,
   createSubstrateFederatedNativeGenesisBroadcastAuthorizerV1,
+  createSubstrateFederatedNativeGenesisBroadcastAuthorizerV3,
   type SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1,
   type SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2,
   type SubstrateFederatedNativeGenesisBroadcastAuthorizerV1,
+  type SubstrateFederatedNativeGenesisBroadcastAuthorizerV3,
 } from '../../substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1,
@@ -355,6 +361,7 @@ import {
   createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1,
   createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV2,
   createSubstrateFederatedNativeGenesisRevalidatorV1,
+  createSubstrateFederatedNativeGenesisRevalidatorV3,
 } from '../../substrate-federated-isolated-devnet-genesis-revalidator-v1.js';
 import {
   createSubstrateFederatedLocalDevnetGenesisJournalV1,
@@ -2476,9 +2483,11 @@ interface PegInCandidatePlanV1 {
  * the local `/transactions` transport. It accepts no replaceable runtime port.
  */
 type GenesisExecutionBatch = Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2
-  | SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3 | SubstrateFederatedNativeGenesisSetupExecutionBatchV1>;
+  | SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3 | SubstrateFederatedNativeGenesisSetupExecutionBatchV1
+  | SubstrateFederatedNativeGenesisSetupExecutionBatchV3>;
 type GenesisExecutionAuthorizer = Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1
-  | SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2 | SubstrateFederatedNativeGenesisBroadcastAuthorizerV1>;
+  | SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2 | SubstrateFederatedNativeGenesisBroadcastAuthorizerV1
+  | SubstrateFederatedNativeGenesisBroadcastAuthorizerV3>;
 
 /** Execute the exact retained fee funding; the caller owns target and journal lifetime. */
 export async function executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(input: Readonly<{
@@ -2609,6 +2618,38 @@ export async function executeSubstrateFederatedNativeGenesisBatchV1(input: Reado
   const transactions = await executeOrderedGenesisTransactions(
     batch, target, observer, revalidator, authorizer, transport, journal,
     completionDeadline, () => { assertActive(); }, 'native',
+  );
+  assertActive();
+  return transactions;
+}
+
+/** Execute the distinct retained V3/V7 native FED issuance without V1 custody. */
+export async function executeSubstrateFederatedNativeGenesisBatchV3(input: Readonly<{
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+  batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV3>;
+  state: SubstrateFederatedLocalDevnetGenesisJournalStateV1;
+  markerDirectory: string;
+}>): Promise<SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt['transactions']> {
+  const { target, batch, state, markerDirectory } = input;
+  const assertActive = () => assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3(batch, target);
+  const binding = assertActive();
+  assertCanonicalBatch(batch);
+  const completionDeadline = performance.now() + ACTION_COMPLETION_BUDGET_MS;
+  assertManagedActionDeadline(completionDeadline, 'V3 native genesis composition');
+  const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+    target, batch.request.target.genesisHeaderIdHex,
+  );
+  const revalidator = createSubstrateFederatedNativeGenesisRevalidatorV3(target, batch);
+  const authorizer = createSubstrateFederatedNativeGenesisBroadcastAuthorizerV3(
+    target, batch, revalidator, observer,
+  );
+  const transport = createSubstrateFederatedNativeGenesisCheckedSubmissionTransportV3(target, authorizer);
+  const journal = createSubstrateFederatedLocalDevnetGenesisJournalV1({
+    state, markerDirectory, reconciliationIdentityDigestHex: binding.executionTargetIdentityDigestHex,
+  });
+  const transactions = await executeOrderedGenesisTransactions(
+    batch, target, observer, revalidator, authorizer, transport, journal,
+    completionDeadline, () => { assertActive(); }, 'native-v3',
   );
   assertActive();
   return transactions;
@@ -8779,7 +8820,7 @@ async function executeOrderedGenesisTransactions(
   journal: Readonly<SubstrateFederatedLocalDevnetGenesisJournalV1>,
   completionDeadline: number,
   setManagedPhase: (phase: ManagedCampaignPhaseV1) => void,
-  version: 1 | 2 | 'native',
+  version: 1 | 2 | 'native' | 'native-v3',
 ): Promise<SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt['transactions']> {
   const transactions: SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt['transactions'][number][] = [];
   for (let ordinal = 0; ordinal < batch.orderedTransactions.length; ordinal += 1) {
@@ -8822,7 +8863,10 @@ async function executeOrderedGenesisTransactions(
     }));
   }
   setManagedPhase('genesis setup finalization');
-  if (version === 'native') {
+  if (version === 'native-v3') {
+    assertSubstrateFederatedNativeGenesisSetupConfirmedV3(
+      authorizer as Readonly<SubstrateFederatedNativeGenesisBroadcastAuthorizerV3>, target);
+  } else if (version === 'native') {
     assertSubstrateFederatedNativeGenesisSetupConfirmedV1(
       authorizer as Readonly<SubstrateFederatedNativeGenesisBroadcastAuthorizerV1>, target);
   } else if (version === 2) {

@@ -33,9 +33,11 @@ import {
   assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
   assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
   assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1,
+  assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3,
   type SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
   type SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
   type SubstrateFederatedNativeGenesisSetupExecutionBatchV1,
+  type SubstrateFederatedNativeGenesisSetupExecutionBatchV3,
   type SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 
@@ -45,6 +47,8 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_REVALIDATOR_V2_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-genesis-revalidator.v2' as const;
 export const SUBSTRATE_FEDERATED_NATIVE_GENESIS_REVALIDATOR_V1_SCHEMA =
   'e2s.substrate-federated-native-genesis-revalidator.v1' as const;
+export const SUBSTRATE_FEDERATED_NATIVE_GENESIS_REVALIDATOR_V3_SCHEMA =
+  'e2s.substrate-federated-native-genesis-revalidator.v3' as const;
 
 const REVALIDATION_PROFILES = Object.freeze({
   1: Object.freeze({
@@ -58,6 +62,10 @@ const REVALIDATION_PROFILES = Object.freeze({
   native: Object.freeze({
     schema: SUBSTRATE_FEDERATED_NATIVE_GENESIS_REVALIDATOR_V1_SCHEMA,
     domain: 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_REVALIDATION_V1',
+  }),
+  'native-v3': Object.freeze({
+    schema: SUBSTRATE_FEDERATED_NATIVE_GENESIS_REVALIDATOR_V3_SCHEMA,
+    domain: 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_REVALIDATION_V3',
   }),
 });
 const BOX_DIGEST_DOMAIN =
@@ -80,11 +88,17 @@ export interface SubstrateFederatedIsolatedDevnetGenesisRevalidatorV2 extends Re
 export interface SubstrateFederatedNativeGenesisRevalidatorV1 extends RevalidatorPort {
   readonly schema: typeof SUBSTRATE_FEDERATED_NATIVE_GENESIS_REVALIDATOR_V1_SCHEMA;
 }
+export interface SubstrateFederatedNativeGenesisRevalidatorV3 extends RevalidatorPort {
+  readonly schema: typeof SUBSTRATE_FEDERATED_NATIVE_GENESIS_REVALIDATOR_V3_SCHEMA;
+}
 
 type Revalidator = Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidatorV1
-  | SubstrateFederatedIsolatedDevnetGenesisRevalidatorV2 | SubstrateFederatedNativeGenesisRevalidatorV1>;
+  | SubstrateFederatedIsolatedDevnetGenesisRevalidatorV2
+  | SubstrateFederatedNativeGenesisRevalidatorV1 | SubstrateFederatedNativeGenesisRevalidatorV3>;
 type SetupBatch = Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2
-  | SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3 | SubstrateFederatedNativeGenesisSetupExecutionBatchV1>;
+  | SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3
+  | SubstrateFederatedNativeGenesisSetupExecutionBatchV1
+  | SubstrateFederatedNativeGenesisSetupExecutionBatchV3>;
 type RevalidatorVersion = keyof typeof REVALIDATION_PROFILES;
 
 export interface SubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactExpectationV1 {
@@ -173,11 +187,20 @@ export function createSubstrateFederatedNativeGenesisRevalidatorV1(
   return createRevalidator(target, batch, 'native') as Readonly<SubstrateFederatedNativeGenesisRevalidatorV1>;
 }
 
+export function createSubstrateFederatedNativeGenesisRevalidatorV3(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV3>,
+): Readonly<SubstrateFederatedNativeGenesisRevalidatorV3> {
+  return createRevalidator(target, batch, 'native-v3') as Readonly<SubstrateFederatedNativeGenesisRevalidatorV3>;
+}
+
 // The public factories fix the version; callers cannot select a guard or digest domain.
 function assertSetupBatch(target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   batch: SetupBatch, version: RevalidatorVersion) {
   if (version === 'native') return assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(
     batch as Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>, target);
+  if (version === 'native-v3') return assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3(
+    batch as Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV3>, target);
   return version === 1
     ? assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2(
       batch as Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2>, target)
@@ -381,6 +404,14 @@ export function assertSubstrateFederatedNativeGenesisRevalidationArtifactV1(
   assertArtifact(revalidator, artifact, expectation, 'native');
 }
 
+export function assertSubstrateFederatedNativeGenesisRevalidationArtifactV3(
+  revalidator: Readonly<SubstrateFederatedNativeGenesisRevalidatorV3>,
+  artifact: object,
+  expectation: Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactExpectationV1>,
+): void {
+  assertArtifact(revalidator, artifact, expectation, 'native-v3');
+}
+
 function assertArtifact(revalidator: Revalidator, artifact: object,
   expectation: Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactExpectationV1>,
   version: RevalidatorVersion,
@@ -452,10 +483,10 @@ function assertRevalidator(
   ) {
     throw new Error('isolated genesis revalidator lacks process provenance');
   }
-  const current = material.version === 'native'
+  const current = material.version === 'native' || material.version === 'native-v3'
     ? assertSetupBatch(material.target, material.batch, material.version)
     : assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(material.target);
-  if (material.version !== 'native') {
+  if (material.version !== 'native' && material.version !== 'native-v3') {
     assertSetupBatch(material.target, material.batch, material.version);
   }
   if (

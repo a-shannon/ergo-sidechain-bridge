@@ -97,10 +97,18 @@ as the V1 batch or continued through the V1 source-lock route. The focused V3
 file passes 9/9, the existing V1/V2 runner file passes 96/96, TypeScript and
 layered imports pass, and independent exact-source review finds no blocking
 defect in the three changed files. The integration test doubles owned-target
-and node responses; it does not establish actual node acceptance. A distinct
-V3 executor, operational root and worker selection, genuine two-cycle run,
-recovery, operator/FED7 and external acceptance remain due. C74 stays held;
-no successor campaign is selected.
+and node responses; it does not establish actual node acceptance.
+
+A distinct V3 native executor now consumes that retained batch through V3
+revalidation, authorization and checked transport with a durable journal and
+three ordered confirmations. The focused V3 integration file passes 9/9 with
+the pinned JVM compiler and doubled node responses; the three guard files pass
+606/606, four affected V1 root cases pass, architecture passes 441/441, and
+TypeScript and layered imports pass. Independent exact-source and architecture
+delta reviews found no blocking defect. This is a local source boundary, not
+node acceptance or a complete two-cycle. An operational root and worker route,
+genuine two-cycle run, recovery, operator/FED7 and external acceptance remain
+due. C74 stays held; no successor campaign is selected.
 
 C74 is consumed and permanently held; no successor campaign is selected. The
 purpose-specific deposit selector was locally promoted at

@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import axios from 'axios';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Only the upstream observation and history provenance are doubled here.
@@ -66,6 +69,9 @@ import * as helpers from './ergo-helpers.js';
 import * as owned from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import * as trackerCompiler from './substrate-federated-tracker-jvm-compiler-v2.js';
 import * as familyCompiler from './substrate-federated-settlement-family-jvm-compiler-v3.js';
+import { StateTracker } from './state-tracker.js';
+import { executeSubstrateFederatedNativeGenesisBatchV3 }
+  from './apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
 import { ORIGINAL_NODE_OPTIONS } from './test-node-env.js';
 import * as unsigned from './unsigned-ergo-transaction.js';
 import { getPooledReserveEmptyDigest } from './avl-bridge.js';
@@ -152,7 +158,7 @@ beforeEach(async () => {
 });
 afterEach(() => { source?.dispose(); setup?.dispose(); vi.restoreAllMocks(); });
 
-describe('observed FED genesis V3 source-only compilation', () => {
+describe('observed FED genesis V3 compilation and retained execution', () => {
   it('compiles the process-owned V2/V7 family and materializes all three unsigned singleton issuances', async () => {
     const previous = process.env.NODE_OPTIONS;
     if (ORIGINAL_NODE_OPTIONS === undefined) delete process.env.NODE_OPTIONS;
@@ -284,6 +290,65 @@ describe('observed FED genesis V3 source-only compilation', () => {
       batch, { ...target })).toThrow(/process provenance/);
     expect(() => assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(
       batch as never, target)).toThrow(/process provenance/);
+    const root = mkdtempSync(join(tmpdir(), 'e2s-v3-native-issuance-'));
+    const markers = join(root, 'markers');
+    mkdirSync(markers);
+    const state = new StateTracker(join(root, 'state.sqlite'));
+    const sent = new Set<string>();
+    const inclusionHeight = batch.request.target.preSetupAnchor.height;
+    const inclusionHeaderIdHex = batch.request.target.preSetupAnchor.headerIdHex;
+    vi.spyOn(axios, 'create').mockImplementation(() => ({
+      get: async (path: string) => {
+        if (path === '/info') return { data: { network: 'devnet', fullHeight: inclusionHeight + 20 } };
+        if (path === '/blocks/at/1') return { data: [batch.request.target.genesisHeaderIdHex] };
+        if (path === `/blocks/at/${inclusionHeight}`) return { data: [inclusionHeaderIdHex] };
+        const match = /^\/blockchain\/transaction\/byId\/([0-9a-f]{64})$/.exec(path);
+        if (match && sent.has(match[1]!)) return { data: {
+          id: match[1], numConfirmations: 20, inclusionHeight, headerId: inclusionHeaderIdHex,
+        } };
+        throw new Error(`unexpected V3 node observation ${path}`);
+      },
+    }) as ReturnType<typeof axios.create>);
+    const post = vi.spyOn(axios, 'post').mockImplementation(async (url, body) => {
+      expect(url).toBe('http://127.0.0.1:9051/transactions');
+      if (!body || typeof body !== 'object' || !('id' in body) || typeof body.id !== 'string') {
+        throw new Error('V3 transport requires a signed transaction ID');
+      }
+      const expected = batch.orderedTransactions[sent.size]!;
+      expect(body.id).toBe(expected.issuance.unsignedTransactionIdHex);
+      expect(state.getErgoOperationalTransactionAttempt(body.id)).not.toBeNull();
+      expect(readdirSync(markers)).toHaveLength(sent.size + 1);
+      for (const predecessor of sent) {
+        expect(state.getErgoOperationalTransactionAttempt(predecessor)?.status).toBe('confirmed');
+      }
+      sent.add(body.id);
+      return { status: 200, data: body.id };
+    });
+    try {
+      const execution = { target, batch, state, markerDirectory: markers };
+      await expect(executeSubstrateFederatedNativeGenesisBatchV3({
+        ...execution, batch: { ...batch },
+      } as never)).rejects.toThrow(/process provenance/);
+      await expect(executeSubstrateFederatedNativeGenesisBatchV3({
+        ...execution, target: { ...target },
+      } as never)).rejects.toThrow(/process provenance/);
+      expect(post).not.toHaveBeenCalled();
+      const result = await executeSubstrateFederatedNativeGenesisBatchV3(execution);
+      expect(result.map(value => value.role)).toEqual(['tracker', 'duplicatePrevention', 'pooledReserve']);
+      expect(result.map(value => value.expectedTxId)).toEqual([...sent]);
+      expect(result.every(value => value.transportStatus === 'accepted'
+        && value.confirmationHeight === inclusionHeight
+        && value.confirmationHeaderIdHex === inclusionHeaderIdHex)).toBe(true);
+      expect(result.every(value => state.getErgoOperationalTransactionAttempt(value.expectedTxId)?.status
+        === 'confirmed')).toBe(true);
+      expect(post).toHaveBeenCalledTimes(3);
+      expect(readdirSync(markers)).toHaveLength(3);
+      await expect(executeSubstrateFederatedNativeGenesisBatchV3(execution)).rejects.toThrow();
+      expect(post).toHaveBeenCalledTimes(3);
+    } finally {
+      state.close();
+      rmSync(root, { recursive: true, force: true });
+    }
     await expect(setup.runNativeGenesisRetainingSignerV3(compiled, target)).rejects.toThrow();
     expect(helpers.ncheck).toHaveBeenCalledTimes(3);
     expect(() => assertSubstrateFederatedNativeGenesisSetupReadCustodyV3(batch, target))

@@ -97,6 +97,12 @@ const genesisBoundary = vi.hoisted(() => ({
   authorizationArtifactNative: Object.freeze({ role: 'native-authorization-v1' }),
   assertAuthorizerNative: vi.fn(),
   assertAuthorizationNative: vi.fn(),
+  authorizerNativeV3: Object.freeze({
+    schema: 'e2s.substrate-federated-native-genesis-broadcast-authorizer.v3',
+  }),
+  authorizationArtifactNativeV3: Object.freeze({ role: 'native-authorization-v3' }),
+  assertAuthorizerNativeV3: vi.fn(),
+  assertAuthorizationNativeV3: vi.fn(),
   authorizerV2: Object.freeze({
     schema: 'e2s.substrate-federated-isolated-devnet-genesis-broadcast-authorizer.v2',
   }),
@@ -158,6 +164,10 @@ vi.mock(
       genesisBoundary.assertAuthorizerNative,
     assertSubstrateFederatedNativeGenesisBroadcastAuthorizationArtifactV1:
       genesisBoundary.assertAuthorizationNative,
+    assertSubstrateFederatedNativeGenesisBroadcastAuthorizerV3:
+      genesisBoundary.assertAuthorizerNativeV3,
+    assertSubstrateFederatedNativeGenesisBroadcastAuthorizationArtifactV3:
+      genesisBoundary.assertAuthorizationNativeV3,
     assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1:
       genesisBoundary.assertAuthorizerV1,
     assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2:
@@ -360,6 +370,7 @@ import {
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1,
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2,
   createSubstrateFederatedNativeGenesisCheckedSubmissionTransportV1,
+  createSubstrateFederatedNativeGenesisCheckedSubmissionTransportV3,
   createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1,
   createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1,
   submitSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
@@ -447,8 +458,15 @@ function permitDeferred() {
   return { promise, resolve, reject };
 }
 
-type GenesisVersion = 1 | 2 | 'native';
+type GenesisVersion = 1 | 2 | 'native' | 'native-v3';
 function genesisProfile(version: GenesisVersion) {
+  if (version === 'native-v3') return {
+    authorizer: genesisBoundary.authorizerNativeV3,
+    artifact: genesisBoundary.authorizationArtifactNativeV3,
+    authorizerGuard: genesisBoundary.assertAuthorizerNativeV3,
+    artifactGuard: genesisBoundary.assertAuthorizationNativeV3,
+    factory: createSubstrateFederatedNativeGenesisCheckedSubmissionTransportV3,
+  };
   if (version === 'native') return {
     authorizer: genesisBoundary.authorizerNative,
     artifact: genesisBoundary.authorizationArtifactNative,
@@ -497,7 +515,7 @@ beforeEach(() => {
   }
   genesisBoundary.events.length = 0;
   boundary.issuedSignedCandidate = boundary.signedCandidate;
-  for (const version of [1, 2, 'native'] as const) {
+  for (const version of [1, 2, 'native', 'native-v3'] as const) {
     const { authorizer, artifact, authorizerGuard, artifactGuard } = genesisProfile(version);
     authorizerGuard.mockReset();
     authorizerGuard.mockImplementation((value: unknown, target: unknown) => {
@@ -837,6 +855,11 @@ async function genesisAttempt(
 
 const GENESIS_RESPONSE_PROFILES = [
   {
+    version: 'native-v3',
+    schema: 'e2s.substrate-federated-native-genesis-checked-submission-transport.v3',
+    domain: 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_CHECKED_SUBMISSION_RESPONSE_V3',
+  },
+  {
     version: 'native',
     schema: 'e2s.substrate-federated-native-genesis-checked-submission-transport.v1',
     domain: 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_CHECKED_SUBMISSION_RESPONSE_V1',
@@ -856,15 +879,15 @@ const GENESIS_RESPONSE_PROFILES = [
 describe.each(GENESIS_RESPONSE_PROFILES)(
   'fixed genesis checked transport V$version',
   ({ version, schema, domain }) => {
+    const isNative = version === 'native' || version === 'native-v3';
     const { factory, authorizer, artifact, authorizerGuard, artifactGuard } = genesisProfile(version);
-    const otherAuthorizer = version === 1
-      ? genesisBoundary.authorizerV2 : boundary.authorizer;
-    const otherArtifact = version === 1
-      ? genesisBoundary.authorizationArtifactV2 : boundary.authorizationArtifact;
-    const otherAuthorizerGuard = version === 1
-      ? genesisBoundary.assertAuthorizerV2 : genesisBoundary.assertAuthorizerV1;
-    const otherArtifactGuard = version === 1
-      ? genesisBoundary.assertAuthorizationV2 : genesisBoundary.assertAuthorizationV1;
+    const opposite = version === 'native-v3' ? genesisProfile('native')
+      : version === 'native' ? genesisProfile('native-v3')
+        : version === 1 ? genesisProfile(2) : genesisProfile(1);
+    const otherAuthorizer = opposite.authorizer;
+    const otherArtifact = opposite.artifact;
+    const otherAuthorizerGuard = opposite.authorizerGuard;
+    const otherArtifactGuard = opposite.artifactGuard;
 
     function expectNoConsumptionOrPost() {
       expect(boundary.consume).not.toHaveBeenCalled();
@@ -916,7 +939,7 @@ describe.each(GENESIS_RESPONSE_PROFILES)(
         responseDigestHex: expectedResponseDigest('accepted', 200, boundary.expectedTxId) });
       expect(Object.isFrozen(projectDiagnostic(result))).toBe(true);
       expect(projectDiagnostic({ ...result })).toBeNull();
-      expect(authorizerGuard).toHaveBeenCalledTimes(version === 'native' ? 2 : 1);
+      expect(authorizerGuard).toHaveBeenCalledTimes(isNative ? 2 : 1);
       expect(authorizerGuard).toHaveBeenLastCalledWith(
         authorizer, processBoundary.target,
       );
@@ -935,7 +958,7 @@ describe.each(GENESIS_RESPONSE_PROFILES)(
         'checked-handle',
         'execution-binding',
         'consume',
-        ...(version === 'native' ? ['authorizer-vnative'] : []),
+        ...(isNative ? [`authorizer-v${version}`] : []),
         'post',
       ]);
       expect(boundary.consume).toHaveBeenCalledExactlyOnceWith(
@@ -1064,7 +1087,7 @@ describe.each(GENESIS_RESPONSE_PROFILES)(
       expectNoConsumptionOrPost();
     });
 
-    if (version === 'native') {
+    if (isNative) {
       it('stops before POST when native custody expires during checked-handle consumption', async () => {
         const { transport, attempt } = await genesisAttempt(version);
         trackerBoundary.beforeCheckedCallback.mockImplementationOnce(async () => {
@@ -1141,8 +1164,8 @@ describe.each(GENESIS_RESPONSE_PROFILES)(
         responseDigestHex: expectedResponseDigest(outcome, status, observedTxId) });
       expect(Object.isFrozen(projectDiagnostic(result))).toBe(true);
       expect(projectDiagnostic({ ...result })).toBeNull();
-      expect(genesisBoundary.events.slice(version === 'native' ? -3 : -2))
-        .toEqual(['consume', ...(version === 'native' ? ['authorizer-vnative'] : []), 'post']);
+      expect(genesisBoundary.events.slice(isNative ? -3 : -2))
+        .toEqual(['consume', ...(isNative ? [`authorizer-v${version}`] : []), 'post']);
       await expect(transport.submit(attempt)).rejects.toThrow(/checked handle provenance/u);
       expect(boundary.consume).toHaveBeenCalledTimes(1);
       expect(trackerBoundary.beforeCheckedCallback).toHaveBeenCalledTimes(1);

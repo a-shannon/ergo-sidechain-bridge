@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   assertBatch: vi.fn(),
   assertBatchV3: vi.fn(),
   assertNativeBatch: vi.fn(),
+  assertNativeBatchV3: vi.fn(),
   validateBoxPair: vi.fn(),
 }));
 
@@ -35,6 +36,8 @@ vi.mock('./substrate-federated-isolated-devnet-setup-check-execution-v2.js', () 
     mocks.assertBatchV3,
   assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1:
     mocks.assertNativeBatch,
+  assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3:
+    mocks.assertNativeBatchV3,
 }));
 
 vi.mock('./substrate-federated-genesis-observation-v1.js', () => ({
@@ -48,6 +51,8 @@ import {
   createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV2 as createRevalidatorV2,
   assertSubstrateFederatedNativeGenesisRevalidationArtifactV1 as assertNativeArtifact,
   createSubstrateFederatedNativeGenesisRevalidatorV1 as createNativeRevalidator,
+  assertSubstrateFederatedNativeGenesisRevalidationArtifactV3 as assertNativeArtifactV3,
+  createSubstrateFederatedNativeGenesisRevalidatorV3 as createNativeRevalidatorV3,
 } from './substrate-federated-isolated-devnet-genesis-revalidator-v1.js';
 import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_EXECUTION_V1_SCHEMA,
@@ -76,12 +81,14 @@ const TARGET = Object.freeze({
 });
 
 type SetupRole = 'tracker' | 'duplicate-prevention' | 'pooled-reserve';
-const PROFILES = [1, 2, 'native'] as const;
+const PROFILES = [1, 2, 'native', 'native-v3'] as const;
 type Profile = typeof PROFILES[number];
 const APIS = {
   1: { create: createRevalidatorV1, assertArtifact: assertArtifactV1, assertBatch: mocks.assertBatch },
   2: { create: createRevalidatorV2, assertArtifact: assertArtifactV2, assertBatch: mocks.assertBatchV3 },
   native: { create: createNativeRevalidator, assertArtifact: assertNativeArtifact, assertBatch: mocks.assertNativeBatch },
+  'native-v3': { create: createNativeRevalidatorV3, assertArtifact: assertNativeArtifactV3,
+    assertBatch: mocks.assertNativeBatchV3 },
 } as const;
 let batches = new WeakMap<object, Profile>();
 
@@ -260,7 +267,7 @@ describe.each(PROFILES)('genesis revalidator profile %s', version => {
     batches.set(setupBatch, version);
     return Reflect.apply(api.create, undefined, [target, setupBatch]) as
       ReturnType<typeof createRevalidatorV1> | ReturnType<typeof createRevalidatorV2>
-      | ReturnType<typeof createNativeRevalidator>;
+      | ReturnType<typeof createNativeRevalidator> | ReturnType<typeof createNativeRevalidatorV3>;
   };
   const assertArtifact = (...args: unknown[]) => Reflect.apply(
     api.assertArtifact, undefined, args);
@@ -275,7 +282,7 @@ describe.each(PROFILES)('genesis revalidator profile %s', version => {
           throw new Error('synthetic setup batch provenance is missing');
         }
         // Native production batch validation includes a complete current-target check.
-        if (profile === 'native') return mocks.assertTarget(target);
+        if (profile === 'native' || profile === 'native-v3') return mocks.assertTarget(target);
         return BINDING;
       });
     }
@@ -339,8 +346,8 @@ describe.each(PROFILES)('genesis revalidator profile %s', version => {
         postCheck.sourceBoxSigmaSerializedSha256Hex,
       observationDigestHex: postCheck.observationDigestHex,
     });
-    const schema = version === 'native'
-      ? 'e2s.substrate-federated-native-genesis-revalidator.v1'
+    const schema = version === 'native' || version === 'native-v3'
+      ? `e2s.substrate-federated-native-genesis-revalidator.v${version === 'native' ? 1 : 3}`
       : `e2s.substrate-federated-isolated-devnet-genesis-revalidator.v${version}`;
     expect(revalidator.schema).toBe(schema);
     expect(postCheck.revalidationArtifact).toMatchObject({ schema });
@@ -354,8 +361,8 @@ describe.each(PROFILES)('genesis revalidator profile %s', version => {
       tipHeaderIdHex: TIP_HEADER_ID, sourceBoxDigestHex: postCheck.sourceBoxDigestHex,
       sigmaSerializedSha256Hex: hex('81'), primarySourceIdHex: hex('71'), witnessSourceIdHex: hex('72'),
     };
-    const domain = version === 'native'
-      ? 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_REVALIDATION_V1'
+    const domain = version === 'native' || version === 'native-v3'
+      ? `E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_REVALIDATION_V${version === 'native' ? 1 : 3}`
       : `E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_REVALIDATION_V${version}`;
     expect(postCheck.observationDigestHex).toBe(independentDigest(projection, domain));
     for (const otherProfile of otherProfiles) {
@@ -481,6 +488,18 @@ describe.each(PROFILES)('genesis revalidator profile %s', version => {
     const setupBatch = batch();
     batches.set(setupBatch, version);
     expect(() => Reflect.apply(APIS[otherProfile].create, undefined, [TARGET, setupBatch]))
+      .toThrow('synthetic setup batch provenance is missing');
+    expect(mocks.createSource).not.toHaveBeenCalled();
+  });
+
+  it('rejects a cloned batch and a different target before source creation', () => {
+    const setupBatch = batch();
+    batches.set(setupBatch, version);
+    expect(() => Reflect.apply(api.create, undefined,
+      [TARGET, Object.freeze({ ...setupBatch })]))
+      .toThrow('synthetic setup batch provenance is missing');
+    expect(() => Reflect.apply(api.create, undefined,
+      [Object.freeze({ ...TARGET }), setupBatch]))
       .toThrow('synthetic setup batch provenance is missing');
     expect(mocks.createSource).not.toHaveBeenCalled();
   });

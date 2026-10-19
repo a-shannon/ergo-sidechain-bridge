@@ -22,12 +22,15 @@ import {
   assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1,
   assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV2,
   assertSubstrateFederatedNativeGenesisBroadcastAuthorizationArtifactV1,
+  assertSubstrateFederatedNativeGenesisBroadcastAuthorizationArtifactV3,
   assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1,
   assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2,
   assertSubstrateFederatedNativeGenesisBroadcastAuthorizerV1,
+  assertSubstrateFederatedNativeGenesisBroadcastAuthorizerV3,
   type SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1,
   type SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2,
   type SubstrateFederatedNativeGenesisBroadcastAuthorizerV1,
+  type SubstrateFederatedNativeGenesisBroadcastAuthorizerV3,
 } from './substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1,
@@ -105,10 +108,16 @@ const TRANSPORT_PROFILES = Object.freeze({
     schema: 'e2s.substrate-federated-native-genesis-checked-submission-transport.v1',
     domain: 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_CHECKED_SUBMISSION_RESPONSE_V1',
   }),
+  'native-v3': Object.freeze({
+    schema: 'e2s.substrate-federated-native-genesis-checked-submission-transport.v3',
+    domain: 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_CHECKED_SUBMISSION_RESPONSE_V3',
+  }),
 });
 type TransportVersion = keyof typeof TRANSPORT_PROFILES;
 type GenesisAuthorizer = Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1
-  | SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2 | SubstrateFederatedNativeGenesisBroadcastAuthorizerV1>;
+  | SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2
+  | SubstrateFederatedNativeGenesisBroadcastAuthorizerV1
+  | SubstrateFederatedNativeGenesisBroadcastAuthorizerV3>;
 
 type Transport =
   SubstrateFederatedLocalDevnetGenesisExecutionPorts['transport'];
@@ -297,15 +306,25 @@ export function createSubstrateFederatedNativeGenesisCheckedSubmissionTransportV
   return createGenesisTransport(target, authorizer, 'native');
 }
 
+export function createSubstrateFederatedNativeGenesisCheckedSubmissionTransportV3(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  authorizer: Readonly<SubstrateFederatedNativeGenesisBroadcastAuthorizerV3>,
+): Readonly<Transport> {
+  return createGenesisTransport(target, authorizer, 'native-v3');
+}
+
 // The factory fixes the authority profile; callers cannot inject its guards.
 function createGenesisTransport(
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   authorizer: GenesisAuthorizer,
-  version: 1 | 2 | 'native',
+  version: 1 | 2 | 'native' | 'native-v3',
 ): Readonly<Transport> {
   const binding =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
-  if (version === 'native') {
+  if (version === 'native-v3') {
+    assertSubstrateFederatedNativeGenesisBroadcastAuthorizerV3(
+      authorizer as Readonly<SubstrateFederatedNativeGenesisBroadcastAuthorizerV3>, target);
+  } else if (version === 'native') {
     assertSubstrateFederatedNativeGenesisBroadcastAuthorizerV1(
       authorizer as Readonly<SubstrateFederatedNativeGenesisBroadcastAuthorizerV1>, target);
   } else if (version === 1) {
@@ -347,7 +366,10 @@ function createGenesisTransport(
           attempt.candidate.authorization.authorizationDigestHex,
       };
       const artifact = attempt.candidate.authorization.authorizationArtifact;
-      if (version === 'native') {
+      if (version === 'native-v3') {
+        assertSubstrateFederatedNativeGenesisBroadcastAuthorizationArtifactV3(
+          authorizer as Readonly<SubstrateFederatedNativeGenesisBroadcastAuthorizerV3>, artifact, expectation);
+      } else if (version === 'native') {
         assertSubstrateFederatedNativeGenesisBroadcastAuthorizationArtifactV1(
           authorizer as Readonly<SubstrateFederatedNativeGenesisBroadcastAuthorizerV1>, artifact, expectation);
       } else if (version === 1) {
@@ -400,7 +422,9 @@ function createGenesisTransport(
         exactSignedCandidate,
         async signedTransaction => {
           // Handle consumption may await; native session custody must still be active at the POST.
-          if (version === 'native') assertSubstrateFederatedNativeGenesisBroadcastAuthorizerV1(
+          if (version === 'native-v3') assertSubstrateFederatedNativeGenesisBroadcastAuthorizerV3(
+            authorizer as Readonly<SubstrateFederatedNativeGenesisBroadcastAuthorizerV3>, target);
+          else if (version === 'native') assertSubstrateFederatedNativeGenesisBroadcastAuthorizerV1(
             authorizer as Readonly<SubstrateFederatedNativeGenesisBroadcastAuthorizerV1>, target);
           return await submitExactTransaction(
             signedTransaction, admission.expectedTxId, attempt.durableAttemptDigestHex,

@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   assertBatch: vi.fn(),
   assertBatchV3: vi.fn(),
   assertNativeBatch: vi.fn(),
+  assertNativeBatchV3: vi.fn(),
   assertConfirmationArtifact: vi.fn(),
   assertConfirmationObserver: vi.fn(),
   assertHandleBinding: vi.fn(),
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   assertRevalidationArtifact: vi.fn(),
   assertRevalidationArtifactV2: vi.fn(),
   assertNativeRevalidationArtifact: vi.fn(),
+  assertNativeRevalidationArtifactV3: vi.fn(),
   assertTarget: vi.fn(),
 }));
 
@@ -41,6 +43,8 @@ vi.mock(
       mocks.assertRevalidationArtifactV2,
     assertSubstrateFederatedNativeGenesisRevalidationArtifactV1:
       mocks.assertNativeRevalidationArtifact,
+    assertSubstrateFederatedNativeGenesisRevalidationArtifactV3:
+      mocks.assertNativeRevalidationArtifactV3,
   }),
 );
 
@@ -56,6 +60,8 @@ vi.mock('./substrate-federated-isolated-devnet-setup-check-execution-v2.js', () 
     mocks.assertBatchV3,
   assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1:
     mocks.assertNativeBatch,
+  assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3:
+    mocks.assertNativeBatchV3,
 }));
 
 import {
@@ -71,6 +77,10 @@ import {
   assertSubstrateFederatedNativeGenesisBroadcastAuthorizerV1,
   assertSubstrateFederatedNativeGenesisSetupConfirmedV1,
   createSubstrateFederatedNativeGenesisBroadcastAuthorizerV1,
+  assertSubstrateFederatedNativeGenesisBroadcastAuthorizationArtifactV3,
+  assertSubstrateFederatedNativeGenesisBroadcastAuthorizerV3,
+  assertSubstrateFederatedNativeGenesisSetupConfirmedV3,
+  createSubstrateFederatedNativeGenesisBroadcastAuthorizerV3,
 } from './substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js';
 import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_EXECUTION_V1_SCHEMA,
@@ -107,6 +117,9 @@ const REVALIDATORS = Object.freeze({
   native: Object.freeze({
     schema: 'e2s.substrate-federated-native-genesis-revalidator.v1',
   }),
+  'native-v3': Object.freeze({
+    schema: 'e2s.substrate-federated-native-genesis-revalidator.v3',
+  }),
 });
 const CONFIRMATION_OBSERVER = Object.freeze({
   schema:
@@ -116,7 +129,7 @@ const CONFIRMATION_OBSERVER = Object.freeze({
 
 type CoreRole = 'tracker' | 'duplicatePrevention' | 'pooledReserve';
 type SetupRole = 'tracker' | 'duplicate-prevention' | 'pooled-reserve';
-const PROFILES = [1, 2, 'native'] as const;
+const PROFILES = [1, 2, 'native', 'native-v3'] as const;
 type Version = typeof PROFILES[number];
 
 const APIS = {
@@ -143,6 +156,14 @@ const APIS = {
     assertConfirmed: assertSubstrateFederatedNativeGenesisSetupConfirmedV1,
     assertBatch: mocks.assertNativeBatch,
     assertRevalidationArtifact: mocks.assertNativeRevalidationArtifact,
+  },
+  'native-v3': {
+    create: createSubstrateFederatedNativeGenesisBroadcastAuthorizerV3,
+    assertAuthorizer: assertSubstrateFederatedNativeGenesisBroadcastAuthorizerV3,
+    assertArtifact: assertSubstrateFederatedNativeGenesisBroadcastAuthorizationArtifactV3,
+    assertConfirmed: assertSubstrateFederatedNativeGenesisSetupConfirmedV3,
+    assertBatch: mocks.assertNativeBatchV3,
+    assertRevalidationArtifact: mocks.assertNativeRevalidationArtifactV3,
   },
 } as const;
 
@@ -480,11 +501,11 @@ function expectedDigest(
     observationDigestHex: value.observationDigestHex,
   });
   const projection = {
-    schema: version === 'native'
-      ? 'e2s.substrate-federated-native-genesis-broadcast-authorizer.v1'
+    schema: version === 'native' || version === 'native-v3'
+      ? `e2s.substrate-federated-native-genesis-broadcast-authorizer.v${version === 'native' ? 1 : 3}`
       : `e2s.substrate-federated-isolated-devnet-genesis-broadcast-authorizer.v${version}`,
-    authorizationScope: version === 'native'
-      ? 'fed-native-local-synthetic-genesis-setup-only'
+    authorizationScope: version === 'native' || version === 'native-v3'
+      ? `fed-native${version === 'native' ? '' : '-v3'}-local-synthetic-genesis-setup-only`
       : 'fed-6-lab-local-synthetic-genesis-setup-only',
     processBindingDigestHex: PROCESS_BINDING,
     executionTargetIdentityDigestHex: EXECUTION_IDENTITY,
@@ -506,8 +527,8 @@ function expectedDigest(
       ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]]))
       : value);
   return createHash('sha256')
-    .update(version === 'native'
-      ? 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_BROADCAST_AUTHORIZATION_V1'
+    .update(version === 'native' || version === 'native-v3'
+      ? `E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_BROADCAST_AUTHORIZATION_V${version === 'native' ? 1 : 3}`
       : `E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_BROADCAST_AUTHORIZATION_V${version}`, 'ascii')
     .update('\0', 'ascii')
     .update(canonical, 'utf8')
@@ -540,15 +561,15 @@ describe.each(PROFILES)('genesis broadcast authorizer profile %s', (version) => 
       );
       expect(result.authorizationDigestHex).toMatch(/^[0-9a-f]{64}$/u);
       expect(authorizer.schema).toBe(
-        version === 'native'
-          ? 'e2s.substrate-federated-native-genesis-broadcast-authorizer.v1'
+        version === 'native' || version === 'native-v3'
+          ? `e2s.substrate-federated-native-genesis-broadcast-authorizer.v${version === 'native' ? 1 : 3}`
           : `e2s.substrate-federated-isolated-devnet-genesis-broadcast-authorizer.v${version}`,
       );
       expect(result.authorizationArtifact).toEqual({
         schema: authorizer.schema,
-        version: version === 'native' ? 1 : version,
-        authorizationScope: version === 'native'
-          ? 'fed-native-local-synthetic-genesis-setup-only'
+        version: version === 'native' ? 1 : version === 'native-v3' ? 3 : version,
+        authorizationScope: version === 'native' || version === 'native-v3'
+          ? `fed-native${version === 'native' ? '' : '-v3'}-local-synthetic-genesis-setup-only`
           : 'fed-6-lab-local-synthetic-genesis-setup-only',
         role,
         ordinal: digests.size,
@@ -602,6 +623,17 @@ describe.each(PROFILES)('genesis broadcast authorizer profile %s', (version) => 
     expect(() => opposite.assertAuthorizer(authorizer as any, TARGET as any))
       .toThrow('isolated genesis broadcast authorizer version differs');
     expect(() => api.assertAuthorizer(authorizer as any, TARGET as any)).not.toThrow();
+  });
+
+  it('rejects a cloned setup batch and a different target before authorization', () => {
+    const { batch } = setup();
+    const create = (target: unknown, value: unknown) => Reflect.apply(api.create, undefined,
+      [target, value, REVALIDATORS[version], CONFIRMATION_OBSERVER]);
+    expect(() => create(TARGET, Object.freeze({ ...batch })))
+      .toThrow('synthetic setup batch provenance is missing');
+    expect(() => create(Object.freeze({ ...TARGET }), batch))
+      .toThrow('synthetic setup batch provenance is missing');
+    expect(api.assertRevalidationArtifact).not.toHaveBeenCalled();
   });
 
   it.each(otherProfiles)('rejects profile %s artifact guard for an otherwise exact authorization', oppositeVersion => {
