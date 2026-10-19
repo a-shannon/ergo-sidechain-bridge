@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   assertCandidate: vi.fn(),
   assertCandidateV2: vi.fn(),
+  assertNativePacketV1: vi.fn(),
+  assertNativePacketV3: vi.fn(),
+  assertNativeV3Check: vi.fn(),
   assertExecutionCheck: vi.fn(),
   assertHandleBinding: vi.fn(),
   assertHandle: vi.fn(),
@@ -21,6 +24,10 @@ vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v1.js', () => ({
 }));
 vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v2.js', () => ({
   assertSubstrateFederatedIsolatedDevnetPegInCandidateV2: mocks.assertCandidateV2,
+  assertSubstrateFederatedNativeGenesisPegInPacketV1: mocks.assertNativePacketV1,
+}));
+vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v3.js', () => ({
+  assertSubstrateFederatedNativeGenesisPegInPacketV3: mocks.assertNativePacketV3,
 }));
 vi.mock(
   './substrate-federated-isolated-devnet-reward-input-discovery-v1.js',
@@ -41,6 +48,8 @@ vi.mock(
 vi.mock('./substrate-federated-isolated-devnet-setup-check-execution-v2.js', () => ({
   assertSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1:
     mocks.assertExecutionCheck,
+  assertSubstrateFederatedNativeGenesisPegInSourceLockExecutionCheckV3:
+    mocks.assertNativeV3Check,
 }));
 vi.mock('./fleet-signer.js', () => ({
   assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding:
@@ -54,6 +63,8 @@ import {
   assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1,
   createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1,
   createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV2,
+  createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV1,
+  createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV3,
 } from './substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.js';
 import {
   admitErgoOperationalTransaction,
@@ -316,6 +327,97 @@ describe('isolated source-lock V2 authorization boundary (mocked provenance and 
   it('rejects a backwards V2 pre-transport observation', () => {
     expect(() => create({ ...input(), preTransport: ownedObservation(observation('32', 99)) as never }))
       .toThrow(/moved backwards/);
+  });
+});
+
+describe('native V3 source-lock authorization boundary (mocked exact packet provenance)', () => {
+  const nativeBatch = Object.freeze({
+    ...BATCH,
+    receipt: Object.freeze({ receiptDigestHex: hex('35') }),
+    targetBinding: Object.freeze({ processBindingDigestHex: BINDING.processBindingDigestHex }),
+  });
+  const input = () => ({
+    target: TARGET as never,
+    batch: nativeBatch as never,
+    packet: PACKET as never,
+    executionCheck: CHECK as never,
+    postCheck: ownedObservation(observation('31', 100)) as never,
+    preTransport: ownedObservation(observation('32', 101)) as never,
+  });
+
+  beforeEach(() => {
+    mocks.assertNativePacketV3.mockImplementation((packet, batch, target) => {
+      if (packet !== PACKET || batch !== nativeBatch || target !== TARGET) {
+        throw new Error('native V3 packet lacks exact process provenance');
+      }
+      return PACKET;
+    });
+    mocks.assertNativePacketV1.mockImplementation((packet, batch, target) => {
+      if (packet !== PACKET || batch !== nativeBatch || target !== TARGET) {
+        throw new Error('native V1 packet lacks exact process provenance');
+      }
+      return PACKET;
+    });
+    mocks.assertNativeV3Check.mockImplementation((check, packet, batch, target) => {
+      if (check !== CHECK || packet !== PACKET || batch !== nativeBatch || target !== TARGET) {
+        throw new Error('native V3 check lacks exact packet provenance');
+      }
+      return BINDING;
+    });
+  });
+
+  it('keeps a distinct V3 scope and digest, then authorizes only once', () => {
+    const supplied = input();
+    const authorizer = createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV3(supplied);
+    const nativeV1 = createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV1(supplied);
+    expect(authorizer.revalidationDigestHex).not.toBe(nativeV1.revalidationDigestHex);
+    const { revalidated: base } = fixture();
+    const revalidated = Object.freeze({ ...base,
+      revalidationDigestHex: authorizer.revalidationDigestHex });
+    const evidence = authorizer.authorize(revalidated as never);
+    expect((evidence.authorizationArtifact as { authorizationScope: string }).authorizationScope)
+      .toBe('fed-6-native-v3-local-synthetic-peg-in-source-lock-creation-only');
+    expect(evidence.authorizationDigestHex)
+      .not.toBe(nativeV1.authorize(Object.freeze({ ...base,
+        revalidationDigestHex: nativeV1.revalidationDigestHex }) as never).authorizationDigestHex);
+    expect(() => assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1(
+      authorizer, { revalidated, ...evidence } as never,
+    )).not.toThrow();
+    expect(() => authorizer.authorize(revalidated as never)).toThrow(/one-shot/);
+  });
+
+  it.each(['copied packet', 'foreign batch', 'copied target', 'copied check'] as const)(
+    'rejects %s before a V3 authorizer exists', fault => {
+      const supplied = input();
+      if (fault === 'copied packet') supplied.packet = { ...PACKET } as never;
+      if (fault === 'foreign batch') supplied.batch = { ...nativeBatch } as never;
+      if (fault === 'copied target') supplied.target = { ...TARGET } as never;
+      if (fault === 'copied check') supplied.executionCheck = { ...CHECK } as never;
+      expect(() => createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV3(supplied))
+        .toThrow(/provenance/);
+    },
+  );
+
+  it('rechecks the retained V3 guard before any authorization', () => {
+    const authorizer = createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV3(input());
+    const { revalidated: base } = fixture();
+    mocks.assertNativePacketV3.mockImplementation(() => {
+      throw new Error('native V3 packet guard revoked');
+    });
+    expect(() => authorizer.authorize({ ...base,
+      revalidationDigestHex: authorizer.revalidationDigestHex } as never))
+      .toThrow(/guard revoked/);
+  });
+
+  it('rechecks the exact V3 check-to-packet guard before authorization', () => {
+    const authorizer = createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV3(input());
+    const { revalidated: base } = fixture();
+    mocks.assertNativeV3Check.mockImplementation(() => {
+      throw new Error('native V3 check-to-packet guard revoked');
+    });
+    expect(() => authorizer.authorize({ ...base,
+      revalidationDigestHex: authorizer.revalidationDigestHex } as never))
+      .toThrow(/check-to-packet guard revoked/);
   });
 });
 

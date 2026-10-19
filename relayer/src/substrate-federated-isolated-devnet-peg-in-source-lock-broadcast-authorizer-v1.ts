@@ -28,6 +28,8 @@ import {
   assertSubstrateFederatedNativeGenesisPegInPacketV1,
   type SubstrateFederatedIsolatedDevnetPegInCandidateV2,
 } from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
+import { assertSubstrateFederatedNativeGenesisPegInPacketV3 }
+  from './substrate-federated-isolated-devnet-peg-in-candidate-v3.js';
 import {
   SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
   SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
@@ -35,12 +37,15 @@ import {
 } from './substrate-federated-isolated-devnet-reward-input-discovery-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1,
+  assertSubstrateFederatedNativeGenesisPegInSourceLockExecutionCheckV3,
   type SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1,
   type SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
   type SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
   type SubstrateFederatedNativeGenesisSetupExecutionBatchV1,
+  type SubstrateFederatedNativeGenesisSetupExecutionBatchV3,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import type { SubstrateFederatedPooledReserveDepositV2Packet } from './substrate-federated-pooled-reserve-deposit-v2.js';
+import type { SubstrateFederatedPooledReserveDepositV3Packet } from './substrate-federated-pooled-reserve-deposit-v3.js';
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_BROADCAST_AUTHORIZER_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer.v1' as const;
@@ -49,10 +54,16 @@ const AUTHORIZATION_SCOPE =
   'fed-6-lab-local-synthetic-peg-in-source-lock-creation-only' as const;
 const NATIVE_AUTHORIZATION_SCOPE =
   'fed-6-native-local-synthetic-peg-in-source-lock-creation-only' as const;
+const NATIVE_V3_AUTHORIZATION_SCOPE =
+  'fed-6-native-v3-local-synthetic-peg-in-source-lock-creation-only' as const;
 const REVALIDATION_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_REVALIDATION_V1';
 const AUTHORIZATION_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_BROADCAST_AUTHORIZATION_V1';
+const NATIVE_V3_REVALIDATION_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_PEG_IN_SOURCE_LOCK_REVALIDATION_V3';
+const NATIVE_V3_AUTHORIZATION_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_PEG_IN_SOURCE_LOCK_BROADCAST_AUTHORIZATION_V3';
 
 type AuthorizerPort =
   ErgoOperationalTransactionExecutionPorts['broadcastAuthorizer'];
@@ -68,7 +79,8 @@ export interface SubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthori
   readonly schema:
     typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_BROADCAST_AUTHORIZER_V1_SCHEMA;
   readonly version: 1;
-  readonly authorizationScope: typeof AUTHORIZATION_SCOPE | typeof NATIVE_AUTHORIZATION_SCOPE;
+  readonly authorizationScope: typeof AUTHORIZATION_SCOPE | typeof NATIVE_AUTHORIZATION_SCOPE
+    | typeof NATIVE_V3_AUTHORIZATION_SCOPE;
   readonly expectedTxId: string;
   readonly sourceFundingBoxIdHex: string;
   readonly authorizationDigestHex: string;
@@ -82,7 +94,8 @@ interface AuthorizerMaterialV1 {
   readonly packet: DepositPacket;
   readonly candidateDigestHex: string;
   readonly setupRequestDigestHex: string;
-  readonly authorizationScope: typeof AUTHORIZATION_SCOPE | typeof NATIVE_AUTHORIZATION_SCOPE;
+  readonly authorizationScope: typeof AUTHORIZATION_SCOPE | typeof NATIVE_AUTHORIZATION_SCOPE
+    | typeof NATIVE_V3_AUTHORIZATION_SCOPE;
   readonly assertCandidate: () => DepositPacket;
   readonly executionCheck:
     Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1>;
@@ -105,7 +118,8 @@ const AUTHORIZERS = new WeakMap<object, AuthorizerMaterialV1>();
 const AUTHORIZATIONS = new WeakMap<object, AuthorizationMaterialV1>();
 
 type DepositPacket = ReturnType<typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV1>
-  | ReturnType<typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV2>;
+  | ReturnType<typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV2>
+  | ReturnType<typeof assertSubstrateFederatedNativeGenesisPegInPacketV3>;
 type AuthorizerInput = Pick<AuthorizerMaterialV1,
   'target' | 'executionCheck' | 'postCheck' | 'preTransport'>;
 type BoundAuthorizerInput = AuthorizerInput & Pick<AuthorizerMaterialV1,
@@ -163,6 +177,31 @@ export function createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAut
     'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_PEG_IN_PACKET_BINDING_V1'),
     setupRequestDigestHex: batch.request.requestDigestHex, authorizationScope: NATIVE_AUTHORIZATION_SCOPE,
   }, () => assertSubstrateFederatedNativeGenesisPegInPacketV1(packet, batch, target));
+}
+
+/** Native V3 custody and a distinct source-lock-only authorization scope. */
+export function createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV3(
+  input: Readonly<AuthorizerInput & {
+    batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV3>;
+    packet: Readonly<SubstrateFederatedPooledReserveDepositV3Packet>;
+  }>,
+): Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1> {
+  const retained = Object.freeze({ ...input });
+  const { packet, batch, target, executionCheck } = retained;
+  const assertExact = () => {
+    const currentPacket = assertSubstrateFederatedNativeGenesisPegInPacketV3(packet, batch, target);
+    assertSubstrateFederatedNativeGenesisPegInSourceLockExecutionCheckV3(
+      executionCheck, packet, batch, target,
+    );
+    return currentPacket;
+  };
+  assertExact();
+  return createAuthorizer({ ...retained,
+    candidateDigestHex: sha256CanonicalJson({ packet, setupRequestDigestHex: batch.request.requestDigestHex,
+      setupCheckReceiptDigestHex: batch.receipt.receiptDigestHex, target: batch.targetBinding },
+    'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_PEG_IN_PACKET_BINDING_V3'),
+    setupRequestDigestHex: batch.request.requestDigestHex, authorizationScope: NATIVE_V3_AUTHORIZATION_SCOPE,
+  }, assertExact);
 }
 
 function createAuthorizer(
@@ -227,9 +266,11 @@ function createAuthorizer(
     postCheck,
     preTransport,
     binding,
-  }, input.authorizationScope === NATIVE_AUTHORIZATION_SCOPE
-    ? 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_PEG_IN_SOURCE_LOCK_REVALIDATION_V1'
-    : REVALIDATION_DIGEST_DOMAIN);
+  }, input.authorizationScope === NATIVE_V3_AUTHORIZATION_SCOPE
+    ? NATIVE_V3_REVALIDATION_DIGEST_DOMAIN
+    : input.authorizationScope === NATIVE_AUTHORIZATION_SCOPE
+      ? 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_PEG_IN_SOURCE_LOCK_REVALIDATION_V1'
+      : REVALIDATION_DIGEST_DOMAIN);
 
   let authorizer!:
     Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1>;
@@ -271,9 +312,11 @@ function createAuthorizer(
         postCheckReportDigestHex: material.postCheck.observation.reportDigestHex,
         preTransportReportDigestHex:
           material.preTransport.observation.reportDigestHex,
-      }, material.authorizationScope === NATIVE_AUTHORIZATION_SCOPE
-        ? 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_PEG_IN_SOURCE_LOCK_BROADCAST_AUTHORIZATION_V1'
-        : AUTHORIZATION_DIGEST_DOMAIN);
+      }, material.authorizationScope === NATIVE_V3_AUTHORIZATION_SCOPE
+        ? NATIVE_V3_AUTHORIZATION_DIGEST_DOMAIN
+        : material.authorizationScope === NATIVE_AUTHORIZATION_SCOPE
+          ? 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_PEG_IN_SOURCE_LOCK_BROADCAST_AUTHORIZATION_V1'
+          : AUTHORIZATION_DIGEST_DOMAIN);
       const authorizationArtifact = Object.freeze({
         schema:
           SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_BROADCAST_AUTHORIZER_V1_SCHEMA,

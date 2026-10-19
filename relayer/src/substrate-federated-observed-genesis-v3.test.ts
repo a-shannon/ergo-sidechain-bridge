@@ -58,7 +58,9 @@ import { createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2 }
   from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
 import { assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1,
   assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3,
-  assertSubstrateFederatedNativeGenesisSetupReadCustodyV3 }
+  assertSubstrateFederatedNativeGenesisSetupReadCustodyV3,
+  assertSubstrateFederatedNativeGenesisPegInSourceLockExecutionCheckV3,
+  promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1 }
   from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import { createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2 }
   from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
@@ -420,11 +422,22 @@ describe('observed FED genesis V3 compilation and retained execution', () => {
         .toThrow(/native FED V3 peg-in packet lacks exact process provenance/);
       expect(() => assertNativePegInV3(pegInPacket, batch, target)).not.toThrow();
     } finally { foreignSource.dispose(); foreignSetup.dispose(); }
+    const uncheckedSameTxPacket = await buildNativePegInV3(pegInInput);
+    expect(uncheckedSameTxPacket).not.toBe(pegInPacket);
+    expect(uncheckedSameTxPacket.transactions.sourceLockCreation.txId)
+      .toBe(pegInPacket.transactions.sourceLockCreation.txId);
     const sourceLock = await setup.checkNativePegInSourceLockRetainingSignerV3(pegInPacket, target);
     expect(sourceLock.unsignedTransactionIdHex).toBe(pegInPacket.transactions.sourceLockCreation.txId);
     expect(sourceLock.sourceFundingBoxIdHex).toBe(pegInPacket.boxes.sourceFundingInput.boxId);
     expect(sourceLock.boundaries.broadcastAuthorityEstablished).toBe(false);
     expect(helpers.ncheck).toHaveBeenCalledTimes(7);
+    const promotedSourceLock = promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1(
+      sourceLock, target);
+    expect(() => assertSubstrateFederatedNativeGenesisPegInSourceLockExecutionCheckV3(
+      promotedSourceLock, uncheckedSameTxPacket, batch, target))
+      .toThrow(/exact packet custody/);
+    expect(() => assertSubstrateFederatedNativeGenesisPegInSourceLockExecutionCheckV3(
+      promotedSourceLock, pegInPacket, batch, target)).not.toThrow();
     expect(() => assertNativePegInV3(pegInPacket, batch, target)).not.toThrow();
     const vaultForeignSetup = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
     const vaultForeignSource = createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2({

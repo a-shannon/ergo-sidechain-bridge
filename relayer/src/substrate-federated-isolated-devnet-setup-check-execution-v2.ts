@@ -619,6 +619,13 @@ const PEG_IN_SOURCE_LOCK_EXECUTION_CHECKS = new WeakMap<
     assertActive?: () => void;
   }>
 >();
+type NativeV3SourceLockCheckIdentity = Readonly<{
+  packet: Readonly<SubstrateFederatedPooledReserveDepositV3Packet>;
+  batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV3>;
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+}>;
+const NATIVE_V3_SOURCE_LOCK_RECEIPTS = new WeakMap<object, NativeV3SourceLockCheckIdentity>();
+const NATIVE_V3_SOURCE_LOCK_EXECUTION_CHECKS = new WeakMap<object, NativeV3SourceLockCheckIdentity>();
 
 export interface SubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1 {
   readonly receipt:
@@ -1228,6 +1235,7 @@ export function promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1(
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
 ): Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1> {
   const material = PEG_IN_SOURCE_LOCK_CHECK_MATERIAL.get(receipt);
+  const nativeV3Identity = NATIVE_V3_SOURCE_LOCK_RECEIPTS.get(receipt);
   material?.assertActive?.();
   const current =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
@@ -1264,6 +1272,10 @@ export function promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1(
     binding: current,
     assertActive: material.assertActive,
   }));
+  if (nativeV3Identity !== undefined) {
+    NATIVE_V3_SOURCE_LOCK_EXECUTION_CHECKS.set(promoted, nativeV3Identity);
+    NATIVE_V3_SOURCE_LOCK_RECEIPTS.delete(receipt);
+  }
   return promoted;
 }
 
@@ -1298,11 +1310,27 @@ export function assertSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCh
   return current;
 }
 
+/** Preserve the exact V3 packet checked by this live source-lock session. */
+export function assertSubstrateFederatedNativeGenesisPegInSourceLockExecutionCheckV3(
+  check: Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1>,
+  packet: Readonly<SubstrateFederatedPooledReserveDepositV3Packet>,
+  batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV3>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1> {
+  const retained = NATIVE_V3_SOURCE_LOCK_EXECUTION_CHECKS.get(check);
+  if (retained === undefined || retained.packet !== packet || retained.batch !== batch
+    || retained.target !== target) {
+    throw new Error('native FED V3 source-lock execution check lacks exact packet custody');
+  }
+  return assertSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1(check, target);
+}
+
 export function discardSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1(
   receipt:
     Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt>,
 ): void {
   PEG_IN_SOURCE_LOCK_CHECK_MATERIAL.delete(receipt);
+  NATIVE_V3_SOURCE_LOCK_RECEIPTS.delete(receipt);
 }
 
 /** Promote the exact in-process committed-vault check once inside the LAB root. */
@@ -2635,6 +2663,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
           unsignedTransaction: packet.transactions.sourceLockCreation,
         }, target, signer, activeMnemonic, assertActive);
         assertActive();
+        NATIVE_V3_SOURCE_LOCK_RECEIPTS.set(checked, Object.freeze({ packet, batch: ownBatch, target }));
         return checked;
       }, 'native-v3-source-lock-checked'),
       checkNativePegInCommittedVaultRetainingSignerV3: async (

@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-10-19
+Updated: 2026-10-20
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -151,6 +151,18 @@ The first test run had one stale call-count expectation, corrected before the
 green run. This is a pre-submission source boundary, not a committed vault,
 transported transaction, node acceptance or campaign admission. Operational
 ownership and the genuine two-cycle remain due.
+
+The native V3 source-lock authorizer now binds the promoted check to the
+exact packet, setup batch and target retained by its live session. A second
+real V3 packet with the same transaction ID cannot borrow that check. The
+authorizer has a distinct V3 scope and digest domains and rechecks custody
+before authorization. Focused authorizer tests pass 24/24, the pinned-JVM V3
+integration file passes 9/9, a narrow V1 promotion test passes 1/1, TypeScript
+noEmit and layered imports pass, and independent exact-source review found no
+blocking defect. An initial review caught a check-to-packet binding gap before
+this correction. This source-only boundary grants no transport, node or
+campaign authority. The next join is an explicitly owned V3 operational route;
+the genuine two-cycle and later recovery/operator/FED7 evidence remain due.
 
 C74 is consumed and permanently held; no successor campaign is selected. The
 purpose-specific deposit selector was locally promoted at
