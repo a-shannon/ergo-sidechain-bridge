@@ -68,7 +68,8 @@ import { buildSubstrateFederatedGenesisV3 } from './substrate-federated-runtime-
 import { decodeSubstrateFederatedSettlementFamilyV1Profile }
   from './substrate-federated-settlement-family-v1.js';
 import { buildSubstrateFederatedNativeGenesisPegInPacketV3 as buildNativePegInV3,
-  assertSubstrateFederatedNativeGenesisPegInPacketV3 as assertNativePegInV3 }
+  assertSubstrateFederatedNativeGenesisPegInPacketV3 as assertNativePegInV3,
+  assertSubstrateFederatedNativeGenesisPegInReadCustodyV3 as assertNativeReadCustodyV3 }
   from './substrate-federated-isolated-devnet-peg-in-candidate-v3.js';
 import { buildBridgeValidityTrackerCanonicalHeaderContextV1 }
   from './bridge-validity-tracker-header-context-v1.js';
@@ -421,6 +422,7 @@ describe('observed FED genesis V3 compilation and retained execution', () => {
       expect(() => assertNativePegInV3(pegInPacket, foreignBatch, target))
         .toThrow(/native FED V3 peg-in packet lacks exact process provenance/);
       expect(() => assertNativePegInV3(pegInPacket, batch, target)).not.toThrow();
+      expect(() => assertNativeReadCustodyV3(pegInPacket, batch, target)).not.toThrow();
     } finally { foreignSource.dispose(); foreignSetup.dispose(); }
     const uncheckedSameTxPacket = await buildNativePegInV3(pegInInput);
     expect(uncheckedSameTxPacket).not.toBe(pegInPacket);
@@ -572,6 +574,7 @@ describe('observed FED genesis V3 compilation and retained execution', () => {
     expect(() => assertSubstrateFederatedNativeGenesisSetupReadCustodyV3(batch, target))
       .toThrow();
     expect(() => assertNativePegInV3(pegInPacket, batch, target)).toThrow();
+    expect(() => assertNativeReadCustodyV3(pegInPacket, batch, target)).toThrow();
   }, 120_000);
 
   it.each(['setup clone', 'source clone', 'discovery clone', 'history clone',

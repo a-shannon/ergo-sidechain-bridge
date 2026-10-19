@@ -3,6 +3,7 @@ import type { SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1 }
   from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import {
   assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3,
+  assertSubstrateFederatedNativeGenesisSetupReadCustodyV3,
   getSubstrateFederatedNativeGenesisSetupCompilerInputV3,
   type SubstrateFederatedNativeGenesisSetupExecutionBatchV3,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
@@ -106,6 +107,21 @@ export function assertSubstrateFederatedNativeGenesisPegInPacketV3(
     throw new Error('native FED V3 peg-in packet lacks exact process provenance');
   }
   assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3(batch, target);
+  assertSubstrateFederatedPooledReserveDepositV3Packet(packet);
+  return packet;
+}
+
+/** Retained packet and setup read custody within a fully bracketed output read. */
+export function assertSubstrateFederatedNativeGenesisPegInReadCustodyV3(
+  packet: Packet,
+  batch: Batch,
+  target: Target,
+): Packet {
+  const retained = nativePackets.get(packet);
+  if (retained === undefined || retained.batch !== batch || retained.target !== target) {
+    throw new Error('native FED V3 peg-in packet lacks exact retained read custody');
+  }
+  assertSubstrateFederatedNativeGenesisSetupReadCustodyV3(batch, target);
   assertSubstrateFederatedPooledReserveDepositV3Packet(packet);
   return packet;
 }

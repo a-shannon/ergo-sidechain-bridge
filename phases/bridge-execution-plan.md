@@ -164,6 +164,17 @@ this correction. This source-only boundary grants no transport, node or
 campaign authority. The next join is an explicitly owned V3 operational route;
 the genuine two-cycle and later recovery/operator/FED7 evidence remain due.
 
+The V3 source-lock output observer now retains the packet and setup read
+custody through the existing bounded, dual-node observation. A private profile
+tag prevents native V1 and V3 callers from exchanging observations even when
+their public V1-format output facts and digest match. The direct observer file
+passes 195/195, the real pinned-JVM V3 integration passes 9/9 with active and
+disposed read-custody checks, TypeScript and architecture pass, and independent
+exact-four-file review finds no blocking defect. This is still a source-only
+observation. The next separate batch must connect the V3 check, authorizer,
+journal, transport and confirmed output in an owned operational root; it may
+not borrow the V1 worker or imply a completed deposit.
+
 C74 is consumed and permanently held; no successor campaign is selected. The
 purpose-specific deposit selector was locally promoted at
 `9e70f876a46999383f6fc975ce47d816ada5d235` after exact independent review and
