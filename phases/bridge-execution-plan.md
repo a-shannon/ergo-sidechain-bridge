@@ -48,8 +48,12 @@ the V2 tracker authenticated as DATA_INPUTS(0); seven isolated recipient,
 replay, liability, fee, context and proof negatives reject at their expected
 boundaries. The exact synthetic fixture and JVM consumer are now promoted in
 local source, and the promoted bytes passed the same focused JVM matrix. A
-versioned operational selector and genuine node execution remain due. These
-results establish neither a C74 cause nor runtime authority. The
+separate source-only resolver now freezes the selected tracker V2,
+duplicate-prevention V1, source-lock V6 and pooled-reserve V7 contracts from
+the pinned public fixture. Its 17 focused tests, TypeScript check, import
+check and independent exact-source review passed. Process-owned JVM
+compilation, the versioned operational selector and genuine node execution
+remain due. These results establish neither a C74 cause nor runtime authority. The
 current V2 route still selects the V1/V6 family; historical C74 callers stay
 untouched.
 
