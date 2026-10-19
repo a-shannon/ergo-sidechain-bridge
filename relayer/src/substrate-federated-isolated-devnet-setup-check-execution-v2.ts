@@ -712,6 +712,10 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
     packet: Readonly<SubstrateFederatedPooledReserveDepositV3Packet>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt>>;
+  readonly checkNativePegInCommittedVaultRetainingSignerV3: (
+    packet: Readonly<SubstrateFederatedPooledReserveDepositV3Packet>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Receipt>>;
   readonly checkNativePegInSourceLockRetainingSignerV1: (
     packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
@@ -1562,6 +1566,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       | 'native-setup-complete'
       | 'native-v3-setup-complete'
       | 'native-v3-source-lock-checked'
+      | 'native-v3-vault-checked'
       | 'native-source-lock-checked'
       | 'native-vault-checked'
       | 'native-withdrawal-fee-checked'
@@ -1599,7 +1604,8 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
     };
     const assertNativeV3SessionActive = (): void => {
       if (!nativeV3RouteSelected || terminalInvalidationRequested || nativeCancellation.signal.aborted
-        || !['running', 'native-v3-setup-complete', 'native-v3-source-lock-checked'].includes(state)) {
+        || !['running', 'native-v3-setup-complete', 'native-v3-source-lock-checked',
+          'native-v3-vault-checked'].includes(state)) {
         throw new Error('native FED V3 setup session is inactive');
       }
     };
@@ -1670,6 +1676,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         | 'open'
         | 'native-setup-complete'
         | 'native-v3-setup-complete'
+        | 'native-v3-source-lock-checked'
         | 'native-source-lock-checked'
         | 'native-vault-checked'
         | 'native-withdrawal-fee-checked'
@@ -1696,6 +1703,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         | 'native-setup-complete'
         | 'native-v3-setup-complete'
         | 'native-v3-source-lock-checked'
+        | 'native-v3-vault-checked'
         | 'native-source-lock-checked'
         | 'native-vault-checked'
         | 'native-withdrawal-fee-checked'
@@ -2629,6 +2637,34 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         assertActive();
         return checked;
       }, 'native-v3-source-lock-checked'),
+      checkNativePegInCommittedVaultRetainingSignerV3: async (
+        packet: Readonly<SubstrateFederatedPooledReserveDepositV3Packet>,
+        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      ) => consume('native-v3-source-lock-checked', async activeMnemonic => {
+        if (retainedNativeV3PegInPacket !== packet) {
+          throw new Error('native FED V3 peg-in packet differs from the checked source lock');
+        }
+        const { assertSubstrateFederatedNativeGenesisPegInPacketV3 } =
+          await import('./substrate-federated-isolated-devnet-peg-in-candidate-v3.js');
+        const ownBatch = nativeV3Batch;
+        if (ownBatch === undefined) throw new Error('native FED V3 committed-vault setup custody is absent');
+        const assertActive = (): void => {
+          assertNativeV3SessionActive();
+          if (nativeV3Batch !== ownBatch || retainedNativeV3PegInPacket !== packet) {
+            throw new Error('native FED V3 committed-vault retained custody changed');
+          }
+          assertSubstrateFederatedNativeGenesisPegInPacketV3(packet, ownBatch, target);
+        };
+        assertActive();
+        const checked = await runPegInCommittedVaultCheck({
+          reservePredecessorBoxIdHex: packet.boxes.reservePredecessor.boxId,
+          sourceLockBoxIdHex: packet.boxes.sourceLock.boxId,
+          transitionFeeFundingBoxIdHex: packet.boxes.transitionFeeFunding.boxId,
+          unsignedTransaction: packet.transactions.reserveTransition,
+        }, target, signer, activeMnemonic, assertActive);
+        assertActive();
+        return checked;
+      }, 'native-v3-vault-checked'),
       checkNativePegInSourceLockRetainingSignerV1: async (
         packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
         target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,

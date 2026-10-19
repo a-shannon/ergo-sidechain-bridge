@@ -71,6 +71,8 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckSessionV2 {
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runNativeGenesisRetainingSignerV3'];
   readonly checkNativePegInSourceLockRetainingSignerV3:
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativePegInSourceLockRetainingSignerV3'];
+  readonly checkNativePegInCommittedVaultRetainingSignerV3:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativePegInCommittedVaultRetainingSignerV3'];
   readonly checkNativePegInSourceLockRetainingSignerV1:
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativePegInSourceLockRetainingSignerV1'];
   readonly checkNativePegInCommittedVaultRetainingSignerV1:
@@ -251,6 +253,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     | 'native-setup-complete'
     | 'native-v3-setup-complete'
     | 'native-v3-source-lock-checked'
+    | 'native-v3-vault-checked'
     | 'native-source-lock-checked'
     | 'native-withdrawal-fee-checked'
     | 'native-tracker-fee-checked'
@@ -312,6 +315,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       | 'open'
       | 'native-setup-complete'
       | 'native-v3-setup-complete'
+      | 'native-v3-source-lock-checked'
       | 'native-source-lock-checked'
       | 'native-vault-checked'
       | 'native-withdrawal-fee-checked'
@@ -344,6 +348,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       | 'native-setup-complete'
       | 'native-v3-setup-complete'
       | 'native-v3-source-lock-checked'
+      | 'native-v3-vault-checked'
       | 'native-source-lock-checked'
       | 'native-withdrawal-fee-checked'
       | 'native-tracker-fee-checked'
@@ -426,6 +431,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
           || state === 'native-setup-complete'
           || state === 'native-v3-setup-complete'
           || state === 'native-v3-source-lock-checked'
+          || state === 'native-v3-vault-checked'
           || state === 'native-source-lock-checked'
           || state === 'native-vault-checked'
           || state === 'native-withdrawal-fee-checked'
@@ -466,6 +472,11 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     ) => consume('native-v3-setup-complete',
       () => execution.checkNativePegInSourceLockRetainingSignerV3(packet, target),
       'native-v3-source-lock-checked'),
+    checkNativePegInCommittedVaultRetainingSignerV3: async (
+      ...[packet, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativePegInCommittedVaultRetainingSignerV3']>
+    ) => consume('native-v3-source-lock-checked',
+      () => execution.checkNativePegInCommittedVaultRetainingSignerV3(packet, target),
+      'native-v3-vault-checked'),
     checkNativePegInSourceLockRetainingSignerV1: async (
       ...[packet, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativePegInSourceLockRetainingSignerV1']>
     ) => consume('native-setup-complete', () => execution.checkNativePegInSourceLockRetainingSignerV1(packet, target),

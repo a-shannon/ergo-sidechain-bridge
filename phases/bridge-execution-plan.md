@@ -140,6 +140,18 @@ not establish a transported lock, committed vault, node acceptance or campaign
 authority. Next, connect the same retained V3 packet to the existing local
 committed-vault checker in a separate, directly falsifiable batch.
 
+That V3 committed-vault join now follows only the retained V3 source-lock
+state. It requires the same packet object, batch and target throughout the
+existing local three-input checker, including its signing and node-check
+callbacks. The pinned-JVM V3 integration file passes 9/9: a clone presented
+by another live session after its own source-lock check is refused before
+signing or node checking, while the owning packet receives a local checker
+receipt. TypeScript, architecture and independent exact-diff review pass.
+The first test run had one stale call-count expectation, corrected before the
+green run. This is a pre-submission source boundary, not a committed vault,
+transported transaction, node acceptance or campaign admission. Operational
+ownership and the genuine two-cycle remain due.
+
 C74 is consumed and permanently held; no successor campaign is selected. The
 purpose-specific deposit selector was locally promoted at
 `9e70f876a46999383f6fc975ce47d816ada5d235` after exact independent review and
