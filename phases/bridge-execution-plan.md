@@ -57,8 +57,12 @@ selected V7 template hash in its 596-byte profile and both predecessor IDs
 derived by the same JVM invocation. Its 16 focused tests include actual pinned
 JVM compilation and isolated provenance, source, lock and mutation refusals;
 TypeScript, layered imports and independent exact-source review passed.
-Versioned genesis preparation, an observed-genesis producer, the operational
-selector and genuine node execution remain due. These results establish
+A separate V3 genesis preparation/builder now consumes the process-owned V3
+family receipt, keeps the 596-byte family profile and 349-byte V4 runtime
+encoding, and rejects copied provenance and forged endowment arrays. Its
+53 focused tests include actual pinned JVM compilation; TypeScript, layered
+imports and independent exact-source review passed. The observed-genesis
+producer, operational selector and genuine node execution remain due. These results establish
 neither a C74 cause nor runtime authority. The current V2 route still selects
 the V1/V6 family; historical C74 callers stay untouched.
 
