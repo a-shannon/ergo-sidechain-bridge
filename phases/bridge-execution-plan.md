@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-10-18
+Updated: 2026-10-19
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,7 +28,7 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Close the separate public-source R7 static family lot. The V6
+**Now:** Close the exact tracker-V2/reserve-V7 R7 path. The V6
 compiled reserve accepts an additional dense R7 on a successor that the next
 deposit builder refuses. A pinned JVM reduction exposed that acceptance.
 The V7 template adds three fail-closed R7 guards; its coherent V1-tracker
@@ -37,10 +37,12 @@ burn reserve predicate. A fresh four-contract family combines tracker V2
 with the V7 reserve: its isolated JVM compiler test passed, its receipt is
 byte-identical to the selected public fixture, and the separately versioned
 TypeScript identity binding passed focused positive and direct negative tests.
-These are static source results, not a C74 cause or runtime authority. The
-exact four-contract V2/V7 R7 deposit/burn reduction and a versioned operational
-selector remain due. The current V2 route still selects the V1/V6 family;
-historical C74 callers stay untouched.
+An isolated exact four-contract JVM deposit reduction then passed one focused
+test: the reserve and source lock accept the baseline deposit, while isolated
+predecessor/successor R7 variants are rejected. The burn reduction for this
+exact family and a versioned operational selector remain due. These results
+do not establish a C74 cause or runtime authority. The current V2 route still
+selects the V1/V6 family; historical C74 callers stay untouched.
 
 C74 is consumed and permanently held; no successor campaign is selected. The
 purpose-specific deposit selector was locally promoted at
@@ -2220,7 +2222,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Pooled-reserve R7 static family -> exact V2/V7 reduction | Retain the permanent C74 hold; close the reviewed static four-contract family and TypeScript identity binding, then select an exact V2/V7 R7 reducer and a separate versioned operational selector without changing historical callers | V6 compiled reserve accepted dense successor R7 while the next deposit builder refused it. V7 guards and a V1-tracker family passed two focused JVM tests. The new tracker-V2/V7 compiler test and public-receipt equality passed, as did focused TypeScript identity positives and direct negatives; independent source review is scoped to this static lot. The exact four-contract reduction and operational route remain open; no C74 cause, lifecycle or automatic campaign claim |
+| **Now** | Pooled-reserve R7 exact V2/V7 family -> burn and operational route | Retain the permanent C74 hold; use the reviewed four-contract family and exact deposit reduction to select the smallest exact burn reducer, then a separate versioned operational selector without changing historical callers | V6 compiled reserve accepted dense successor R7 while the next deposit builder refused it. V7 guards and a V1-tracker family passed two focused JVM tests. The tracker-V2/V7 compiler test, public-receipt equality, focused TypeScript identity positives/direct negatives and one exact-family JVM deposit reduction passed within their stated scopes. Exact-family burn and the operational route remain open; no C74 cause, lifecycle or automatic campaign claim |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Separately select and admit one local synthetic campaign after a deciding checkpoint, exact local source identity, applicable checks/review and fresh runtime/source/output/custody/fee gates; apply guarded publication and due exact-head CI at public promotion | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
