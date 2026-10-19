@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-10-17
+Updated: 2026-10-18
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,20 +28,48 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Close purpose-specific deposit funding selection. Both deposit branches
-used the three-input genesis selector even though source-lock creation consumes
-one fresh reward input. The original consumer rejects sufficient one/two-box
-inventories and can select an insufficient oldest input when a later input
-covers the deposit. A separate deposit selector preserves the genesis contract
-and selects one input covering the amount and both construction fees, with zero
-or at least minimum-box change. The same frozen requirements bind discovery,
-owned-target provenance and packet construction in both branches. Exact root
-regressions, isolated value/provenance refusals, the existing root suite and
-named-import guards pass; TypeScript and imports pass. Final exact-candidate
-review and guarded local promotion apply before source closure. This source
-counterexample does not identify a historical campaign cause or establish a
-successful deposit. Reassess the next executable consumer after this closure;
-no successor campaign is selected.
+**Now:** Close the separate public-source R7 static family lot. The V6
+compiled reserve accepts an additional dense R7 on a successor that the next
+deposit builder refuses. A pinned JVM reduction exposed that acceptance.
+The V7 template adds three fail-closed R7 guards; its coherent V1-tracker
+family passed two focused JVM tests for deposit reserve/source-lock and the
+burn reserve predicate. A fresh four-contract family combines tracker V2
+with the V7 reserve: its isolated JVM compiler test passed, its receipt is
+byte-identical to the selected public fixture, and the separately versioned
+TypeScript identity binding passed focused positive and direct negative tests.
+These are static source results, not a C74 cause or runtime authority. The
+exact four-contract V2/V7 R7 deposit/burn reduction and a versioned operational
+selector remain due. The current V2 route still selects the V1/V6 family;
+historical C74 callers stay untouched.
+
+C74 is consumed and permanently held; no successor campaign is selected. The
+purpose-specific deposit selector was locally promoted at
+`9e70f876a46999383f6fc975ce47d816ada5d235` after exact independent review and
+guarded promotion. It preserves genesis3 and binds one input, the amount and both
+construction fees through discovery, owned provenance and both packet branches.
+Its scoped direct, root, architecture, TypeScript and import closure remains
+valid; it establishes neither a historical campaign cause nor a successful deposit.
+
+Source09 preparation and the separately selected C74 invocation have now been
+consumed. C74 issued one canonical command and terminated with integer exit1.
+The reviewed public graph contains eleven selected files,10799 bytes, classified
+`execution_failure / root-or-cleanup / cycle-1 / deposit-funding`. The original
+process identity is absent. Source/startup phases are null, cleanup error count
+is zero and the post-failure identity check passed; operation completion, root
+cleanup and raw-cause publication remain false. Effects, custody disposal, fees,
+deposit success and internal cause remain unknown. The optional funding-substage
+parent was absent; this proves neither substage entry nor its absence. Detailed
+pins, bounded observations and independent review remain in the active handoff.
+
+No executable campaign successor follows from C74's public facts. The separate
+R7 source counterexample selects the bounded source correction above, without
+identifying C74's inner cause or granting runtime authority. A future campaign
+still requires a distinct operational selection and all fresh admission gates;
+do not infer it from the same coarse failure, missing optional detail or elapsed time.
+Closed source/operator preparation remains reusable in scope. Actual recovery
+still needs successful lifecycle capture, and operator acceptance needs a fresh
+external integration context and independent custody. Delivery remains open;
+no C75, package, Probe, admission or campaign is automatically selected.
 
 Native Hold initial-snapshot drainage was locally promoted at
 `65ee918235de19eb3f9d144574eee76e97826d7f`. Both snapshots and all six started raw
@@ -2192,13 +2220,15 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Reward inventory -> one deposit funding input | Close the demonstrated genesis-purpose mismatch with a separate one-input selector bound to the amount and both construction fees; retain genesis3, full-anchor equality and owned provenance | Six original consumer failures become green; isolated requirements/value/provenance and both root branches, existing root orchestration and exact named-import guards pass. Final independent candidate review and guarded local promotion remain gates; no historical cause, lifecycle authority or automatic successor campaign |
+| **Now** | Pooled-reserve R7 static family -> exact V2/V7 reduction | Retain the permanent C74 hold; close the reviewed static four-contract family and TypeScript identity binding, then select an exact V2/V7 R7 reducer and a separate versioned operational selector without changing historical callers | V6 compiled reserve accepted dense successor R7 while the next deposit builder refused it. V7 guards and a V1-tracker family passed two focused JVM tests. The new tracker-V2/V7 compiler test and public-receipt equality passed, as did focused TypeScript identity positives and direct negatives; independent source review is scoped to this static lot. The exact four-contract reduction and operational route remain open; no C74 cause, lifecycle or automatic campaign claim |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Separately select and admit one local synthetic campaign after a deciding checkpoint, exact local source identity, applicable checks/review and fresh runtime/source/output/custody/fee gates; apply guarded publication and due exact-head CI at public promotion | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns 24–73 remain consumed or held. C42 is incomplete/ambiguous without a
+Campaigns 24–74 remain consumed or held. C74's selected public failure graph is
+closed and supplies no retry, source-cause inference or successor selection.
+C42 is incomplete/ambiguous without a
 parent terminal artifact; C43–C51 failed once as recorded in Current Focus and
 the active handoff. None authorizes retry, resume or custody reuse. The earlier
 timing, tracker-phase and source-lock checkpoints are closed; the selected
@@ -2237,7 +2267,7 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Deposit-specific funding selection (source validated locally) | Select one mature reward input covering the same canonical amount and two construction fees used by each deposit packet; reject underfunding/dust, foreign provenance and held-anchor drift while preserving genesis3 | Six original exact-consumer failures become green. Direct selection/requirements/provenance41, root join31, root orchestration626 and architecture437 pass in distinct scopes; TypeScript/imports pass. Exact independent candidate review and guarded local promotion bind closure; no historical cause or packaged lifecycle claim |
+| Deposit-specific funding selection (locally promoted at9e70f876) | Select one mature reward input covering the same canonical amount and two construction fees used by each deposit packet; reject underfunding/dust, foreign provenance and held-anchor drift while preserving genesis3 | Six original exact-consumer failures became green. Direct selection/requirements/provenance41, root join31, root orchestration626 and architecture437 pass in distinct scopes; TypeScript/imports, exact independent review and guarded local promotion closed this source boundary. C74 subsequently failed at the public deposit-funding location; its suppressed cause does not reclassify that source evidence or establish packaged lifecycle success |
 | Native Hold initial-snapshot drainage (locally promoted at65ee9182) | Drain both snapshots and all six started raw reads before the failed Hold changes phase; retain the identical first observed error and original guards | Ten exact-production cases cover six isolated source/route faults, both temporal orders, validation failure with a pending peer and valid Hold. Nine original failures become green; full lifetime308, TypeScript, imports, exact independent review and guarded local promotion closed this source boundary; no historical cause or successful funding claim |
 | V2 reward-inventory scope drainage (locally promoted at1f8d80db) | Both started reward-delay lanes settle before either reconstruction scope closes; preserve the first observed error, successful values and all original limits | Nine exact-production cases and twenty direct discovery cases pass. Six original failure-path cases demonstrate premature scope closure, resumed reads and both temporal error orders; the valid twin and outer peer controls isolate the inner boundary. TypeScript, exact independent review and guarded local promotion passed; no historical cause or lifecycle claim |
 | Downstream held full-block funding anchor (locally promoted at48a86d12) | Root prior-confirmation revalidation and V2 discovery prove complete ancestry from mandatory best-full ID to the observed header tip; retain the held full anchor, original funding equality, scopes and budgets | Two extracted-production cases are RED then GREEN, including absent-full-ID refusal and the unchanged funding-equality refusal of a later retained BEFORE anchor. Exact isolated proof/IO/role/drift, legacy V1, affected-consumer closure, independent review and guarded promotion closed the source boundary; no C72 cause or end-to-end claim |
