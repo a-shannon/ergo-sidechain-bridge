@@ -61,10 +61,15 @@ A separate V3 genesis preparation/builder now consumes the process-owned V3
 family receipt, keeps the 596-byte family profile and 349-byte V4 runtime
 encoding, and rejects copied provenance and forged endowment arrays. Its
 53 focused tests include actual pinned JVM compilation; TypeScript, layered
-imports and independent exact-source review passed. The observed-genesis
-producer, operational selector and genuine node execution remain due. These results establish
-neither a C74 cause nor runtime authority. The current V2 route still selects
-the V1/V6 family; historical C74 callers stay untouched.
+imports and independent exact-source review passed. A separate versioned V3
+observed-genesis producer now binds process-owned family, history, discovery
+and target custody to the V7 reserve template. Its 8 focused tests include
+actual pinned JVM compilation and isolated V6-template, forged-receipt and
+custody negatives; TypeScript, layered imports and independent exact-source
+review passed. This remains source-only. The operational selector and genuine
+node execution remain due. These results establish neither a C74 cause nor
+runtime authority. The current V2 route still selects the V1/V6 family;
+historical C74 callers stay untouched.
 
 C74 is consumed and permanently held; no successor campaign is selected. The
 purpose-specific deposit selector was locally promoted at
