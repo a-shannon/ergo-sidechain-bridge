@@ -51,11 +51,16 @@ local source, and the promoted bytes passed the same focused JVM matrix. A
 separate source-only resolver now freezes the selected tracker V2,
 duplicate-prevention V1, source-lock V6 and pooled-reserve V7 contracts from
 the pinned public fixture. Its 17 focused tests, TypeScript check, import
-check and independent exact-source review passed. Process-owned JVM
-compilation, the versioned operational selector and genuine node execution
-remain due. These results establish neither a C74 cause nor runtime authority. The
-current V2 route still selects the V1/V6 family; historical C74 callers stay
-untouched.
+check and independent exact-source review passed. A separate versioned V3
+binder now compiles a process-owned tracker-V2/reserve-V7 family with the
+selected V7 template hash in its 596-byte profile and both predecessor IDs
+derived by the same JVM invocation. Its 16 focused tests include actual pinned
+JVM compilation and isolated provenance, source, lock and mutation refusals;
+TypeScript, layered imports and independent exact-source review passed.
+Versioned genesis preparation, an observed-genesis producer, the operational
+selector and genuine node execution remain due. These results establish
+neither a C74 cause nor runtime authority. The current V2 route still selects
+the V1/V6 family; historical C74 callers stay untouched.
 
 C74 is consumed and permanently held; no successor campaign is selected. The
 purpose-specific deposit selector was locally promoted at
