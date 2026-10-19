@@ -71,6 +71,15 @@ node execution remain due. These results establish neither a C74 cause nor
 runtime authority. The current V2 route still selects the V1/V6 family;
 historical C74 callers stay untouched.
 
+A new versioned V3 setup-check request now consumes the observed-genesis
+receipt and binds its family, V7 source, preparation and target custody before
+the setup check. Its 18 focused tests cover three unsigned issuances and
+isolated schema, role, identity, source and mutation refusals; TypeScript and
+layered imports pass, with independent exact-source review. The tests use a
+stubbed compiler provenance and node reads, so the actual compiler-to-request
+join, versioned checker/session/worker route and operational selector remain
+due. No C74 caller is changed and no new campaign is selected.
+
 C74 is consumed and permanently held; no successor campaign is selected. The
 purpose-specific deposit selector was locally promoted at
 `9e70f876a46999383f6fc975ce47d816ada5d235` after exact independent review and
