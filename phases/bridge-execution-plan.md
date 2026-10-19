@@ -127,6 +127,19 @@ This remains source-only: an operational selector and worker route, genuine node
 acceptance and a complete two-cycle remain due. C74 stays held, and no new
 campaign is selected.
 
+The retained V3 session and its facade now pass that exact unsigned packet to
+the existing local source-lock checker through a distinct V3 transition. The
+packet, setup batch and target are revalidated before checking, at each
+signing/node-check callback and after the check. The focused V3 file passes
+9/9, including rejection of a packet from another live session before signing
+or node checking, followed by success for the owning session. TypeScript,
+architecture, narrow V1/V2 checks and independent exact-diff review pass. A
+larger legacy V1 run was stopped after failures without a final diagnostic and
+is not a green or attributed regression result. This source-only check does
+not establish a transported lock, committed vault, node acceptance or campaign
+authority. Next, connect the same retained V3 packet to the existing local
+committed-vault checker in a separate, directly falsifiable batch.
+
 C74 is consumed and permanently held; no successor campaign is selected. The
 purpose-specific deposit selector was locally promoted at
 `9e70f876a46999383f6fc975ce47d816ada5d235` after exact independent review and

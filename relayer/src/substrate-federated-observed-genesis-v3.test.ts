@@ -95,8 +95,9 @@ let input: CompileObservedSubstrateFederatedGenesisV3Input;
 let wasm: any;
 let headers: Record<string, any>[];
 
-async function observedInputs(target: object, tipHeaderIdHex = '73'.repeat(32)) {
-  const tree = setup.signer.rewardInputErgoTrees.delay1;
+async function observedInputs(target: object, tipHeaderIdHex = '73'.repeat(32),
+  currentSetup = setup) {
+  const tree = currentSetup.signer.rewardInputErgoTrees.delay1;
   const boxes = (await unsigned.materializeUnsignedTransaction({
     inputs: [{ ...BASE_INPUT, extension: {} }], dataInputs: [],
     outputs: [50, 60, 70, 120].map(amount => ({
@@ -112,8 +113,8 @@ async function observedInputs(target: object, tipHeaderIdHex = '73'.repeat(32)) 
       tipHeight: 1000, tipHeaderIdHex }),
     sources: Object.freeze({ primaryNodeOrigin: 'http://127.0.0.1:9051',
       witnessNodeOrigin: 'http://127.0.0.1:9052' }),
-    signer: Object.freeze({ publicKeyHex: setup.signer.publicKeyHex,
-      p2pkErgoTreeHex: setup.signer.p2pkErgoTreeHex,
+    signer: Object.freeze({ publicKeyHex: currentSetup.signer.publicKeyHex,
+      p2pkErgoTreeHex: currentSetup.signer.p2pkErgoTreeHex,
       rewardDelayBlocks: 1 as const, rewardInputErgoTreeHex: tree }),
     genesisBoxIds: Object.freeze({ tracker: boxes[0]!.boxId,
       duplicatePrevention: boxes[1]!.boxId, pooledReserve: boxes[2]!.boxId }),
@@ -378,6 +379,53 @@ describe('observed FED genesis V3 compilation and retained execution', () => {
     try {
       await expect(buildNativePegInV3(pegInInput)).rejects.toThrow(/inactive|unproven/);
     } finally { observations.active = true; revoked.mockRestore(); }
+    const foreignSetup = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    const foreignSource = createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2({
+      ergoAdmissionThreshold: 1, ergoAdmissionPublicKeysHex: [foreignSetup.signer.publicKeyHex],
+    });
+    try {
+      const foreignObserved = await observedInputs(target, observations.tip, foreignSetup);
+      const foreignOwned = foreignObserved.ownedDiscovery as unknown as typeof input.ownedDiscovery;
+      for (const box of Object.values(foreignOwned.observation.genesisInputs)) {
+        observations.boxes.set(box.boxId, box);
+        const parsed = wasm.ErgoBox.from_json(JSON.stringify(box));
+        try {
+          observations.binary.set(box.boxId,
+            Buffer.from(parsed.sigma_serialize_bytes()).toString('hex'));
+        } finally { parsed.free(); }
+      }
+      const foreignInput: CompileObservedSubstrateFederatedGenesisV3Input = {
+        ...input, ...foreignObserved, setupSigner: foreignSetup.signer, sourceSession: foreignSource,
+      };
+      const previousOptions = process.env.NODE_OPTIONS;
+      if (ORIGINAL_NODE_OPTIONS === undefined) delete process.env.NODE_OPTIONS;
+      else process.env.NODE_OPTIONS = ORIGINAL_NODE_OPTIONS;
+      let foreignCompiled: Awaited<ReturnType<typeof compileObservedSubstrateFederatedGenesisV3>>;
+      try {
+        foreignCompiled = await compileObservedSubstrateFederatedGenesisV3(foreignInput);
+      } finally {
+        if (previousOptions === undefined) delete process.env.NODE_OPTIONS;
+        else process.env.NODE_OPTIONS = previousOptions;
+      }
+      const foreignBatch = await foreignSetup.runNativeGenesisRetainingSignerV3(foreignCompiled, target);
+      expect(helpers.ncheck).toHaveBeenCalledTimes(6);
+      const signatures = vi.spyOn(wasm.Wallet.prototype, 'sign_transaction');
+      try {
+        await expect(foreignSetup.checkNativePegInSourceLockRetainingSignerV3(pegInPacket, target))
+          .rejects.toThrow(/native FED V3 peg-in packet lacks exact process provenance/);
+        expect(signatures).not.toHaveBeenCalled();
+        expect(helpers.ncheck).toHaveBeenCalledTimes(6);
+      } finally { signatures.mockRestore(); }
+      expect(() => assertNativePegInV3(pegInPacket, foreignBatch, target))
+        .toThrow(/native FED V3 peg-in packet lacks exact process provenance/);
+      expect(() => assertNativePegInV3(pegInPacket, batch, target)).not.toThrow();
+    } finally { foreignSource.dispose(); foreignSetup.dispose(); }
+    const sourceLock = await setup.checkNativePegInSourceLockRetainingSignerV3(pegInPacket, target);
+    expect(sourceLock.unsignedTransactionIdHex).toBe(pegInPacket.transactions.sourceLockCreation.txId);
+    expect(sourceLock.sourceFundingBoxIdHex).toBe(pegInPacket.boxes.sourceFundingInput.boxId);
+    expect(sourceLock.boundaries.broadcastAuthorityEstablished).toBe(false);
+    expect(helpers.ncheck).toHaveBeenCalledTimes(7);
+    expect(() => assertNativePegInV3(pegInPacket, batch, target)).not.toThrow();
     const root = mkdtempSync(join(tmpdir(), 'e2s-v3-native-issuance-'));
     const markers = join(root, 'markers');
     mkdirSync(markers);
@@ -438,7 +486,7 @@ describe('observed FED genesis V3 compilation and retained execution', () => {
       rmSync(root, { recursive: true, force: true });
     }
     await expect(setup.runNativeGenesisRetainingSignerV3(compiled, target)).rejects.toThrow();
-    expect(helpers.ncheck).toHaveBeenCalledTimes(3);
+    expect(helpers.ncheck).toHaveBeenCalledTimes(7);
     expect(() => assertSubstrateFederatedNativeGenesisSetupReadCustodyV3(batch, target))
       .toThrow();
     expect(() => assertNativePegInV3(pegInPacket, batch, target)).toThrow();

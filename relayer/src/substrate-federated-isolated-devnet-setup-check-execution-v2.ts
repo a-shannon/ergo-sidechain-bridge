@@ -47,6 +47,8 @@ import {
   assertSubstrateFederatedPooledReserveDepositV2Packet,
   type SubstrateFederatedPooledReserveDepositV2Packet,
 } from './substrate-federated-pooled-reserve-deposit-v2.js';
+import type { SubstrateFederatedPooledReserveDepositV3Packet }
+  from './substrate-federated-pooled-reserve-deposit-v3.js';
 import { assertSubstrateFederatedTrackerV2ExternalFeeTransaction,
   type SubstrateFederatedTrackerV2ExternalFeeTransaction }
   from './substrate-federated-tracker-v2-external-fee.js';
@@ -706,6 +708,10 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
     compiled: Readonly<ObservedSubstrateFederatedGenesisV3>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   ) => Promise<Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV3>>;
+  readonly checkNativePegInSourceLockRetainingSignerV3: (
+    packet: Readonly<SubstrateFederatedPooledReserveDepositV3Packet>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt>>;
   readonly checkNativePegInSourceLockRetainingSignerV1: (
     packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
@@ -1546,6 +1552,8 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
     let continuationMiningAuthority: Readonly<SubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1> | undefined;
     let retainedPegInPacket: Readonly<SubstrateFederatedPooledReserveDepositV2Packet> | undefined;
     let nativeBatch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1> | undefined;
+    let nativeV3Batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV3> | undefined;
+    let retainedNativeV3PegInPacket: Readonly<SubstrateFederatedPooledReserveDepositV3Packet> | undefined;
     let retainedContinuationWithdrawal: Readonly<SubstrateFederatedIsolatedDevnetWithdrawalV2Check> | undefined;
     let state:
       | 'open'
@@ -1553,6 +1561,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       | 'setup-complete'
       | 'native-setup-complete'
       | 'native-v3-setup-complete'
+      | 'native-v3-source-lock-checked'
       | 'native-source-lock-checked'
       | 'native-vault-checked'
       | 'native-withdrawal-fee-checked'
@@ -1590,7 +1599,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
     };
     const assertNativeV3SessionActive = (): void => {
       if (!nativeV3RouteSelected || terminalInvalidationRequested || nativeCancellation.signal.aborted
-        || !['running', 'native-v3-setup-complete'].includes(state)) {
+        || !['running', 'native-v3-setup-complete', 'native-v3-source-lock-checked'].includes(state)) {
         throw new Error('native FED V3 setup session is inactive');
       }
     };
@@ -1650,6 +1659,8 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       retainedContinuationTracker = undefined;
       retainedPegInPacket = undefined;
       nativeBatch = undefined;
+      nativeV3Batch = undefined;
+      retainedNativeV3PegInPacket = undefined;
       retainedContinuationWithdrawal = undefined;
       mnemonic = '';
       state = 'closed';
@@ -1658,6 +1669,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       expectedState:
         | 'open'
         | 'native-setup-complete'
+        | 'native-v3-setup-complete'
         | 'native-source-lock-checked'
         | 'native-vault-checked'
         | 'native-withdrawal-fee-checked'
@@ -1683,6 +1695,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         | 'setup-complete'
         | 'native-setup-complete'
         | 'native-v3-setup-complete'
+        | 'native-v3-source-lock-checked'
         | 'native-source-lock-checked'
         | 'native-vault-checked'
         | 'native-withdrawal-fee-checked'
@@ -2584,9 +2597,38 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         const receipt = await runSubstrateFederatedNativeGenesisSetupCheckV3(
           request, activeMnemonic, nativeCancellation.signal);
         assertNativeV3SessionActive();
-        return promoteNativeSetupExecutionBatchV3({ compiled, target, binding, request, receipt,
+        nativeV3Batch = promoteNativeSetupExecutionBatchV3({ compiled, target, binding, request, receipt,
           assertSessionActive: assertNativeV3SessionActive });
+        return nativeV3Batch;
       }, 'native-v3-setup-complete'),
+      checkNativePegInSourceLockRetainingSignerV3: async (
+        packet: Readonly<SubstrateFederatedPooledReserveDepositV3Packet>,
+        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      ) => consume('native-v3-setup-complete', async activeMnemonic => {
+        const { assertSubstrateFederatedNativeGenesisPegInPacketV3 } =
+          await import('./substrate-federated-isolated-devnet-peg-in-candidate-v3.js');
+        const ownBatch = nativeV3Batch;
+        if (ownBatch === undefined) throw new Error('native FED V3 source-lock setup custody is absent');
+        const assertPacketCustody = (): void => {
+          assertNativeV3SessionActive();
+          if (nativeV3Batch !== ownBatch) throw new Error('native FED V3 source-lock setup custody changed');
+          assertSubstrateFederatedNativeGenesisPegInPacketV3(packet, ownBatch, target);
+        };
+        assertPacketCustody();
+        retainedNativeV3PegInPacket = packet;
+        const assertActive = (): void => {
+          assertPacketCustody();
+          if (retainedNativeV3PegInPacket !== packet) {
+            throw new Error('native FED V3 source-lock packet custody changed');
+          }
+        };
+        const checked = await runPegInSourceLockCheck({
+          sourceFundingBoxIdHex: packet.boxes.sourceFundingInput.boxId,
+          unsignedTransaction: packet.transactions.sourceLockCreation,
+        }, target, signer, activeMnemonic, assertActive);
+        assertActive();
+        return checked;
+      }, 'native-v3-source-lock-checked'),
       checkNativePegInSourceLockRetainingSignerV1: async (
         packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
         target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
