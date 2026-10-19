@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   assertCandidateV2: vi.fn(),
   assertNativePacket: vi.fn(),
   assertNativeReadCustody: vi.fn(),
+  assertNativePacketV3: vi.fn(),
+  assertNativeReadCustodyV3: vi.fn(),
   assertConfirmation: vi.fn(),
   reobserveConfirmation: vi.fn(),
   assertTarget: vi.fn(),
@@ -44,6 +46,10 @@ vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v2.js', () => ({
   assertSubstrateFederatedNativeGenesisPegInPacketV1: mocks.assertNativePacket,
   assertSubstrateFederatedNativeGenesisPegInReadCustodyV1: mocks.assertNativeReadCustody,
 }));
+vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v3.js', () => ({
+  assertSubstrateFederatedNativeGenesisPegInPacketV3: mocks.assertNativePacketV3,
+  assertSubstrateFederatedNativeGenesisPegInReadCustodyV3: mocks.assertNativeReadCustodyV3,
+}));
 vi.mock('./substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js', () => ({
   assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1:
     mocks.assertConfirmation,
@@ -64,6 +70,8 @@ import {
   assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV2,
   observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV1,
   assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1,
+  observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV3,
+  assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV3,
 } from './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js';
 import {
   buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
@@ -860,6 +868,202 @@ describe('native committed-vault observation (mocked packet custody, box codec a
       expect(mocks.reobserveConfirmation).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+describe('native V3 committed-vault observation (mocked V3 packet and read custody)', () => {
+  const batchV1 = Object.freeze({ ...BATCH, role: 'native-v1', targetBinding: BINDING });
+  const batchV3 = Object.freeze({ ...BATCH, role: 'native-v3', targetBinding: BINDING });
+  const packetV3A = Object.freeze({ ...PACKET, formatVersion: 3 });
+  const packetV3B = Object.freeze({ ...PACKET, formatVersion: 3 });
+  const inputV1 = () => ({ target: TARGET as never, batch: batchV1 as never,
+    packet: PACKET as never, confirmation: REFRESHED_CONFIRMATION as never });
+  const inputV3 = (packet: typeof packetV3A = packetV3A) => ({
+    target: TARGET as never, batch: batchV3 as never,
+    packet: packet as never, confirmation: REFRESHED_CONFIRMATION as never,
+  });
+  let custodyActive = true;
+  let issuedPackets: WeakSet<object>;
+
+  const assertV3ReadCustody = (packet: unknown, batch: unknown, target: unknown) => {
+    if (!custodyActive) throw new Error('V3 custody revoked');
+    if (typeof packet !== 'object' || packet === null || !issuedPackets.has(packet)
+      || batch !== batchV3 || target !== TARGET) {
+      throw new Error('V3 packet provenance missing');
+    }
+    return packet;
+  };
+
+  beforeEach(() => {
+    custodyActive = true;
+    issuedPackets = new WeakSet([packetV3A, packetV3B]);
+    mocks.assertNativeReadCustodyV3.mockImplementation(assertV3ReadCustody);
+    mocks.assertNativePacketV3.mockImplementation((packet, batch, target) => {
+      assertV3ReadCustody(packet, batch, target);
+      const current = mocks.assertTarget(target);
+      if (current.processBindingDigestHex !== BINDING.processBindingDigestHex
+        || current.executionTargetIdentityDigestHex !== BINDING.executionTargetIdentityDigestHex) {
+        throw new Error('V3 packet target provenance changed');
+      }
+      return packet;
+    });
+    const assertV1ReadCustody = (packet: unknown, batch: unknown, target: unknown) => {
+      if (packet !== PACKET || batch !== batchV1 || target !== TARGET) {
+        throw new Error('V1 packet provenance missing');
+      }
+      return PACKET;
+    };
+    mocks.assertNativeReadCustody.mockImplementation(assertV1ReadCustody);
+    mocks.assertNativePacket.mockImplementation((packet, batch, target) => {
+      assertV1ReadCustody(packet, batch, target);
+      mocks.assertTarget(target);
+      return PACKET;
+    });
+    mocks.assertConfirmation.mockImplementation((artifact, identity, genesis, txId, confirmation) => {
+      if (artifact !== REFRESHED_CONFIRMATION.observerArtifact
+        || identity !== BINDING.executionTargetIdentityDigestHex || genesis !== GENESIS_ID
+        || txId !== TX_ID || confirmation.confirmationHeight !== 201
+        || confirmation.confirmationHeaderIdHex !== REFRESHED_CONFIRMATION_HEADER_ID) {
+        throw new Error('confirmation provenance missing');
+      }
+    });
+    mocks.reobserveConfirmation.mockImplementation(async request => {
+      if (request.artifact !== request.priorConfirmation.observerArtifact
+        || request.priorConfirmation.confirmationHeaderIdHex !== REFRESHED_CONFIRMATION_HEADER_ID
+        || request.expectedReconciliationIdentityDigestHex !== BINDING.executionTargetIdentityDigestHex
+        || request.expectedTargetGenesisHeaderIdHex !== GENESIS_ID
+        || request.expectedTxId !== TX_ID) {
+        throw new Error('confirmation reobservation binding changed');
+      }
+      return REFRESHED_CONFIRMATION;
+    });
+    mocks.normalizeBox.mockImplementation(async value => value);
+  });
+
+  it('keeps V1 public receipt bytes, digest and non-authorizing flags for V3', async () => {
+    const v3 = await observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV3(inputV3());
+    const v1 = await observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV1(inputV1());
+    expect(v3).toEqual(v1);
+    expect(v3.observationDigestHex).toBe(v1.observationDigestHex);
+    expect(v3.boundaries).toMatchObject({ ergoPowAuthenticated: false,
+      mintAuthorized: false, fundsAuthorityEstablished: false, gate5Closed: false });
+    expect(assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV3(
+      v3, TARGET as never, batchV3 as never, packetV3A as never)).toBe(packetV3A);
+    expect(mocks.assertNativePacketV3).toHaveBeenCalled();
+  });
+
+  it('keeps native V1 and V3 profiles separate even when public receipts match', async () => {
+    // Both mocked producers accept the exact same tuple; only the private profile differs.
+    mocks.assertNativeReadCustody.mockImplementation(assertV3ReadCustody);
+    mocks.assertNativePacket.mockImplementation((packet, batch, target) => {
+      assertV3ReadCustody(packet, batch, target);
+      mocks.assertTarget(target);
+      return packet;
+    });
+    const shared = inputV3();
+    const v1 = await observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV1(shared as never);
+    const v3 = await observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV3(shared);
+    expect(v3).toEqual(v1);
+    expect(assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1(
+      v1, TARGET as never, batchV3 as never, packetV3A as never)).toBe(packetV3A);
+    expect(assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV3(
+      v3, TARGET as never, batchV3 as never, packetV3A as never)).toBe(packetV3A);
+    expect(() => assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1(
+      v3, TARGET as never, batchV3 as never, packetV3A as never)).toThrow(/provenance/);
+    expect(() => assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV3(
+      v1, TARGET as never, batchV3 as never, packetV3A as never)).toThrow(/provenance/);
+  });
+
+  it('binds two authentic V3 packets with the same transaction to separate observations', async () => {
+    expect(packetV3A).not.toBe(packetV3B);
+    expect(packetV3A.transactions.reserveTransition.txId).toBe(packetV3B.transactions.reserveTransition.txId);
+    const first = await observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV3(inputV3(packetV3A));
+    const second = await observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV3(inputV3(packetV3B));
+    expect(first).toEqual(second);
+    expect(assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV3(
+      first, TARGET as never, batchV3 as never, packetV3A as never)).toBe(packetV3A);
+    expect(assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV3(
+      second, TARGET as never, batchV3 as never, packetV3B as never)).toBe(packetV3B);
+    expect(() => assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV3(
+      first, TARGET as never, batchV3 as never, packetV3B as never)).toThrow(/provenance/);
+    expect(() => assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV3(
+      second, TARGET as never, batchV3 as never, packetV3A as never)).toThrow(/provenance/);
+  });
+
+  it.each(['packet', 'batch', 'target'] as const)(
+    'rejects a copied V3 %s before any node read', async field => {
+      const supplied = inputV3();
+      if (field === 'packet') supplied.packet = { ...packetV3A } as never;
+      if (field === 'batch') supplied.batch = { ...batchV3 } as never;
+      if (field === 'target') supplied.target = { ...TARGET } as never;
+      await expect(observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV3(supplied))
+        .rejects.toThrow(/provenance/);
+      expect(mocks.getBestHeader).not.toHaveBeenCalled();
+      expect(mocks.reobserveConfirmation).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['packet', 'batch', 'target', 'observation'] as const)(
+    'rejects a copied V3 %s at receipt consumption', async field => {
+      const observation = await observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV3(inputV3());
+      expect(() => assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV3(
+        field === 'observation' ? { ...observation } : observation,
+        (field === 'target' ? { ...TARGET } : TARGET) as never,
+        (field === 'batch' ? { ...batchV3 } : batchV3) as never,
+        (field === 'packet' ? { ...packetV3A } : packetV3A) as never)).toThrow(/provenance/);
+    },
+  );
+
+  it.each(['native', 'generic'] as const)(
+    'rejects V3 custody revoked at %s receipt consumption', async consumer => {
+      const observation = await observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV3(inputV3());
+      custodyActive = false;
+      expect(() => consumer === 'native'
+        ? assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV3(
+          observation, TARGET as never, batchV3 as never, packetV3A as never)
+        : assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1(
+          observation, TARGET as never)).toThrow(/V3 custody revoked/);
+    },
+  );
+
+  it.each(['confirmation', 'tip', 'box', 'normalization', 'header'] as const)(
+    'rejects V3 custody revoked during asynchronous %s without retry', async phase => {
+      const revoke = () => { custodyActive = false; };
+      if (phase === 'confirmation') mocks.reobserveConfirmation.mockImplementationOnce(async () => {
+        revoke(); return REFRESHED_CONFIRMATION;
+      });
+      if (phase === 'tip') mocks.getBestHeader.mockImplementationOnce(async () => {
+        revoke(); return { height: 211, id: OBSERVED_TIP_ID };
+      });
+      if (phase === 'box') mocks.getBox.mockImplementationOnce(async () => {
+        revoke(); return null;
+      });
+      if (phase === 'normalization') mocks.normalizeBox.mockImplementationOnce(async value => {
+        revoke(); return value;
+      });
+      if (phase === 'header') mocks.getBlockHeaderById.mockImplementationOnce(async (_origin, id) => {
+        revoke(); return headerFixture().get(id);
+      });
+      await expect(observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV3(inputV3()))
+        .rejects.toThrow(/V3 custody revoked/);
+      expect(mocks.reobserveConfirmation).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('rejects V3 peer-tip disagreement without accepting an output snapshot', async () => {
+    mocks.getBestHeader.mockImplementation((origin: string) => ({
+      height: 211, id: origin === PRIMARY ? OBSERVED_TIP_ID : hex('1e'),
+    }));
+    await expect(observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV3(inputV3()))
+      .rejects.toThrow();
+    expect(mocks.reobserveConfirmation).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a V3 tip beyond the bounded finality window', async () => {
+    mocks.getBestHeader.mockReturnValue({ height: 276, id: hex('ab') });
+    await expect(observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV3(inputV3()))
+      .rejects.toThrow(/bounded tip window/);
+    expect(mocks.reobserveConfirmation).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('isolated committed-vault V2 candidate boundary (mocked provenance and node fields)', () => {

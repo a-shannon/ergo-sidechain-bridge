@@ -26,13 +26,20 @@ import {
   assertSubstrateFederatedNativeGenesisPegInReadCustodyV1,
   type SubstrateFederatedIsolatedDevnetPegInCandidateV2,
 } from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
+import {
+  assertSubstrateFederatedNativeGenesisPegInPacketV3,
+  assertSubstrateFederatedNativeGenesisPegInReadCustodyV3,
+} from './substrate-federated-isolated-devnet-peg-in-candidate-v3.js';
 import type {
   SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
   SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
   SubstrateFederatedNativeGenesisSetupExecutionBatchV1,
+  SubstrateFederatedNativeGenesisSetupExecutionBatchV3,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import type { SubstrateFederatedPooledReserveDepositV2Packet }
   from './substrate-federated-pooled-reserve-deposit-v2.js';
+import type { SubstrateFederatedPooledReserveDepositV3Packet }
+  from './substrate-federated-pooled-reserve-deposit-v3.js';
 import {
   normalizeEip12Box,
   type Eip12Box,
@@ -103,11 +110,13 @@ const OBSERVATIONS = new WeakMap<
     candidate?: object;
     packet: DepositPacket;
     assertNativePacket?: () => DepositPacket;
+    nativeProfile?: 'v1' | 'v3';
   }>
 >();
 
 type DepositPacket = ReturnType<typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV1>
-  | ReturnType<typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV2>;
+  | ReturnType<typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV2>
+  | ReturnType<typeof assertSubstrateFederatedNativeGenesisPegInPacketV3>;
 
 export async function observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1(
   input: Readonly<{
@@ -334,7 +343,11 @@ function retainObservation(
     confirmationHeight: number; confirmationHeaderIdHex: string;
   },
   assertNativePacket?: () => DepositPacket,
+  nativeProfile?: 'v1' | 'v3',
 ): Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1> {
+  if ((assertNativePacket !== undefined) !== (nativeProfile !== undefined)) {
+    throw new Error('native committed-vault output profile and custody differ');
+  }
   const expectedTxId = packet.transactions.reserveTransition.txId;
   const body = Object.freeze({
     schema:
@@ -396,6 +409,7 @@ function retainObservation(
     candidate: input.candidate,
     packet,
     ...(assertNativePacket ? { assertNativePacket } : {}),
+    ...(nativeProfile === undefined ? {} : { nativeProfile }),
   }));
   return observation;
 }
@@ -430,8 +444,41 @@ export async function observeSubstrateFederatedNativeGenesisPegInCommittedVaultO
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>> {
   const retained = Object.freeze({ ...input });
   const { target, batch, packet } = retained;
+  return observeNativeOutputs(retained, () =>
+    assertSubstrateFederatedNativeGenesisPegInPacketV1(packet, batch, target), () =>
+    assertSubstrateFederatedNativeGenesisPegInReadCustodyV1(packet, batch, target), 'v1');
+}
+
+export async function observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV3(
+  input: Readonly<{
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+    batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV3>;
+    packet: Readonly<SubstrateFederatedPooledReserveDepositV3Packet>;
+    confirmation: Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>;
+  }>,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>> {
+  const retained = Object.freeze({ ...input });
+  const { target, batch, packet } = retained;
+  return observeNativeOutputs(retained, () =>
+    assertSubstrateFederatedNativeGenesisPegInPacketV3(packet, batch, target), () =>
+    assertSubstrateFederatedNativeGenesisPegInReadCustodyV3(packet, batch, target), 'v3');
+}
+
+async function observeNativeOutputs(
+  retained: Readonly<{
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+    batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1
+      | SubstrateFederatedNativeGenesisSetupExecutionBatchV3>;
+    packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet
+      | SubstrateFederatedPooledReserveDepositV3Packet>;
+    confirmation: Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>;
+  }>,
+  assertPacket: () => DepositPacket,
+  assertRetainedReadCustody: () => DepositPacket,
+  nativeProfile: 'v1' | 'v3',
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>> {
+  const { target, batch, packet } = retained;
   const binding = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
-  const assertPacket = () => assertSubstrateFederatedNativeGenesisPegInPacketV1(packet, batch, target);
   const assertActive = () => {
     const current = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
     if (current.processBindingDigestHex !== binding.processBindingDigestHex
@@ -441,7 +488,7 @@ export async function observeSubstrateFederatedNativeGenesisPegInCommittedVaultO
     }
   };
   const assertReadCustody = () => {
-    if (assertSubstrateFederatedNativeGenesisPegInReadCustodyV1(packet, batch, target) !== packet) {
+    if (assertRetainedReadCustody() !== packet) {
       throw new Error('native committed-vault read custody changed');
     }
   };
@@ -557,7 +604,7 @@ export async function observeSubstrateFederatedNativeGenesisPegInCommittedVaultO
       }
       assertActive();
       return retainObservation(retained, packet, binding, binding,
-        primaryState, witnessState, latest, assertPacket);
+        primaryState, witnessState, latest, assertPacket, nativeProfile);
     } catch (error) {
       assertActive();
       if (!(error instanceof NativeTipAdvance)) throw error;
@@ -574,8 +621,24 @@ export function assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputOb
 ): Readonly<SubstrateFederatedPooledReserveDepositV2Packet> {
   assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1(observation, target);
   const material = OBSERVATIONS.get(observation);
-  if (material?.assertNativePacket === undefined || material.batch !== batch || material.packet !== packet) {
+  if (material?.nativeProfile !== 'v1' || material.assertNativePacket === undefined
+    || material.batch !== batch || material.packet !== packet) {
     throw new Error('native committed-vault observation lacks exact packet and batch provenance');
+  }
+  return packet;
+}
+
+export function assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV3(
+  observation: Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV3>,
+  packet: Readonly<SubstrateFederatedPooledReserveDepositV3Packet>,
+): Readonly<SubstrateFederatedPooledReserveDepositV3Packet> {
+  assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1(observation, target);
+  const material = OBSERVATIONS.get(observation);
+  if (material?.nativeProfile !== 'v3' || material.assertNativePacket === undefined
+    || material.batch !== batch || material.packet !== packet) {
+    throw new Error('native V3 committed-vault observation lacks exact packet and batch provenance');
   }
   return packet;
 }

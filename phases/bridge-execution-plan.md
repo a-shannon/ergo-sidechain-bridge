@@ -199,6 +199,16 @@ authorizer join with a real committed-vault output observation, an owned
 committed-vault root and worker remain due. These source-only checks do not
 establish transport, node acceptance or a complete two-cycle.
 
+The V3 committed-vault output observer now keeps the exact V3 packet and setup
+read custody through the existing three-window, dual-node output read. A private
+profile tag prevents V1 and V3 native assertions from exchanging observations;
+the public V1-format body, digest and non-authorizing flags are unchanged.
+Focused observer tests pass 145/145, TypeScript and architecture pass, and
+independent exact two-file review found no blocking defect. The new tests mock
+packet provenance and node reads. A positive join with the real V3 producer,
+committed-vault root and worker remains open; no actual deposit or campaign
+authority follows from this source-only result.
+
 C74 is consumed and permanently held; no successor campaign is selected. The
 purpose-specific deposit selector was locally promoted at
 `9e70f876a46999383f6fc975ce47d816ada5d235` after exact independent review and
