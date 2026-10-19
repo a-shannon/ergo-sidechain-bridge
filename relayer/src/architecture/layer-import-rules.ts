@@ -2307,6 +2307,9 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
       ['getSubstrateFederatedNativeGenesisReadCompilerInputV1', new Set([
         'substrate-federated-isolated-devnet-peg-in-candidate-v2.ts',
       ])] as const,
+      ['getSubstrateFederatedNativeGenesisSetupCompilerInputV3', new Set([
+        'substrate-federated-isolated-devnet-peg-in-candidate-v3.ts',
+      ])] as const,
       ['getSubstrateFederatedNativeGenesisRetainedAttestationContextV1', new Set([
         'substrate-federated-isolated-devnet-source-attestation-session-v1.ts',
       ])] as const,

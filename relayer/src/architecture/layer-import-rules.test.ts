@@ -1500,6 +1500,7 @@ describe('layer import rules', () => {
     ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'assertSubstrateFederatedIsolatedDevnetWithdrawalV2Check', 'substrate-federated-isolated-devnet-withdrawal-v2-lifecycle'],
     ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'assertSubstrateFederatedIsolatedDevnetWithdrawalV2Check', 'substrate-federated-isolated-devnet-peg-in-candidate-v2'],
     ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'getSubstrateFederatedNativeGenesisReadCompilerInputV1', 'substrate-federated-isolated-devnet-peg-in-candidate-v2'],
+    ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'getSubstrateFederatedNativeGenesisSetupCompilerInputV3', 'substrate-federated-isolated-devnet-peg-in-candidate-v3'],
     ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'getSubstrateFederatedNativeGenesisRetainedAttestationContextV1', 'substrate-federated-isolated-devnet-source-attestation-session-v1'],
     ['substrate-federated-isolated-devnet-peg-in-candidate-v2', 'getSubstrateFederatedNativeGenesisPegInAttestationProvenanceV1', 'substrate-federated-isolated-devnet-source-attestation-session-v1'],
     ['substrate-federated-isolated-devnet-withdrawal-v2-lifecycle', 'reobserveSubstrateFederatedIsolatedDevnetConfirmedWithdrawalV2', 'substrate-federated-isolated-devnet-peg-in-candidate-v2'],
@@ -1509,13 +1510,29 @@ describe('layer import rules', () => {
     ['substrate-federated-isolated-devnet-ergo-node-process-v1', 'assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2', 'substrate-federated-isolated-devnet-setup-check-execution-v2'],
     ['substrate-federated-isolated-devnet-ergo-node-process-v1', 'assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2', 'substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle'],
     ['substrate-federated-isolated-devnet-ergo-node-process-v1', 'assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2', 'substrate-federated-isolated-devnet-setup-check-execution-v2'],
-  ])('keeps the V2 admission capability %s#%s in its concrete owner', (module, symbol, owner) => {
+  ])('keeps the V2/V3 admission capability %s#%s in its concrete owner', (module, symbol, owner) => {
     const source = `import { ${symbol} } from './${module}.js'; ${symbol}();`;
     const producer = { [`${module}.ts`]: `export const ${symbol} = () => {};` };
     expect(inspect({ ...producer, [`${owner}.ts`]: source })).toEqual([]);
     expect(inspect({ ...producer, 'other-admission-caller.ts': source }).map(item => item.message)).toEqual([
       `exclusive authority import has the wrong owner: ./${module}.js#${symbol}`,
     ]);
+  });
+
+  it('keeps the V3 setup compiler getter as a named, unaliased import', () => {
+    const module = 'substrate-federated-isolated-devnet-setup-check-execution-v2';
+    const owner = 'substrate-federated-isolated-devnet-peg-in-candidate-v3.ts';
+    const symbol = 'getSubstrateFederatedNativeGenesisSetupCompilerInputV3';
+    const specifier = `./${module}.js`;
+    const producer = { [`${module}.ts`]: `export const ${symbol} = () => {};` };
+    for (const [source, error] of [
+      [`import { ${symbol} as compiler } from '${specifier}'; compiler();`,
+        `exclusive authority import must not be aliased: ${specifier}#${symbol}`],
+      [`import * as setup from '${specifier}'; setup.${symbol}();`,
+        `exclusive authority module must use named runtime imports: ${specifier}`],
+    ] as const) {
+      expect(inspect({ ...producer, [owner]: source }).map(item => item.message)).toContain(error);
+    }
   });
 
   it('preserves only the exact named dynamic setup-to-packet continuation check', () => {

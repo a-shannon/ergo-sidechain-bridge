@@ -63,6 +63,11 @@ import { assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1,
 import { createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2 }
   from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
 import { buildSubstrateFederatedGenesisV3 } from './substrate-federated-runtime-genesis-v3.js';
+import { decodeSubstrateFederatedSettlementFamilyV1Profile }
+  from './substrate-federated-settlement-family-v1.js';
+import { buildSubstrateFederatedNativeGenesisPegInPacketV3 as buildNativePegInV3,
+  assertSubstrateFederatedNativeGenesisPegInPacketV3 as assertNativePegInV3 }
+  from './substrate-federated-isolated-devnet-peg-in-candidate-v3.js';
 import { buildBridgeValidityTrackerCanonicalHeaderContextV1 }
   from './bridge-validity-tracker-header-context-v1.js';
 import * as helpers from './ergo-helpers.js';
@@ -290,6 +295,89 @@ describe('observed FED genesis V3 compilation and retained execution', () => {
       batch, { ...target })).toThrow(/process provenance/);
     expect(() => assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(
       batch as never, target)).toThrow(/process provenance/);
+    const funding = (await unsigned.materializeUnsignedTransaction({
+      inputs: [{ ...BASE_INPUT, extension: {} }],
+      dataInputs: [],
+      outputs: [
+        { value: '20000000', ergoTree: setup.signer.p2pkErgoTreeHex, creationHeight: 1001 },
+        { value: '280000000', ergoTree: setup.signer.p2pkErgoTreeHex, creationHeight: 1001 },
+      ],
+    }, 'V3 distinct deposit funding fixture')).outputs[0]!;
+    const familyProfile = decodeSubstrateFederatedSettlementFamilyV1Profile(
+      compiled.familyReceipt.profile);
+    const pegInInput = {
+      batch, target, sourceFundingInput: funding,
+      sourceIntent: {
+        formatVersion: 2 as const, sourceNetworkIdHex: familyProfile.sourceNetworkIdHex,
+        sidechainIdHex: familyProfile.sidechainIdHex,
+        bridgeAddressHex: familyProfile.bridgeAddressHex,
+        tokenAddressHex: familyProfile.tokenAddressHex,
+        settlementProfileIdHex: familyProfile.settlementProfileIdHex,
+        admissionProfileIdHex: compiled.familyReceipt.profile.familyIdHex,
+        sourceAssetIdHex: familyProfile.settlementAssetIdHex,
+        amountNanoErg: '10000000', recipientAddressHex: '31'.repeat(20),
+      },
+      depositorErgoTreeHex: setup.signer.p2pkErgoTreeHex,
+      creationHeights: { currentErgoHeight: 1001, sourceLockCreation: 1001,
+        reserveTransition: 1001 },
+    } satisfies Parameters<typeof buildNativePegInV3>[0];
+    await expect(buildNativePegInV3({ ...pegInInput, batch: { ...batch } } as never))
+      .rejects.toThrow(/process provenance/);
+    await expect(buildNativePegInV3({ ...pegInInput, target: { ...target } } as never))
+      .rejects.toThrow(/process provenance/);
+    const pegInPacket = await buildNativePegInV3(pegInInput);
+    expect(pegInPacket.schema).toBe('e2s.substrate-federated-pooled-reserve-deposit.v3');
+    expect(pegInPacket.boxes.reservePredecessor.boxId)
+      .toBe(batch.request.orderedIssuances[2]!.predictedStateOutput.boxIdHex);
+    expect(pegInPacket.invariants.exactFederatedFamilyBound).toBe(true);
+    expect(assertNativePegInV3(pegInPacket, batch, target)).toBe(pegInPacket);
+    expect(() => assertNativePegInV3({ ...pegInPacket }, batch, target))
+      .toThrow(/process provenance/);
+    expect(() => assertNativePegInV3(pegInPacket, { ...batch }, target))
+      .toThrow(/process provenance/);
+    expect(() => assertNativePegInV3(pegInPacket, batch, { ...target }))
+      .toThrow(/process provenance/);
+    const materialize = unsigned.materializeUnsignedTransaction;
+    const mutableFunding = structuredClone(funding);
+    const mutation = vi.spyOn(unsigned, 'materializeUnsignedTransaction')
+      .mockImplementationOnce(async (tx, label) => {
+        const value = await materialize(tx, label);
+        Object.assign(mutableFunding, { value: '21000000' });
+        return value;
+      });
+    try {
+      const captured = await buildNativePegInV3({ ...pegInInput,
+        sourceFundingInput: mutableFunding });
+      expect(captured.boxes.sourceFundingInput.value).toBe('20000000');
+    } finally { mutation.mockRestore(); }
+    const prediction = vi.spyOn(unsigned, 'materializeUnsignedTransaction')
+      .mockImplementationOnce(async (tx, label) => {
+        const value = await materialize(tx, label);
+        return { ...value, txId: 'ff'.repeat(32) };
+      });
+    try {
+      await expect(buildNativePegInV3(pegInInput)).rejects.toThrow(/prediction differs/);
+    } finally { prediction.mockRestore(); }
+    const outputDrift = vi.spyOn(unsigned, 'materializeUnsignedTransaction')
+      .mockImplementationOnce(async (tx, label) => {
+        const value = await materialize(tx, label);
+        return { ...value, outputs: [
+          { ...value.outputs[0]!, value: '1' }, ...value.outputs.slice(1),
+        ] };
+      });
+    try {
+      await expect(buildNativePegInV3(pegInInput)).rejects.toThrow(/prediction differs/);
+      expect(outputDrift).toHaveBeenCalledOnce();
+    } finally { outputDrift.mockRestore(); }
+    const revoked = vi.spyOn(unsigned, 'materializeUnsignedTransaction')
+      .mockImplementationOnce(async (tx, label) => {
+        const value = await materialize(tx, label);
+        observations.active = false;
+        return value;
+      });
+    try {
+      await expect(buildNativePegInV3(pegInInput)).rejects.toThrow(/inactive|unproven/);
+    } finally { observations.active = true; revoked.mockRestore(); }
     const root = mkdtempSync(join(tmpdir(), 'e2s-v3-native-issuance-'));
     const markers = join(root, 'markers');
     mkdirSync(markers);
@@ -353,6 +441,7 @@ describe('observed FED genesis V3 compilation and retained execution', () => {
     expect(helpers.ncheck).toHaveBeenCalledTimes(3);
     expect(() => assertSubstrateFederatedNativeGenesisSetupReadCustodyV3(batch, target))
       .toThrow();
+    expect(() => assertNativePegInV3(pegInPacket, batch, target)).toThrow();
   }, 120_000);
 
   it.each(['setup clone', 'source clone', 'discovery clone', 'history clone',

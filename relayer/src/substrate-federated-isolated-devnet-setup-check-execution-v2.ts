@@ -3263,6 +3263,17 @@ export function assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3(
   return current;
 }
 
+/** Retained V3 action compiler identity; this grants no signing or transport authority. */
+export function getSubstrateFederatedNativeGenesisSetupCompilerInputV3(
+  batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV3>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<Pick<ObservedSubstrateFederatedGenesisV3, 'familyCompilerInput' | 'familyReceipt'>> {
+  assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3(batch, target);
+  const compiled = NATIVE_V3_EXECUTION_BATCHES.get(batch)!.compiled;
+  return Object.freeze({ familyCompilerInput: compiled.familyCompilerInput,
+    familyReceipt: compiled.familyReceipt });
+}
+
 /** Retained read custody only; this does not renew the completed setup check. */
 export function assertSubstrateFederatedNativeGenesisSetupReadCustodyV3(
   batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV3>,

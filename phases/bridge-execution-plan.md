@@ -116,9 +116,16 @@ deposit equations. It emits a distinct V3 packet with a separate provenance
 set and keeps every signing, node, finality and funds boundary false. Four
 focused tests pass with a pinned JVM receipt, including copied and cross-version
 refusals; TypeScript, layered imports and independent exact-source review pass.
-The packet is not yet bound to the retained V3 setup batch and target. That
-producer-to-consumer join, the operational route and genuine node acceptance
-remain separate work; no campaign is selected.
+A separate V3 native packet join now rematerializes the retained setup batch's
+reserve issuance, verifies its transaction and predicted output, and binds the
+unsigned deposit packet to that exact batch and target. Caller-owned construction
+inputs are copied before the first asynchronous step. The pinned-JVM V3 fixture
+passes 9/9, including copied identities, caller mutation, transaction-ID and
+materialized-output drift, revocation and post-session refusal. TypeScript,
+layered imports, architecture tests and independent exact-source review pass.
+This remains source-only: an operational selector and worker route, genuine node
+acceptance and a complete two-cycle remain due. C74 stays held, and no new
+campaign is selected.
 
 C74 is consumed and permanently held; no successor campaign is selected. The
 purpose-specific deposit selector was locally promoted at
