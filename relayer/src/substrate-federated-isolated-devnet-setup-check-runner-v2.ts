@@ -67,6 +67,8 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckSessionV2 {
   readonly dispose: () => void;
   readonly runNativeGenesisRetainingSigner:
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runNativeGenesisRetainingSigner'];
+  readonly runNativeGenesisRetainingSignerV3:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runNativeGenesisRetainingSignerV3'];
   readonly checkNativePegInSourceLockRetainingSignerV1:
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativePegInSourceLockRetainingSignerV1'];
   readonly checkNativePegInCommittedVaultRetainingSignerV1:
@@ -245,6 +247,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     | 'frozen-tracker-check-complete'
     | 'v3-setup-complete'
     | 'native-setup-complete'
+    | 'native-v3-setup-complete'
     | 'native-source-lock-checked'
     | 'native-withdrawal-fee-checked'
     | 'native-tracker-fee-checked'
@@ -305,6 +308,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     expectedState:
       | 'open'
       | 'native-setup-complete'
+      | 'native-v3-setup-complete'
       | 'native-source-lock-checked'
       | 'native-vault-checked'
       | 'native-withdrawal-fee-checked'
@@ -335,6 +339,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       | 'frozen-tracker-check-complete'
       | 'v3-setup-complete'
       | 'native-setup-complete'
+      | 'native-v3-setup-complete'
       | 'native-source-lock-checked'
       | 'native-withdrawal-fee-checked'
       | 'native-tracker-fee-checked'
@@ -415,6 +420,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
           || state === 'frozen-tracker-check-complete'
           || state === 'v3-setup-complete'
           || state === 'native-setup-complete'
+          || state === 'native-v3-setup-complete'
           || state === 'native-source-lock-checked'
           || state === 'native-vault-checked'
           || state === 'native-withdrawal-fee-checked'
@@ -444,6 +450,12 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       nativeRouteSelected = true;
       return execution.runNativeGenesisRetainingSigner(compiled, target);
     }, 'native-setup-complete'),
+    runNativeGenesisRetainingSignerV3: async (
+      ...[compiled, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runNativeGenesisRetainingSignerV3']>
+    ) => consume('open', () => {
+      nativeRouteSelected = true;
+      return execution.runNativeGenesisRetainingSignerV3(compiled, target);
+    }, 'native-v3-setup-complete'),
     checkNativePegInSourceLockRetainingSignerV1: async (
       ...[packet, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativePegInSourceLockRetainingSignerV1']>
     ) => consume('native-setup-complete', () => execution.checkNativePegInSourceLockRetainingSignerV1(packet, target),

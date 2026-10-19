@@ -8,6 +8,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 const observations = vi.hoisted(() => ({
   owned: new WeakMap<object, object>(), history: new WeakSet<object>(), active: true,
   validations: 0,
+  boxes: new Map<string, unknown>(), binary: new Map<string, string>(),
+  tip: '', height: 1000,
   binding: Object.freeze({ processBindingDigestHex: '74'.repeat(32),
     executionTargetIdentityDigestHex: '75'.repeat(32) }),
 }));
@@ -25,6 +27,23 @@ vi.mock('./substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js', ()
     if (!observations.history.has(value)) throw new Error('history unproven');
   },
 }));
+vi.mock('./authenticated-spv-tracker-read-only-node-client.js', async importOriginal => ({
+  ...await importOriginal<typeof import('./authenticated-spv-tracker-read-only-node-client.js')>(),
+  createBoundedAuthenticatedSpvTrackerReadOnlySource(origin: string) {
+    if (origin !== 'http://127.0.0.1:9051' && origin !== 'http://127.0.0.1:9052') {
+      throw new Error('unselected node origin');
+    }
+    return {
+      async getInfo() { return { network: 'devnet', fullHeight: observations.height }; },
+      async getBestHeader() { return { id: observations.tip, height: observations.height }; },
+      async getBlockHeaderIdsAtHeight(height: number) {
+        return [height === 1 ? '72'.repeat(32) : observations.tip];
+      },
+      async getBoxByIdOrNull(id: string) { return observations.boxes.get(id) ?? null; },
+      async getBoxBinaryByIdOrNull(id: string) { return { bytes: observations.binary.get(id) }; },
+    };
+  },
+}));
 
 import {
   assertObservedSubstrateFederatedGenesisReadCustodyV3,
@@ -34,9 +53,17 @@ import {
 } from './substrate-federated-observed-genesis-v3.js';
 import { createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2 }
   from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
+import { assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1,
+  assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3,
+  assertSubstrateFederatedNativeGenesisSetupReadCustodyV3 }
+  from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import { createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2 }
   from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
 import { buildSubstrateFederatedGenesisV3 } from './substrate-federated-runtime-genesis-v3.js';
+import { buildBridgeValidityTrackerCanonicalHeaderContextV1 }
+  from './bridge-validity-tracker-header-context-v1.js';
+import * as helpers from './ergo-helpers.js';
+import * as owned from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import * as trackerCompiler from './substrate-federated-tracker-jvm-compiler-v2.js';
 import * as familyCompiler from './substrate-federated-settlement-family-jvm-compiler-v3.js';
 import { ORIGINAL_NODE_OPTIONS } from './test-node-env.js';
@@ -54,8 +81,10 @@ const BASE_INPUT = {
 let setup: Awaited<ReturnType<typeof createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2>>;
 let source: ReturnType<typeof createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>;
 let input: CompileObservedSubstrateFederatedGenesisV3Input;
+let wasm: any;
+let headers: Record<string, any>[];
 
-async function observedInputs(target: object) {
+async function observedInputs(target: object, tipHeaderIdHex = '73'.repeat(32)) {
   const tree = setup.signer.rewardInputErgoTrees.delay1;
   const boxes = (await unsigned.materializeUnsignedTransaction({
     inputs: [{ ...BASE_INPUT, extension: {} }], dataInputs: [],
@@ -69,7 +98,7 @@ async function observedInputs(target: object) {
   const observation = Object.freeze({
     reportDigestHex: '71'.repeat(32),
     target: Object.freeze({ network: 'devnet', genesisHeaderIdHex: '72'.repeat(32),
-      tipHeight: 1000, tipHeaderIdHex: '73'.repeat(32) }),
+      tipHeight: 1000, tipHeaderIdHex }),
     sources: Object.freeze({ primaryNodeOrigin: 'http://127.0.0.1:9051',
       witnessNodeOrigin: 'http://127.0.0.1:9052' }),
     signer: Object.freeze({ publicKeyHex: setup.signer.publicKeyHex,
@@ -92,12 +121,20 @@ async function observedInputs(target: object) {
   return { ownedDiscovery: ownedDiscovery as never, history: history as never };
 }
 
-beforeAll(async () => { await import('ergo-lib-wasm-nodejs'); });
+beforeAll(async () => {
+  const imported = await import('ergo-lib-wasm-nodejs');
+  wasm = imported.default ?? imported;
+  headers = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
+    currentHeight: 1001, anchorContextIndex: 0, anchorExtensionRootHex: '94'.repeat(32),
+  }).headers.map(header => header.raw);
+});
 beforeEach(async () => {
   observations.active = true;
   observations.validations = 0;
   observations.binding = Object.freeze({ processBindingDigestHex: '74'.repeat(32),
     executionTargetIdentityDigestHex: '75'.repeat(32) });
+  observations.boxes.clear(); observations.binary.clear();
+  observations.tip = ''; observations.height = 1000;
   setup = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
   source = createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2({
     ergoAdmissionThreshold: 1, ergoAdmissionPublicKeysHex: [setup.signer.publicKeyHex],
@@ -189,6 +226,68 @@ describe('observed FED genesis V3 source-only compilation', () => {
       .toThrow(/disposed/);
     expect(() => validateObservedSubstrateFederatedGenesisV3(result, input.target))
       .toThrow(/disposed/);
+  }, 120_000);
+
+  it('joins one pinned JVM V3 compilation to the retained native setup check', async () => {
+    const target = input.target;
+    observations.tip = headers[0]!.id;
+    observations.height = headers[0]!.height;
+    input = { ...input, ...await observedInputs(target, observations.tip) };
+    for (const box of Object.values(input.ownedDiscovery.observation.genesisInputs)) {
+      observations.boxes.set(box.boxId, box);
+      const parsed = wasm.ErgoBox.from_json(JSON.stringify(box));
+      try {
+        observations.binary.set(box.boxId,
+          Buffer.from(parsed.sigma_serialize_bytes()).toString('hex'));
+      } finally { parsed.free(); }
+    }
+    vi.spyOn(owned, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+      .mockImplementation(current => {
+        if (current !== target || !observations.active) throw new Error('owned target mismatch');
+        return observations.binding;
+      });
+    vi.spyOn(helpers, 'ngetDirect').mockResolvedValue(headers);
+    vi.spyOn(helpers, 'ncheck').mockImplementation(async (_path, body) => {
+      const tx = wasm.Transaction.from_json(JSON.stringify(body));
+      const id = tx.id();
+      try { return id.to_str(); } finally { id.free(); tx.free(); }
+    });
+
+    const previous = process.env.NODE_OPTIONS;
+    if (ORIGINAL_NODE_OPTIONS === undefined) delete process.env.NODE_OPTIONS;
+    else process.env.NODE_OPTIONS = ORIGINAL_NODE_OPTIONS;
+    let compiled: Awaited<ReturnType<typeof compileObservedSubstrateFederatedGenesisV3>>;
+    try {
+      compiled = await compileObservedSubstrateFederatedGenesisV3(input);
+    } finally {
+      if (previous === undefined) delete process.env.NODE_OPTIONS;
+      else process.env.NODE_OPTIONS = previous;
+    }
+    const batch = await setup.runNativeGenesisRetainingSignerV3(compiled, target);
+    expect(batch.profile).toBe('fed-native-height-zero-v3-reserve-v7');
+    expect(batch.request.schema).toBe('e2s.substrate-federated-native-genesis-setup-check-request.v3');
+    expect(batch.receipt.schema).toBe('e2s.substrate-federated-native-genesis-setup-check-receipt.v3');
+    expect(batch.receipt.version).toBe(3);
+    expect(batch.request.sourceBindings.familyIdHex).toBe(compiled.familyReceipt.profile.familyIdHex);
+    expect(batch.orderedTransactions.map(item => item.issuance.role))
+      .toEqual(['tracker', 'duplicate-prevention', 'pooled-reserve']);
+    expect(helpers.ngetDirect).toHaveBeenCalledWith('/blocks/lastHeaders/10',
+      'http://127.0.0.1:9051');
+    expect(helpers.ncheck).toHaveBeenCalledTimes(3);
+    expect(() => assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3(batch, target))
+      .not.toThrow();
+    expect(() => assertSubstrateFederatedNativeGenesisSetupReadCustodyV3(batch, target))
+      .not.toThrow();
+    expect(() => assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3(
+      { ...batch }, target)).toThrow(/process provenance/);
+    expect(() => assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3(
+      batch, { ...target })).toThrow(/process provenance/);
+    expect(() => assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(
+      batch as never, target)).toThrow(/process provenance/);
+    await expect(setup.runNativeGenesisRetainingSignerV3(compiled, target)).rejects.toThrow();
+    expect(helpers.ncheck).toHaveBeenCalledTimes(3);
+    expect(() => assertSubstrateFederatedNativeGenesisSetupReadCustodyV3(batch, target))
+      .toThrow();
   }, 120_000);
 
   it.each(['setup clone', 'source clone', 'discovery clone', 'history clone',

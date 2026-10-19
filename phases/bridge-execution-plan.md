@@ -76,19 +76,31 @@ receipt and binds its family, V7 source, preparation and target custody before
 the setup check. Its 18 focused tests cover three unsigned issuances and
 isolated schema, role, identity, source and mutation refusals; TypeScript and
 layered imports pass, with independent exact-source review. The tests use a
-stubbed compiler provenance and node reads, so the actual compiler-to-request
-join, versioned checker/session/worker route and operational selector remain
-due. No C74 caller is changed and no new campaign is selected.
+stubbed compiler provenance and node reads; the subsequent checker and session
+join are recorded below. A distinct worker route and operational selector
+remain due. No C74 caller is changed and no new campaign is selected.
 
 A separate V3 setup checker now consumes that registered request. It checks
 three independently derived unsigned IDs against the signed and observed node
 responses, keeps the V3 receipt and one-use execution material distinct from
 V1, and refuses custody drift and cancellation. Ten focused V3 tests,
 TypeScript, layered imports, two narrow V1 checks and independent exact-source
-review pass. The tests double compiler custody and node reads; the real
-compiler-to-checker join and a versioned session/worker route are still due.
+review pass. The checker-only tests double compiler custody and node reads;
+the session join below supplies a separate producer-to-consumer check.
 The broader legacy suite and one synthetic test stopped without final assertions
 and provide no green or red result. No C74 caller or campaign was changed.
+
+A versioned V3 native setup session now carries one actual pinned JVM
+compiler result through the registered V3 request and checker into a distinct
+three-issuance batch. Its retained state and read custody cannot be presented
+as the V1 batch or continued through the V1 source-lock route. The focused V3
+file passes 9/9, the existing V1/V2 runner file passes 96/96, TypeScript and
+layered imports pass, and independent exact-source review finds no blocking
+defect in the three changed files. The integration test doubles owned-target
+and node responses; it does not establish actual node acceptance. A distinct
+V3 executor, operational root and worker selection, genuine two-cycle run,
+recovery, operator/FED7 and external acceptance remain due. C74 stays held;
+no successor campaign is selected.
 
 C74 is consumed and permanently held; no successor campaign is selected. The
 purpose-specific deposit selector was locally promoted at
