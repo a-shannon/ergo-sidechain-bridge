@@ -1743,6 +1743,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
   [FEDERATED_NATIVE_RESERVATION_SIGNING, new Set([
     'signFrontierNativeProofBoundReservationV1', 'executeFrontierNativeProofBoundReservationV1',
     'signFrontierNativeProofBoundReservationV3',
+    'executeFrontierNativeProofBoundReservationV3',
     'executeFrontierNativeProofBoundContinuationReservationV1',
     'executeFrontierNativeProofBoundContinuationMintAndBurnV1',
     'executeFrontierNativeProofBoundReservationAndMintV1',
@@ -2082,6 +2083,9 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
       'substrate-federated-isolated-devnet-source-attestation-mint-proof-v1.test.ts',
     ])],
     ['executeFrontierNativeProofBoundReservationV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
+    ['executeFrontierNativeProofBoundReservationV3', new Set([
+      'substrate-federated-isolated-devnet-source-attestation-mint-proof-v1.test.ts',
+    ])],
     ['executeFrontierNativeProofBoundContinuationReservationV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['executeFrontierNativeProofBoundContinuationMintAndBurnV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['executeFrontierNativeProofBoundReservationAndMintV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],

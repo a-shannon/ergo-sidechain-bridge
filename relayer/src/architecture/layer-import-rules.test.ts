@@ -1051,6 +1051,25 @@ describe('layer import rules', () => {
       `exclusive authority module must use named runtime imports: ${specifier}`);
   });
 
+  it('limits V3 reservation execution to its named direct test, without granting a runtime caller', () => {
+    const signer = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
+    const test = 'substrate-federated-isolated-devnet-source-attestation-mint-proof-v1.test.ts';
+    const specifier = `./${signer.replace(/\.ts$/, '.js')}`;
+    const v3 = 'executeFrontierNativeProofBoundReservationV3';
+    expect(inspect(staticAppFixture(test,
+      `import { ${v3} } from '${specifier}'; await ${v3}({});`))).toEqual([]);
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+      `import { ${v3} } from './frontier-native-proof-bound-reservation-signing-v1.js'; ${v3}({});`))
+      .map(item => item.message)).toContain(
+      `exclusive authority import has the wrong owner: ./frontier-native-proof-bound-reservation-signing-v1.js#${v3}`);
+    expect(inspect(staticAppFixture('substrate-federated-isolated-devnet-foreign.test.ts',
+      `import { ${v3} } from '${specifier}'; ${v3}({});`)).map(item => item.message)).toContain(
+      `exclusive runtime module import has the wrong owner: ${specifier}`);
+    expect(inspect(staticAppFixture(test,
+      `import { ${v3} as execute } from '${specifier}'; execute({});`)).map(item => item.message)).toContain(
+      `exclusive authority import must not be aliased: ${specifier}#${v3}`);
+  });
+
   it.each([
     ['../../adapters/federated-genesis-operator-v1.js', 'signFederatedGenesisOperatorV1'],
     ['../../adapters/federated-genesis-target-observation-v1.js', 'rpc'],

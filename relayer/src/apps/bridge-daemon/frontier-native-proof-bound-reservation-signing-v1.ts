@@ -183,6 +183,19 @@ export async function executeFrontierNativeProofBoundReservationV1(input: Readon
   return (await executeReservation(retained, attemptDirectory)).result;
 }
 
+/** A distinct V3-only local reservation attempt; this does not mint or establish finality. */
+export async function executeFrontierNativeProofBoundReservationV3(input: Readonly<{
+  signing: Readonly<SigningInputV3>;
+  attemptDirectory: string;
+  broadcastScope: 'fed-native-local-synthetic-v3-reservation-only';
+}>) {
+  exact(input, ['signing', 'attemptDirectory', 'broadcastScope']);
+  if (input.broadcastScope !== 'fed-native-local-synthetic-v3-reservation-only') {
+    throw new Error('native V3 reservation broadcast scope is absent');
+  }
+  return (await executeReservationV3(captureV3(input.signing), input.attemptDirectory)).result;
+}
+
 /** Reserve the next deposit on the same live native chain after its original confirmed burn. */
 export async function executeFrontierNativeProofBoundContinuationReservationV1(input: Readonly<{
   previousExecution: Awaited<ReturnType<typeof executeFrontierNativeProofBoundReservationMintAndBurnV1>>;
@@ -467,6 +480,64 @@ async function executeReservation(retained: ReturnType<typeof capture>, attemptD
   const result = Object.freeze({ ...observed, pendingReservationScaleHex: pending,
     sourceProofReceiptDigestHex: proof.receiptDigestHex, mintIdentityHex: proof.mintIdentityHex,
     runtimeProfileIdHex: proof.runtimeProfileIdHex, runtimeReservationObserved: true as const, mintExecuted: false as const });
+  return { result, observation };
+}
+
+async function executeReservationV3(retained: ReturnType<typeof captureV3>, attemptDirectory: string) {
+  retained.assertCurrent();
+  const { proof, operator } = retained.input;
+  const reservedAtNativeHeight = 1;
+  if (BigInt(proof.result.issuedAtNativeHeight) > BigInt(reservedAtNativeHeight)
+    || BigInt(proof.result.expiresAtNativeHeight) <= BigInt(reservedAtNativeHeight)) {
+    throw new Error('native V3 reservation proof does not cover its observed child height');
+  }
+  const pending = encodePooledReserveMintReservationPendingV4ScaleHex({
+    profileIdHex: proof.runtimeProfileIdHex, statementHex: proof.request.statementHex,
+    statementIdHex: proof.mintReservationStatementIdHex, mintIdentityHex: proof.mintIdentityHex,
+    sourceStatementBytesDigestHex: blake(Buffer.from(proof.request.statementHex.slice(2), 'hex')),
+    sourceProofSystemIdHex: proof.request.runtimeProfile.sourceProofSystemIdHex,
+    sourceProofProfileIdHex: proof.sourceProofProfileIdHex,
+    sourceProofIssuedAtNativeHeight: proof.result.issuedAtNativeHeight,
+    sourceProofRequestDigestHex: proof.requestDigestHex,
+    sourceProofResultIdHex: proof.signatureVerification.resultIdHex,
+    sourceProofDigestHex: blake(Buffer.concat([Buffer.from('E2S_POOLED_RESERVE_FEDERATED_SOURCE_PROOF_ENVELOPE_V1', 'ascii'),
+      Buffer.from(proof.signatureVerification.resultIdHex.slice(2), 'hex'),
+      Buffer.from(proof.signatureVerification.signatureSetDigestHex.slice(2), 'hex')])),
+    reservedAtNativeHeight: String(reservedAtNativeHeight), expiresAtNativeHeight: proof.result.expiresAtNativeHeight,
+  });
+  const keys = derivePooledReserveMintReservationRuntimeStorageKeysV4(proof.mintIdentityHex);
+  const signed = await signCapturedV3(retained);
+  retained.assertCurrent();
+  const attempt = reserveFederatedNativeReservationAttemptV1(attemptDirectory, {
+    genesisHashHex: signed.genesisHashHex, extrinsicHashHex: signed.extrinsicHashHex,
+    signedExtrinsicHex: signed.signedExtrinsicHex,
+  });
+  retained.assertCurrent();
+  // A durable hold survives any subsequent failure; reobserve before the first transport call.
+  await retained.observe();
+  retained.assertCurrent();
+  const authorize = () => { retained.assertCurrent(); };
+  await submitFederatedNativeReservationV1(attempt, authorize);
+  retained.assertCurrent();
+  const blockHashHex = await sealFederatedNativeReservationV1(attempt, authorize);
+  retained.assertCurrent();
+  const observation = Object.freeze({ attempt, blockHashHex,
+    expectedStorage: {
+      [keys.runtimeCodeStorageKeyHex]: retained.input.expectedStorage[keys.runtimeCodeStorageKeyHex]!,
+      [keys.currentProfileStorageKeyHex]: proof.runtimeProfileScaleHex, [keys.enforcementStorageKeyHex]: '0x01',
+      [keys.pendingKeysStorageKeyHex]: `0x04${proof.mintIdentityHex.slice(2)}`,
+      [keys.pendingReservationStorageKeyHex]: pending,
+      [keys.consumedReservationStorageKeyHex]: null, [keys.invalidatedReservationStorageKeyHex]: null,
+      '0x5c0d1176a568c1f92944340dbfed9e9c530ebca703c85910e7164cb7d1c9e47b': null,
+    }, operatorStorageKeyHex: operator.nativeFunding.storageKeyHex,
+    originalOperatorAccountHex: operator.nativeFunding.accountInfoScaleHex,
+  });
+  const observed = await observeFederatedNativeReservationInclusionV1(observation, authorize);
+  retained.assertCurrent();
+  const result = Object.freeze({ ...observed, pendingReservationScaleHex: pending,
+    sourceProofReceiptDigestHex: proof.receiptDigestHex, mintIdentityHex: proof.mintIdentityHex,
+    runtimeProfileIdHex: proof.runtimeProfileIdHex, runtimeReservationObserved: true as const,
+    mintExecuted: false as const, sourceFinalityEstablished: false as const, trustless: false as const });
   return { result, observation };
 }
 

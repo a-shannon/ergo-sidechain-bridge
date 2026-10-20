@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sign as cryptoSign } from 'node:crypto';
+import { lstatSync, mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { SigningKey } from 'ethers';
 
 const mocks = vi.hoisted(() => ({
@@ -27,6 +30,10 @@ const mocks = vi.hoisted(() => ({
   nativeV3Packets: new WeakMap<object, Readonly<{ batch: object; target: object }>>(),
   nativeV3FamilyReceipts: new WeakMap<object, object>(),
   observeReservationTarget: vi.fn(),
+  reserveReservationAttempt: vi.fn(),
+  submitReservation: vi.fn(),
+  sealReservation: vi.fn(),
+  observeReservationInclusion: vi.fn(),
   frontierTargetCustody: new WeakMap<object, () => void>(),
   onV1ContextRead: undefined as undefined | (() => void),
   onV3ContextRead: undefined as undefined | (() => void),
@@ -56,6 +63,15 @@ vi.mock('node:crypto', async importOriginal => {
 vi.mock('./adapters/federated-genesis-target-observation-v1.js', () => ({
   observeFederatedGenesisReservationTargetV1: mocks.observeReservationTarget,
 }));
+
+vi.mock('./adapters/federated-native-reservation-execution-v1.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('./adapters/federated-native-reservation-execution-v1.js')>();
+  return { ...actual,
+    reserveFederatedNativeReservationAttemptV1: mocks.reserveReservationAttempt,
+    submitFederatedNativeReservationV1: mocks.submitReservation,
+    sealFederatedNativeReservationV1: mocks.sealReservation,
+    observeFederatedNativeReservationInclusionV1: mocks.observeReservationInclusion };
+});
 
 vi.mock('./substrate-federated-authority-safe-devnet-process-v1.js', async importOriginal => {
   const actual = await importOriginal<
@@ -286,8 +302,10 @@ vi.mock(
 import { encodePegInSourceIntentV2Hex } from './peg-in-causal-admission-v2.js';
 import { createFederatedGenesisOperatorV1, disposeFederatedGenesisOperatorV1 }
   from './adapters/federated-genesis-operator-v1.js';
-import { signFrontierNativeProofBoundReservationV3 }
+import { executeFrontierNativeProofBoundReservationV3, signFrontierNativeProofBoundReservationV3 }
   from './apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.js';
+import { derivePooledReserveMintReservationRuntimeStorageKeysV4 }
+  from './pooled-reserve-mint-reservation-runtime-state-v4.js';
 import * as observedV3 from './substrate-federated-observed-genesis-v3.js';
 import {
   decodePegInPooledReserveLineageProfileV4Hex,
@@ -1612,7 +1630,8 @@ describe('native V3 proof-bound sign-only intake', () => {
         throw new Error('Frontier target lacks active original provenance');
       }
     });
-    const expectedStorage = { '0x01': '0x02' };
+    const runtimeKeys = derivePooledReserveMintReservationRuntimeStorageKeysV4(proof.mintIdentityHex);
+    const expectedStorage = { [runtimeKeys.runtimeCodeStorageKeyHex]: '0x02' };
     const expectedGenesisHashHex = h32('94');
     const input = { operator, sourceOperation: operation, draftInputs: fixture.draftInputs,
       draft: fixture.draft, proof, compiled, target, frontierTarget,
@@ -1770,6 +1789,157 @@ describe('native V3 proof-bound sign-only intake', () => {
       expect(inner).toBeDefined();
       expect(primitiveSign).toHaveBeenCalledTimes(1);
     } finally { primitiveSign.mockRestore(); state.dispose(); }
+  });
+
+  describe('V3 reservation-only execution', () => {
+    const scope = 'fed-native-local-synthetic-v3-reservation-only';
+    const attemptDirectory = 'C:/synthetic-v3-reservation-attempt';
+
+    beforeEach(() => {
+      mocks.reserveReservationAttempt.mockImplementation((_directory: string, candidate: object) =>
+        Object.freeze({ ...candidate }));
+      mocks.submitReservation.mockImplementation(async (_attempt: object, authorize: () => void) => {
+        authorize();
+      });
+      mocks.sealReservation.mockImplementation(async (_attempt: object, authorize: () => void) => {
+        authorize();
+        return h32('ab');
+      });
+      mocks.observeReservationInclusion.mockImplementation(async (_observation: object,
+        authorize: () => void) => {
+        authorize();
+        return Object.freeze({ blockHeight: 1, blockHashHex: h32('ab') });
+      });
+    });
+
+    it('carries the original V3 proof through mocked reservation transport and inclusion', async () => {
+      const state = signingFixture(68);
+      try {
+        const result = await executeFrontierNativeProofBoundReservationV3({
+          signing: state.input as never, attemptDirectory, broadcastScope: scope,
+        });
+        expect(mocks.reserveReservationAttempt).toHaveBeenCalledTimes(1);
+        expect(mocks.reserveReservationAttempt.mock.calls[0]?.[0]).toBe(attemptDirectory);
+        expect(mocks.submitReservation).toHaveBeenCalledTimes(1);
+        expect(mocks.sealReservation).toHaveBeenCalledTimes(1);
+        expect(mocks.observeReservationInclusion).toHaveBeenCalledTimes(1);
+        expect(mocks.observeReservationTarget).toHaveBeenCalledTimes(2);
+        const observation = mocks.observeReservationInclusion.mock.calls[0]?.[0] as {
+          expectedStorage: Record<string, string | null>;
+        };
+        const keys = derivePooledReserveMintReservationRuntimeStorageKeysV4(state.proof.mintIdentityHex);
+        expect(observation.expectedStorage[keys.runtimeCodeStorageKeyHex]).toBe('0x02');
+        expect(observation.expectedStorage[keys.pendingReservationStorageKeyHex])
+          .toBe(result.pendingReservationScaleHex);
+        expect(result.pendingReservationScaleHex).toContain(state.proof.request.statementHex.slice(2));
+        expect(result).toMatchObject({ sourceProofReceiptDigestHex: state.proof.receiptDigestHex,
+          mintIdentityHex: state.proof.mintIdentityHex, runtimeReservationObserved: true,
+          mintExecuted: false, sourceFinalityEstablished: false, trustless: false });
+        await expect(executeFrontierNativeProofBoundReservationV3({
+          signing: state.input as never, attemptDirectory, broadcastScope: scope,
+        })).rejects.toThrow(/already consumed/u);
+        expect(mocks.reserveReservationAttempt).toHaveBeenCalledTimes(1);
+      } finally { state.dispose(); }
+    });
+
+    it.each(['wrong scope', 'foreign proof', 'copied packet'] as const)(
+      'rejects %s before reserving an attempt', async fault => {
+        const state = signingFixture(69);
+        try {
+          const signing = { ...state.input };
+          if (fault === 'foreign proof') signing.proof = { ...state.proof };
+          if (fault === 'copied packet') signing.draftInputs = {
+            ...state.fixture.draftInputs, packet: { ...state.fixture.packet } };
+          await expect(executeFrontierNativeProofBoundReservationV3({
+            signing: signing as never, attemptDirectory,
+            broadcastScope: fault === 'wrong scope' ? 'fed-native-local-synthetic-reservation-only' as never : scope,
+          })).rejects.toThrow();
+          expect(mocks.reserveReservationAttempt).not.toHaveBeenCalled();
+          expect(mocks.submitReservation).not.toHaveBeenCalled();
+        } finally { state.dispose(); }
+      });
+
+    it('keeps the mocked attempt call one-shot when submission fails', async () => {
+      const state = signingFixture(70);
+      try {
+        mocks.submitReservation.mockRejectedValueOnce(new Error('injected submission ambiguity'));
+        await expect(executeFrontierNativeProofBoundReservationV3({
+          signing: state.input as never, attemptDirectory, broadcastScope: scope,
+        })).rejects.toThrow(/submission ambiguity/u);
+        expect(mocks.reserveReservationAttempt).toHaveBeenCalledTimes(1);
+        expect(mocks.sealReservation).not.toHaveBeenCalled();
+        expect(mocks.observeReservationInclusion).not.toHaveBeenCalled();
+        await expect(executeFrontierNativeProofBoundReservationV3({
+          signing: state.input as never, attemptDirectory, broadcastScope: scope,
+        })).rejects.toThrow(/already consumed/u);
+        expect(mocks.reserveReservationAttempt).toHaveBeenCalledTimes(1);
+      } finally { state.dispose(); }
+    });
+
+    it('writes a real create-new hold before mocked submission failure', async () => {
+      const state = signingFixture(72);
+      const directory = mkdtempSync(join(tmpdir(), 'bridge-v3-reservation-hold-'));
+      try {
+        const actual = await vi.importActual<typeof import('./adapters/federated-native-reservation-execution-v1.js')>(
+          './adapters/federated-native-reservation-execution-v1.js');
+        mocks.reserveReservationAttempt.mockImplementation(actual.reserveFederatedNativeReservationAttemptV1);
+        mocks.submitReservation.mockRejectedValueOnce(new Error('injected before transport'));
+        await expect(executeFrontierNativeProofBoundReservationV3({
+          signing: state.input as never, attemptDirectory: directory, broadcastScope: scope,
+        })).rejects.toThrow(/injected before transport/u);
+        const attempt = mocks.reserveReservationAttempt.mock.results[0]?.value as Readonly<{
+          genesisHashHex: string; extrinsicHashHex: string; signedExtrinsicHex: string;
+        }>;
+        const file = join(directory, 'native-reservation-attempt.json');
+        const stat = lstatSync(file);
+        expect(stat.isFile()).toBe(true);
+        expect(stat.isSymbolicLink()).toBe(false);
+        expect(stat.nlink).toBe(1);
+        expect(readFileSync(file, 'utf8')).toBe(JSON.stringify({
+          schema: 'e2s.fed-native-reservation-attempt.v1', status: 'reserved', ...attempt,
+        }));
+        expect(() => actual.reserveFederatedNativeReservationAttemptV1(directory, attempt)).toThrow(/EEXIST/u);
+        expect(mocks.submitReservation).toHaveBeenCalledTimes(1);
+        expect(mocks.sealReservation).not.toHaveBeenCalled();
+        expect(mocks.observeReservationInclusion).not.toHaveBeenCalled();
+      } finally { state.dispose(); }
+    });
+
+    it.each(['reobservation', 'submission', 'sealing', 'inclusion'] as const)(
+      'refuses custody drift during %s without advancing to the next stage', async stage => {
+        const state = signingFixture(71);
+        try {
+          if (stage === 'reobservation') {
+            mocks.observeReservationTarget.mockImplementationOnce(async () => ({
+              genesisHashHex: state.input.expectedGenesisHashHex, nonce: 0,
+            })).mockImplementationOnce(async () => {
+              state.setFrontierActive(false);
+              return { genesisHashHex: state.input.expectedGenesisHashHex, nonce: 0 };
+            });
+          } else if (stage === 'submission') {
+            mocks.submitReservation.mockImplementationOnce(async (_attempt: object, authorize: () => void) => {
+              state.setFrontierActive(false); authorize();
+            });
+          } else if (stage === 'sealing') {
+            mocks.sealReservation.mockImplementationOnce(async (_attempt: object, authorize: () => void) => {
+              state.setFrontierActive(false); authorize(); return h32('ab');
+            });
+          } else {
+            mocks.observeReservationInclusion.mockImplementationOnce(async (_observation: object,
+              authorize: () => void) => {
+              state.setFrontierActive(false); authorize(); return { blockHeight: 1 };
+            });
+          }
+          await expect(executeFrontierNativeProofBoundReservationV3({
+            signing: state.input as never, attemptDirectory, broadcastScope: scope,
+          })).rejects.toThrow(/provenance/u);
+          expect(mocks.reserveReservationAttempt).toHaveBeenCalledTimes(1);
+          expect(mocks.submitReservation).toHaveBeenCalledTimes(stage === 'reobservation' ? 0 : 1);
+          expect(mocks.sealReservation).toHaveBeenCalledTimes(
+            stage === 'reobservation' || stage === 'submission' ? 0 : 1);
+          expect(mocks.observeReservationInclusion).toHaveBeenCalledTimes(stage === 'inclusion' ? 1 : 0);
+        } finally { state.dispose(); }
+      });
   });
 });
 
