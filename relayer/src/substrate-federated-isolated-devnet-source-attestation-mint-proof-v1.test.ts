@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sign as cryptoSign } from 'node:crypto';
+import { SigningKey } from 'ethers';
 
 const mocks = vi.hoisted(() => ({
   assertCommittedVaultForCandidate: vi.fn(),
@@ -25,6 +26,8 @@ const mocks = vi.hoisted(() => ({
   consumedNativeEvidence: new WeakSet<object>(),
   nativeV3Packets: new WeakMap<object, Readonly<{ batch: object; target: object }>>(),
   nativeV3FamilyReceipts: new WeakMap<object, object>(),
+  observeReservationTarget: vi.fn(),
+  frontierTargetCustody: new WeakMap<object, () => void>(),
   onV1ContextRead: undefined as undefined | (() => void),
   onV3ContextRead: undefined as undefined | (() => void),
 }));
@@ -47,6 +50,28 @@ vi.mock('node:crypto', async importOriginal => {
       }
       return (actual.verify as (...values: unknown[]) => boolean)(...args);
     }),
+  };
+});
+
+vi.mock('./adapters/federated-genesis-target-observation-v1.js', () => ({
+  observeFederatedGenesisReservationTargetV1: mocks.observeReservationTarget,
+}));
+
+vi.mock('./substrate-federated-authority-safe-devnet-process-v1.js', async importOriginal => {
+  const actual = await importOriginal<
+    typeof import('./substrate-federated-authority-safe-devnet-process-v1.js')
+  >();
+  return {
+    ...actual,
+    assertOwnedFederatedGenesisDevnetTargetV1:
+      (target: Parameters<typeof actual.assertOwnedFederatedGenesisDevnetTargetV1>[0]) => {
+        const fixtureGuard = mocks.frontierTargetCustody.get(target);
+        if (fixtureGuard === undefined) {
+          actual.assertOwnedFederatedGenesisDevnetTargetV1(target);
+        } else {
+          fixtureGuard();
+        }
+      },
   };
 });
 
@@ -259,6 +284,11 @@ vi.mock(
 );
 
 import { encodePegInSourceIntentV2Hex } from './peg-in-causal-admission-v2.js';
+import { createFederatedGenesisOperatorV1, disposeFederatedGenesisOperatorV1 }
+  from './adapters/federated-genesis-operator-v1.js';
+import { signFrontierNativeProofBoundReservationV3 }
+  from './apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.js';
+import * as observedV3 from './substrate-federated-observed-genesis-v3.js';
 import {
   decodePegInPooledReserveLineageProfileV4Hex,
   derivePegInPooledReserveLineageProfileV4IdHex,
@@ -370,9 +400,11 @@ beforeEach(() => {
   mocks.consumedNativeEvidence = new WeakSet<object>();
   mocks.nativeV3Packets = new WeakMap();
   mocks.nativeV3FamilyReceipts = new WeakMap();
+  mocks.frontierTargetCustody = new WeakMap();
   mocks.onV1ContextRead = undefined;
   mocks.onV3ContextRead = undefined;
   vi.clearAllMocks();
+  mocks.observeReservationTarget.mockReset();
   mocks.assertCommittedVaultForCandidate.mockImplementation(
     (observation, batch, candidate, target) => {
       if (
@@ -1545,6 +1577,200 @@ describe('native V3 source-only proof on an explicit operation', () => {
         session.dispose();
       }
     });
+});
+
+describe('native V3 proof-bound sign-only intake', () => {
+  function signingFixture(variant: number) {
+    const session = sessionV2();
+    const operation = createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+    const fixture = nativeV3OperationInput(session, variant);
+    const proof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV3(
+      operation, fixture.input as never);
+    const context = mocks.nativeContexts.get(fixture.draftInputs.batch)!.context as {
+      candidate: Record<string, unknown>;
+      checkpointProfile: object;
+      application: Record<string, unknown>;
+    };
+    const familyReceipt = mocks.nativeV3FamilyReceipts.get(fixture.draftInputs.batch)!;
+    const operator = createFederatedGenesisOperatorV1();
+    const target = fixture.draftInputs.target;
+    const compiled = { candidate: context.candidate, familyReceipt,
+      preparation: { checkpointProfile: context.checkpointProfile, application: context.application,
+        operatorAddressHex: operator.addressHex, launchDomainHex: operator.launchDomainHex } };
+    const frontierTarget = Object.freeze({ genesisJsonSha256Hex: context.candidate.genesisJsonSha256Hex,
+      primaryRpcUrl: 'http://127.0.0.1:19955', witnessRpcUrl: 'http://127.0.0.1:19956' });
+    let compiledActive = true;
+    let frontierActive = true;
+    const compiledCustody = vi.spyOn(observedV3, 'assertObservedSubstrateFederatedGenesisV3')
+      .mockImplementation((value, retainedTarget) => {
+        if (!compiledActive || value !== compiled || retainedTarget !== target) {
+          throw new Error('V3 compiled custody lacks original target provenance');
+        }
+      });
+    mocks.frontierTargetCustody.set(frontierTarget, () => {
+      if (!frontierActive) {
+        throw new Error('Frontier target lacks active original provenance');
+      }
+    });
+    const expectedStorage = { '0x01': '0x02' };
+    const expectedGenesisHashHex = h32('94');
+    const input = { operator, sourceOperation: operation, draftInputs: fixture.draftInputs,
+      draft: fixture.draft, proof, compiled, target, frontierTarget,
+      expectedStorage, expectedGenesisHashHex };
+    mocks.observeReservationTarget.mockResolvedValue({ genesisHashHex: expectedGenesisHashHex, nonce: 0 });
+    return { session, operation, fixture, proof, compiled, frontierTarget, input,
+      setCompiledActive(value: boolean) { compiledActive = value; },
+      setFrontierActive(value: boolean) { frontierActive = value; },
+      dispose() { compiledCustody.mockRestore(); mocks.frontierTargetCustody.delete(frontierTarget);
+        operation.dispose(); session.dispose(); disposeFederatedGenesisOperatorV1(operator); } };
+  }
+
+  it('signs one exact V3 receipt with no execution or broadcast authority', async () => {
+    const state = signingFixture(60);
+    try {
+      const signed = await signFrontierNativeProofBoundReservationV3(state.input as never);
+      expect(signed.sourceProofReceiptDigestHex).toBe(state.proof.receiptDigestHex);
+      expect(signed.mintIdentityHex).toBe(state.proof.mintIdentityHex);
+      expect(signed.genesisHashHex).toBe(state.input.expectedGenesisHashHex);
+      expect(signed.nonce).toBe(0);
+      expect(signed).toMatchObject({ runtimeReservationEstablished: false,
+        mintExecuted: false, broadcastAuthorized: false });
+      expect(mocks.observeReservationTarget).toHaveBeenCalledExactlyOnceWith({
+        expectedStorage: state.input.expectedStorage,
+        expectedGenesisHashHex: state.input.expectedGenesisHashHex,
+        sourceRuntimeCodeSha256Hex: state.compiled.preparation.application.sourceRuntimeCodeSha256Hex,
+        sourceRuntimeCodeBytes: state.compiled.preparation.application.sourceRuntimeCodeBytes,
+        runtimeProfileScaleHex: state.compiled.candidate.runtimeProfileScaleHex,
+        operatorStorageKeyHex: state.input.operator.nativeFunding.storageKeyHex,
+        operatorAccountInfoHex: state.input.operator.nativeFunding.accountInfoScaleHex,
+      });
+      await expect(signFrontierNativeProofBoundReservationV3(state.input as never))
+        .rejects.toThrow(/already consumed/u);
+    } finally { state.dispose(); }
+  });
+
+  it.each(['proof clone', 'draft clone', 'draft input clone', 'foreign operation',
+    'compiled clone', 'target clone', 'Frontier clone', 'family drift',
+    'application drift', 'candidate drift', 'checkpoint drift', 'operator drift',
+    'disposed source', 'extra field', 'accessor'] as const)(
+    'rejects %s before observation or signature', async fault => {
+      const state = signingFixture(61);
+      const primitiveSign = vi.spyOn(SigningKey.prototype, 'sign');
+      try {
+        const changed: Record<string, unknown> = { ...state.input };
+        if (fault === 'proof clone') changed.proof = { ...state.proof };
+        if (fault === 'draft clone') changed.draft = { ...state.fixture.draft };
+        if (fault === 'draft input clone') changed.draftInputs = {
+          ...state.fixture.draftInputs, packet: { ...state.fixture.packet } };
+        if (fault === 'foreign operation') changed.sourceOperation = { ...state.operation };
+        if (fault === 'compiled clone') changed.compiled = { ...state.compiled };
+        if (fault === 'target clone') changed.target = { ...state.input.target };
+        if (fault === 'Frontier clone') changed.frontierTarget = { ...state.frontierTarget };
+        if (fault === 'family drift') state.compiled.familyReceipt = { ...state.compiled.familyReceipt };
+        if (fault === 'application drift') state.compiled.preparation.application = {
+          ...state.compiled.preparation.application };
+        if (fault === 'candidate drift') state.compiled.candidate = {
+          ...state.compiled.candidate };
+        if (fault === 'checkpoint drift') state.compiled.preparation.checkpointProfile = {
+          ...state.compiled.preparation.checkpointProfile };
+        if (fault === 'operator drift') state.compiled.preparation.operatorAddressHex = 'fe'.repeat(20);
+        if (fault === 'disposed source') state.operation.dispose();
+        if (fault === 'extra field') changed.broadcast = true;
+        const getter = vi.fn(() => state.proof);
+        if (fault === 'accessor') Object.defineProperty(changed, 'proof', {
+          enumerable: true, get: getter });
+        await expect(signFrontierNativeProofBoundReservationV3(changed as never))
+          .rejects.toThrow();
+        expect(getter).not.toHaveBeenCalled();
+        expect(mocks.observeReservationTarget).not.toHaveBeenCalled();
+        expect(primitiveSign).not.toHaveBeenCalled();
+      } finally { primitiveSign.mockRestore(); state.dispose(); }
+    });
+
+  it('rejects a V1 receipt in the V3 intake and a V3 receipt in the V1 assertion', async () => {
+    const state = signingFixture(62);
+    const legacySession = sessionV2();
+    const legacyOperation = createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(legacySession);
+    const primitiveSign = vi.spyOn(SigningKey.prototype, 'sign');
+    try {
+      const legacy = nativeOperationInput(legacySession, 63, { withV3Family: true });
+      const legacyProof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+        legacyOperation, legacy.input as never);
+      await expect(signFrontierNativeProofBoundReservationV3({
+        ...state.input, proof: legacyProof } as never)).rejects.toThrow();
+      expect(() => assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1(
+        state.proof as never, state.operation, state.fixture.draft as never)).toThrow();
+      expect(mocks.observeReservationTarget).not.toHaveBeenCalled();
+      expect(primitiveSign).not.toHaveBeenCalled();
+    } finally { primitiveSign.mockRestore(); legacyOperation.dispose(); legacySession.dispose(); state.dispose(); }
+  });
+
+  it('rechecks custody after asynchronous observation before signing', async () => {
+    const state = signingFixture(64);
+    const primitiveSign = vi.spyOn(SigningKey.prototype, 'sign');
+    try {
+      mocks.observeReservationTarget.mockImplementationOnce(async () => {
+        state.setFrontierActive(false);
+        return { genesisHashHex: state.input.expectedGenesisHashHex, nonce: 0 };
+      });
+      await expect(signFrontierNativeProofBoundReservationV3(state.input as never))
+        .rejects.toThrow(/provenance/u);
+      expect(primitiveSign).not.toHaveBeenCalled();
+    } finally { primitiveSign.mockRestore(); state.dispose(); }
+  });
+
+  it('rejects a retained application swap during observation before signing', async () => {
+    const state = signingFixture(67);
+    const primitiveSign = vi.spyOn(SigningKey.prototype, 'sign');
+    try {
+      mocks.observeReservationTarget.mockImplementationOnce(async () => {
+        const { batch, target } = state.fixture.draftInputs;
+        const retained = mocks.nativeContexts.get(batch)!;
+        const context = retained.context as {
+          candidate: object; checkpointProfile: object; application: Record<string, unknown>;
+        };
+        mocks.nativeContexts.set(batch, Object.freeze({
+          target, context: Object.freeze({ ...context, application: { ...context.application } }),
+        }));
+        return { genesisHashHex: state.input.expectedGenesisHashHex, nonce: 0 };
+      });
+      await expect(signFrontierNativeProofBoundReservationV3(state.input as never))
+        .rejects.toThrow(/retained genesis or application changed/u);
+      expect(primitiveSign).not.toHaveBeenCalled();
+    } finally { primitiveSign.mockRestore(); state.dispose(); }
+  });
+
+  it('withholds signed bytes if source custody changes during the primitive signature', async () => {
+    const state = signingFixture(65);
+    const originalSign = SigningKey.prototype.sign;
+    const primitiveSign = vi.spyOn(SigningKey.prototype, 'sign')
+      .mockImplementation(function (this: SigningKey, digest) {
+        const signature = originalSign.call(this, digest);
+        state.operation.dispose();
+        return signature;
+      });
+    try {
+      await expect(signFrontierNativeProofBoundReservationV3(state.input as never))
+        .rejects.toThrow(/disposed/u);
+      expect(primitiveSign).toHaveBeenCalledTimes(1);
+    } finally { primitiveSign.mockRestore(); state.dispose(); }
+  });
+
+  it('allows at most one signature under reentrant observation', async () => {
+    const state = signingFixture(66);
+    const primitiveSign = vi.spyOn(SigningKey.prototype, 'sign');
+    try {
+      let inner: Awaited<ReturnType<typeof signFrontierNativeProofBoundReservationV3>> | undefined;
+      mocks.observeReservationTarget.mockImplementationOnce(async () => {
+        inner = await signFrontierNativeProofBoundReservationV3(state.input as never);
+        return { genesisHashHex: state.input.expectedGenesisHashHex, nonce: 0 };
+      });
+      await expect(signFrontierNativeProofBoundReservationV3(state.input as never))
+        .rejects.toThrow(/already consumed/u);
+      expect(inner).toBeDefined();
+      expect(primitiveSign).toHaveBeenCalledTimes(1);
+    } finally { primitiveSign.mockRestore(); state.dispose(); }
+  });
 });
 
 function sessionV1() {

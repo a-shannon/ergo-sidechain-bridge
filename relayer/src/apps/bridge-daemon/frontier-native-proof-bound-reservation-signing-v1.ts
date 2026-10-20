@@ -36,20 +36,33 @@ import {
   produceSubstrateFederatedNativeGenesisCheckpointAttestationV1,
   assertSubstrateFederatedNativeGenesisCheckpointAttestationV1,
   assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1,
+  assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV3,
   assertSubstrateFederatedNativeGenesisContinuationMintSourceProofPairV1,
   produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1,
   assertSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1,
   type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
   type SubstrateFederatedNativeGenesisSourceAttestationOperationV1,
   type SubstrateFederatedNativeGenesisMintSourceProofReceiptV1,
+  type SubstrateFederatedNativeGenesisMintSourceProofReceiptV3,
   type SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1,
 } from '../../substrate-federated-isolated-devnet-source-attestation-session-v1.js';
-import type { SubstrateFederatedNativeGenesisPegInMintReservationDraftV1 }
+import {
+  assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV3,
+  type SubstrateFederatedNativeGenesisPegInMintReservationDraftV1,
+  type SubstrateFederatedNativeGenesisPegInMintReservationDraftV3,
+  type SubstrateFederatedNativeGenesisPegInMintReservationDraftV3Input,
+}
   from '../../substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
+import { getSubstrateFederatedNativeGenesisPegInFamilyReceiptV3 }
+  from '../../substrate-federated-isolated-devnet-peg-in-candidate-v3.js';
+import { getSubstrateFederatedNativeGenesisRetainedAttestationContextV3 }
+  from '../../substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import {
   assertObservedSubstrateFederatedGenesisV1, assertObservedSubstrateFederatedGenesisReadCustodyV1,
   type ObservedSubstrateFederatedGenesisV1,
 } from '../../substrate-federated-observed-genesis-v1.js';
+import { assertObservedSubstrateFederatedGenesisV3, type ObservedSubstrateFederatedGenesisV3 }
+  from '../../substrate-federated-observed-genesis-v3.js';
 import type { SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1 }
   from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 
@@ -68,6 +81,19 @@ type SigningInput = SigningContext & (
   | { readonly sourceSession: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2> }
   | { readonly sourceOperation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1> }
 );
+
+interface SigningInputV3 {
+  readonly operator: Readonly<FederatedGenesisOperatorV1>;
+  readonly sourceOperation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>;
+  readonly draftInputs: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV3Input>;
+  readonly draft: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV3>;
+  readonly proof: Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV3>;
+  readonly compiled: Readonly<ObservedSubstrateFederatedGenesisV3>;
+  readonly target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+  readonly frontierTarget: Readonly<OwnedFederatedGenesisDevnetTargetV1>;
+  readonly expectedStorage: Readonly<Record<string, string>>;
+  readonly expectedGenesisHashHex: string;
+}
 
 const burnExecutions = new WeakMap<object, {
   retained: ReturnType<typeof capture>;
@@ -137,6 +163,11 @@ export function assertFrontierNativeBurnCheckpointV1(value: unknown): asserts va
 /** Caller must reobserve the owned target before transport. A signature is not acceptance. */
 export async function signFrontierNativeProofBoundReservationV1(input: Readonly<SigningInput>) {
   return signCaptured(capture(input));
+}
+
+/** V3 proof and compiled family only; this signs no runtime reservation or transport. */
+export async function signFrontierNativeProofBoundReservationV3(input: Readonly<SigningInputV3>) {
+  return signCapturedV3(captureV3(input));
 }
 
 /** Owns one explicit local attempt. Inclusion remains observation, not mint authority. */
@@ -482,6 +513,62 @@ function capture(input: Readonly<SigningInput>) {
   return { input, assertCurrent, observe };
 }
 
+function captureV3(input: Readonly<SigningInputV3>) {
+  exact(input, ['operator', 'sourceOperation', 'draftInputs', 'draft', 'proof', 'compiled', 'target',
+    'frontierTarget', 'expectedStorage', 'expectedGenesisHashHex']);
+  assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV3(input.draft, input.draftInputs);
+  exact(input.expectedStorage, Object.getOwnPropertyNames(input.expectedStorage));
+  const frozenInput = Object.freeze({ ...input,
+    draftInputs: Object.freeze({ ...input.draftInputs }),
+    expectedStorage: Object.freeze({ ...input.expectedStorage }) });
+  const { operator, sourceOperation, draftInputs, draft, proof, compiled, target, frontierTarget,
+    expectedStorage, expectedGenesisHashHex } = frozenInput;
+  const { batch, packet } = draftInputs;
+  if (draftInputs.target !== target) throw new Error('native V3 reservation target differs from exact draft inputs');
+  const context = getSubstrateFederatedNativeGenesisRetainedAttestationContextV3(batch, target);
+  const familyReceipt = getSubstrateFederatedNativeGenesisPegInFamilyReceiptV3(packet, batch, target);
+  const assertCurrent = () => {
+    assertFederatedGenesisOperatorV1(operator);
+    assertObservedSubstrateFederatedGenesisV3(compiled, target);
+    assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV3(draft, draftInputs);
+    assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV3(proof, sourceOperation, draft);
+    assertOwnedFederatedGenesisDevnetTargetV1(frontierTarget);
+    const currentContext = getSubstrateFederatedNativeGenesisRetainedAttestationContextV3(batch, target);
+    const currentFamilyReceipt = getSubstrateFederatedNativeGenesisPegInFamilyReceiptV3(packet, batch, target);
+    if (currentContext.candidate !== context.candidate
+      || currentContext.checkpointProfile !== context.checkpointProfile
+      || currentContext.application !== context.application
+      || currentFamilyReceipt !== familyReceipt
+      || compiled.candidate !== context.candidate
+      || compiled.preparation.checkpointProfile !== context.checkpointProfile
+      || compiled.preparation.application !== context.application
+      || compiled.familyReceipt !== familyReceipt
+      || compiled.preparation.operatorAddressHex !== operator.addressHex
+      || compiled.preparation.launchDomainHex !== operator.launchDomainHex
+      || compiled.candidate.genesisJsonSha256Hex !== proof.genesisJsonSha256Hex
+      || compiled.candidate.runtimeProfileScaleHex !== proof.runtimeProfileScaleHex
+      || compiled.candidate.runtimeProfileIdHex !== proof.runtimeProfileIdHex
+      || frontierTarget.genesisJsonSha256Hex !== compiled.candidate.genesisJsonSha256Hex
+      || frontierTarget.primaryRpcUrl !== 'http://127.0.0.1:19955'
+      || frontierTarget.witnessRpcUrl !== 'http://127.0.0.1:19956') {
+      throw new Error('native V3 reservation proof differs from retained operator, compiler family or genesis');
+    }
+  };
+  const observe = async () => {
+    assertCurrent();
+    const result = await observeFederatedGenesisReservationTargetV1({ expectedStorage, expectedGenesisHashHex,
+      sourceRuntimeCodeSha256Hex: compiled.preparation.application.sourceRuntimeCodeSha256Hex,
+      sourceRuntimeCodeBytes: compiled.preparation.application.sourceRuntimeCodeBytes,
+      runtimeProfileScaleHex: compiled.candidate.runtimeProfileScaleHex,
+      operatorStorageKeyHex: operator.nativeFunding.storageKeyHex,
+      operatorAccountInfoHex: operator.nativeFunding.accountInfoScaleHex });
+    assertCurrent();
+    return result;
+  };
+  assertCurrent();
+  return { input: frozenInput, assertCurrent, observe };
+}
+
 function captureContinuation(
   input: Readonly<SigningInput>,
   previous: ReturnType<typeof capture>,
@@ -556,6 +643,18 @@ function exact(input: unknown, fields: readonly string[]): void {
 async function signCaptured(retained: ReturnType<typeof capture>) {
   const { operator, proof } = retained.input;
   const { genesisHashHex, nonce } = await retained.observe();
+  const signed = signFederatedGenesisReservationV1(operator, { genesisHashHex, nonce,
+    statementHex: proof.request.statementHex, sourceProofEnvelopeScaleHex: proof.sourceProofEnvelopeScaleHex });
+  retained.assertCurrent();
+  return Object.freeze({ ...signed, sourceProofReceiptDigestHex: proof.receiptDigestHex,
+    mintIdentityHex: proof.mintIdentityHex, runtimeProfileIdHex: proof.runtimeProfileIdHex,
+    runtimeReservationEstablished: false as const, mintExecuted: false as const, broadcastAuthorized: false as const });
+}
+
+async function signCapturedV3(retained: ReturnType<typeof captureV3>) {
+  const { operator, proof } = retained.input;
+  const { genesisHashHex, nonce } = await retained.observe();
+  retained.assertCurrent();
   const signed = signFederatedGenesisReservationV1(operator, { genesisHashHex, nonce,
     statementHex: proof.request.statementHex, sourceProofEnvelopeScaleHex: proof.sourceProofEnvelopeScaleHex });
   retained.assertCurrent();

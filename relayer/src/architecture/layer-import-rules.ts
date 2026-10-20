@@ -233,17 +233,33 @@ const REVIEWED_NATIVE_RESERVATION_SIGNING_BINDINGS: ReadonlyMap<string, Readonly
     'produceSubstrateFederatedNativeGenesisCheckpointAttestationV1',
     'assertSubstrateFederatedNativeGenesisCheckpointAttestationV1',
     'assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1',
+    'assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV3',
     'assertSubstrateFederatedNativeGenesisContinuationMintSourceProofPairV1',
     'produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1',
     'assertSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1',
     'SubstrateFederatedNativeGenesisSourceAttestationOperationV1',
     'SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2', 'SubstrateFederatedNativeGenesisMintSourceProofReceiptV1',
     'SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1',
+    'SubstrateFederatedNativeGenesisMintSourceProofReceiptV3',
   ])],
-  ['substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.ts', new Set(['SubstrateFederatedNativeGenesisPegInMintReservationDraftV1'])],
+  ['substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.ts', new Set([
+    'SubstrateFederatedNativeGenesisPegInMintReservationDraftV1',
+    'assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV3',
+    'SubstrateFederatedNativeGenesisPegInMintReservationDraftV3',
+    'SubstrateFederatedNativeGenesisPegInMintReservationDraftV3Input',
+  ])],
+  ['substrate-federated-isolated-devnet-peg-in-candidate-v3.ts', new Set([
+    'getSubstrateFederatedNativeGenesisPegInFamilyReceiptV3',
+  ])],
+  ['substrate-federated-isolated-devnet-setup-check-execution-v2.ts', new Set([
+    'getSubstrateFederatedNativeGenesisRetainedAttestationContextV3',
+  ])],
   ['substrate-federated-observed-genesis-v1.ts', new Set([
     'assertObservedSubstrateFederatedGenesisV1', 'assertObservedSubstrateFederatedGenesisReadCustodyV1',
     'ObservedSubstrateFederatedGenesisV1',
+  ])],
+  ['substrate-federated-observed-genesis-v3.ts', new Set([
+    'assertObservedSubstrateFederatedGenesisV3', 'ObservedSubstrateFederatedGenesisV3',
   ])],
   ['substrate-federated-isolated-devnet-ergo-node-process-v1.ts', new Set([
     'SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1',
@@ -1726,6 +1742,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
 > = new Map([
   [FEDERATED_NATIVE_RESERVATION_SIGNING, new Set([
     'signFrontierNativeProofBoundReservationV1', 'executeFrontierNativeProofBoundReservationV1',
+    'signFrontierNativeProofBoundReservationV3',
     'executeFrontierNativeProofBoundContinuationReservationV1',
     'executeFrontierNativeProofBoundContinuationMintAndBurnV1',
     'executeFrontierNativeProofBoundReservationAndMintV1',
@@ -2061,6 +2078,9 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
   ])],
   [FEDERATED_NATIVE_RESERVATION_SIGNING, new Map([
     ['signFrontierNativeProofBoundReservationV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
+    ['signFrontierNativeProofBoundReservationV3', new Set([
+      'substrate-federated-isolated-devnet-source-attestation-mint-proof-v1.test.ts',
+    ])],
     ['executeFrontierNativeProofBoundReservationV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['executeFrontierNativeProofBoundContinuationReservationV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['executeFrontierNativeProofBoundContinuationMintAndBurnV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
@@ -2333,6 +2353,10 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
       ['getSubstrateFederatedNativeGenesisRetainedAttestationContextV1', new Set([
         'substrate-federated-isolated-devnet-source-attestation-session-v1.ts',
       ])] as const,
+      ['getSubstrateFederatedNativeGenesisRetainedAttestationContextV3', new Set([
+        'substrate-federated-isolated-devnet-source-attestation-session-v1.ts',
+        FEDERATED_NATIVE_RESERVATION_SIGNING,
+      ])] as const,
     ])),
   ],
   [
@@ -2348,6 +2372,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
     new Map([
       ['getSubstrateFederatedNativeGenesisPegInFamilyReceiptV3', new Set([
         'substrate-federated-isolated-devnet-source-attestation-session-v1.ts',
+        FEDERATED_NATIVE_RESERVATION_SIGNING,
       ])],
     ]),
   ],
@@ -2534,7 +2559,10 @@ const EXCLUSIVE_RUNTIME_MODULE_IMPORT_OWNERS: ReadonlyMap<
   [FEDERATED_GENESIS_TARGET_ROOT, new Set([FEDERATED_NATIVE_TWO_CYCLE_WORKER])],
   [FEDERATED_NATIVE_TWO_CYCLE_WORKER, new Set<string>()],
   [FEDERATED_GENESIS_OPERATOR, new Set([FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_NATIVE_RESERVATION_SIGNING])],
-  [FEDERATED_NATIVE_RESERVATION_SIGNING, new Set([FEDERATED_GENESIS_TARGET_ROOT])],
+  [FEDERATED_NATIVE_RESERVATION_SIGNING, new Set([
+    FEDERATED_GENESIS_TARGET_ROOT,
+    'substrate-federated-isolated-devnet-source-attestation-mint-proof-v1.test.ts',
+  ])],
   [FEDERATED_GENESIS_TARGET_OBSERVATION, new Set([FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_NATIVE_RESERVATION_SIGNING])],
   [FEDERATED_NATIVE_RESERVATION_EXECUTION, new Set([FEDERATED_NATIVE_RESERVATION_SIGNING, FEDERATED_GENESIS_OPERATOR])],
   [

@@ -519,6 +519,25 @@ describe('layer import rules', () => {
   });
 
   it.each([
+    ['substrate-federated-isolated-devnet-setup-check-execution-v2',
+      'getSubstrateFederatedNativeGenesisRetainedAttestationContextV3'],
+    ['substrate-federated-isolated-devnet-peg-in-candidate-v3',
+      'getSubstrateFederatedNativeGenesisPegInFamilyReceiptV3'],
+  ])('reserves V3 signer evidence read %s#%s to exact consumers', (module, binding) => {
+    const signer = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
+    const specifier = `../../${module}.js`;
+    const source = `import { ${binding} } from '${specifier}'; ${binding}();`;
+    expect(inspect(staticAppFixture(signer, source))).toEqual([]);
+    const session = 'substrate-federated-isolated-devnet-source-attestation-session-v1.ts';
+    const sessionSpecifier = `./${module}.js`;
+    expect(inspect(staticAppFixture(session,
+      `import { ${binding} } from '${sessionSpecifier}'; ${binding}();`))).toEqual([]);
+    expect(inspect(staticAppFixture('apps/bridge-daemon/foreign.ts', source))
+      .map(item => item.message)).toContain(
+      `exclusive authority import has the wrong owner: ${specifier}#${binding}`);
+  });
+
+  it.each([
     ['./frontier-native-proof-bound-reservation-signing-v1.js', 'executeFrontierNativeProofBoundReservationAndMintV1'],
     ['../../substrate-federated-isolated-devnet-setup-check-runner-v2.js', 'claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2'],
   ])('rejects superseded mint-only root binding %s#%s', (specifier, binding) => {
@@ -1003,6 +1022,33 @@ describe('layer import rules', () => {
       .map(item => item.message)).toContain(
       'exclusive runtime module import has the wrong owner: ./adapters/federated-genesis-operator-v1.js',
     );
+  });
+
+  it('limits V3 reservation signing to its named direct test, without granting a runtime caller', () => {
+    const signer = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
+    const test = 'substrate-federated-isolated-devnet-source-attestation-mint-proof-v1.test.ts';
+    const specifier = `./${signer.replace(/\.ts$/, '.js')}`;
+    const v3 = 'signFrontierNativeProofBoundReservationV3';
+    const v1 = 'signFrontierNativeProofBoundReservationV1';
+    expect(inspect(staticAppFixture(test,
+      `import { ${v3} } from '${specifier}'; await ${v3}({});`))).toEqual([]);
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+      `import { ${v3} } from './frontier-native-proof-bound-reservation-signing-v1.js'; ${v3}({});`))
+      .map(item => item.message)).toContain(
+      `exclusive authority import has the wrong owner: ./frontier-native-proof-bound-reservation-signing-v1.js#${v3}`);
+    expect(inspect(staticAppFixture(test,
+      `import { ${v1} } from '${specifier}'; ${v1}({});`)).map(item => item.message)).toContain(
+      `exclusive authority import has the wrong owner: ${specifier}#${v1}`);
+    expect(inspect(staticAppFixture('substrate-federated-isolated-devnet-foreign.test.ts',
+      `import { ${v3} } from '${specifier}'; ${v3}({});`)).map(item => item.message)).toContain(
+      `exclusive runtime module import has the wrong owner: ${specifier}`);
+    expect(inspect(staticAppFixture(test,
+      `import { ${v3} as sign } from '${specifier}'; sign({});`)).map(item => item.message)).toContain(
+      `exclusive authority import must not be aliased: ${specifier}#${v3}`);
+    expect(inspect(staticAppFixture(test,
+      `import * as signerModule from '${specifier}'; signerModule.${v3}({});`))
+      .map(item => item.message)).toContain(
+      `exclusive authority module must use named runtime imports: ${specifier}`);
   });
 
   it.each([
