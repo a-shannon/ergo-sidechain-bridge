@@ -2344,6 +2344,14 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
     ]),
   ],
   [
+    'substrate-federated-isolated-devnet-peg-in-candidate-v3.ts',
+    new Map([
+      ['getSubstrateFederatedNativeGenesisPegInFamilyReceiptV3', new Set([
+        'substrate-federated-isolated-devnet-source-attestation-session-v1.ts',
+      ])],
+    ]),
+  ],
+  [
     'substrate-federated-isolated-devnet-source-attestation-session-v1.ts',
     new Map([
       ['assertSubstrateFederatedNativeGenesisContinuationMintSourceProofPairV1', new Set([
@@ -2827,6 +2835,12 @@ function inspectExclusiveRuntimeAuthorityImport(
     && imported.value === './substrate-federated-isolated-devnet-peg-in-candidate-v2.js'
     && imported.form === 'dynamic-import' && imported.bindings.length === 1
     && imported.bindings[0]!.imported === 'assertSubstrateFederatedNativeContinuationPegInPacketV1'
+    && imported.bindings[0]!.local === imported.bindings[0]!.imported) return [];
+  // The V3 setup/packet cycle likewise takes only its existing named packet assertion.
+  if (file === 'substrate-federated-isolated-devnet-setup-check-execution-v2.ts'
+    && imported.value === './substrate-federated-isolated-devnet-peg-in-candidate-v3.js'
+    && imported.form === 'dynamic-import' && imported.bindings.length === 1
+    && imported.bindings[0]!.imported === 'assertSubstrateFederatedNativeGenesisPegInPacketV3'
     && imported.bindings[0]!.local === imported.bindings[0]!.imported) return [];
   if (file === 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign.ts'
     && imported.value === './run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.js'

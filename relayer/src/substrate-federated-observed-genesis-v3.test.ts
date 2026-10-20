@@ -72,7 +72,8 @@ import { decodeSubstrateFederatedSettlementFamilyV1Profile }
   from './substrate-federated-settlement-family-v1.js';
 import { buildSubstrateFederatedNativeGenesisPegInPacketV3 as buildNativePegInV3,
   assertSubstrateFederatedNativeGenesisPegInPacketV3 as assertNativePegInV3,
-  assertSubstrateFederatedNativeGenesisPegInReadCustodyV3 as assertNativeReadCustodyV3 }
+  assertSubstrateFederatedNativeGenesisPegInReadCustodyV3 as assertNativeReadCustodyV3,
+  getSubstrateFederatedNativeGenesisPegInFamilyReceiptV3 as getNativeFamilyReceiptV3 }
   from './substrate-federated-isolated-devnet-peg-in-candidate-v3.js';
 import { createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV3 }
   from './substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.js';
@@ -352,6 +353,13 @@ describe('observed FED genesis V3 compilation and retained execution', () => {
       .toBe(batch.request.orderedIssuances[2]!.predictedStateOutput.boxIdHex);
     expect(pegInPacket.invariants.exactFederatedFamilyBound).toBe(true);
     expect(assertNativePegInV3(pegInPacket, batch, target)).toBe(pegInPacket);
+    expect(getNativeFamilyReceiptV3(pegInPacket, batch, target)).toBe(compiled.familyReceipt);
+    expect(() => getNativeFamilyReceiptV3({ ...pegInPacket }, batch, target))
+      .toThrow(/read custody/);
+    expect(() => getNativeFamilyReceiptV3(pegInPacket, { ...batch }, target))
+      .toThrow(/read custody/);
+    expect(() => getNativeFamilyReceiptV3(pegInPacket, batch, { ...target }))
+      .toThrow(/read custody/);
     expect(() => assertNativePegInV3({ ...pegInPacket }, batch, target))
       .toThrow(/process provenance/);
     expect(() => assertNativePegInV3(pegInPacket, { ...batch }, target))
@@ -446,6 +454,7 @@ describe('observed FED genesis V3 compilation and retained execution', () => {
     expect(uncheckedSameTxPacket.transactions.sourceLockCreation.txId)
       .toBe(pegInPacket.transactions.sourceLockCreation.txId);
     const sourceLock = await setup.checkNativePegInSourceLockRetainingSignerV3(pegInPacket, target);
+    expect(getNativeFamilyReceiptV3(pegInPacket, batch, target)).toBe(compiled.familyReceipt);
     expect(sourceLock.unsignedTransactionIdHex).toBe(pegInPacket.transactions.sourceLockCreation.txId);
     expect(sourceLock.sourceFundingBoxIdHex).toBe(pegInPacket.boxes.sourceFundingInput.boxId);
     expect(sourceLock.boundaries.broadcastAuthorityEstablished).toBe(false);
@@ -618,6 +627,7 @@ describe('observed FED genesis V3 compilation and retained execution', () => {
       .toThrow();
     expect(() => assertNativePegInV3(pegInPacket, batch, target)).toThrow();
     expect(() => assertNativeReadCustodyV3(pegInPacket, batch, target)).toThrow();
+    expect(() => getNativeFamilyReceiptV3(pegInPacket, batch, target)).toThrow();
     expect(() => assertSubstrateFederatedNativeGenesisPegInCommittedVaultExecutionCheckV3(
       promotedVault, pegInPacket, batch, target)).toThrow(/inactive/);
   }, 120_000);

@@ -506,6 +506,18 @@ describe('layer import rules', () => {
     }
   });
 
+  it('reserves retained V3 compiler receipt reads to source attestation', () => {
+    const binding = 'getSubstrateFederatedNativeGenesisPegInFamilyReceiptV3';
+    const specifier = './substrate-federated-isolated-devnet-peg-in-candidate-v3.js';
+    const owner = 'substrate-federated-isolated-devnet-source-attestation-session-v1.ts';
+    expect(inspect(staticAppFixture(owner,
+      `import { ${binding} } from '${specifier}'; ${binding}(packet, batch, target);`))).toEqual([]);
+    expect(inspect(staticAppFixture('foreign.ts',
+      `import { ${binding} } from '${specifier}'; ${binding}(packet, batch, target);`))
+      .map(item => item.message)).toContain(
+      `exclusive authority import has the wrong owner: ${specifier}#${binding}`);
+  });
+
   it.each([
     ['./frontier-native-proof-bound-reservation-signing-v1.js', 'executeFrontierNativeProofBoundReservationAndMintV1'],
     ['../../substrate-federated-isolated-devnet-setup-check-runner-v2.js', 'claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2'],
@@ -1554,6 +1566,26 @@ describe('layer import rules', () => {
         .toContain(`exclusive authority module must use named runtime imports: ./${module}.js`);
     }
     expect(inspect({ ...producer, 'other-continuation-caller.ts': source }).map(item => item.message))
+      .toContain(`exclusive authority module must use named runtime imports: ./${module}.js`);
+  });
+
+  it('preserves only the exact named dynamic V3 setup-to-packet assertion', () => {
+    const module = 'substrate-federated-isolated-devnet-peg-in-candidate-v3';
+    const owner = 'substrate-federated-isolated-devnet-setup-check-execution-v2.ts';
+    const symbol = 'assertSubstrateFederatedNativeGenesisPegInPacketV3';
+    const source = `async function check() { const { ${symbol} } = await import('./${module}.js'); ${symbol}(); }`;
+    const producer = { [`${module}.ts`]: `export const ${symbol} = () => {};` };
+    expect(inspect({ ...producer, [owner]: source })).toEqual([]);
+    for (const rejected of [
+      `async function check() { const namespace = await import('./${module}.js'); namespace.${symbol}(); }`,
+      `async function check() { const { ${symbol}: alias } = await import('./${module}.js'); alias(); }`,
+      `async function check() { const { ${symbol}, getSubstrateFederatedNativeGenesisPegInFamilyReceiptV3 } = await import('./${module}.js'); ${symbol}(); }`,
+      `async function check() { const { getSubstrateFederatedNativeGenesisPegInFamilyReceiptV3 } = await import('./${module}.js'); }`,
+    ]) {
+      expect(inspect({ ...producer, [owner]: rejected }).map(item => item.message))
+        .toContain(`exclusive authority module must use named runtime imports: ./${module}.js`);
+    }
+    expect(inspect({ ...producer, 'other-setup-caller.ts': source }).map(item => item.message))
       .toContain(`exclusive authority module must use named runtime imports: ./${module}.js`);
   });
 

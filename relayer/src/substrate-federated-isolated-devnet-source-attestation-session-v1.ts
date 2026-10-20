@@ -46,8 +46,11 @@ import {
 } from './substrate-federated-pooled-reserve-source-proof-v1.js';
 import {
   assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV1,
+  assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV3,
   type SubstrateFederatedNativeGenesisPegInMintReservationDraftV1,
   type SubstrateFederatedNativeGenesisPegInMintReservationDraftV1Input,
+  type SubstrateFederatedNativeGenesisPegInMintReservationDraftV3,
+  type SubstrateFederatedNativeGenesisPegInMintReservationDraftV3Input,
   assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
   assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_FINALITY_POLICY_ID_V1_HEX,
@@ -56,7 +59,9 @@ import {
 } from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
 import {
   consumeSubstrateFederatedNativeGenesisCommittedReserveEvidenceForDraftV1,
+  consumeSubstrateFederatedNativeGenesisCommittedReserveEvidenceForDraftV3,
   type SubstrateFederatedNativeGenesisCommittedReserveEvidenceReceiptV1,
+  type SubstrateFederatedNativeGenesisCommittedReserveEvidenceReceiptV3,
   consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV1,
   consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV2,
   type SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1,
@@ -64,7 +69,11 @@ import {
 import {
   getSubstrateFederatedNativeGenesisAttestationContextV1,
   getSubstrateFederatedNativeGenesisRetainedAttestationContextV1,
+  getSubstrateFederatedNativeGenesisRetainedAttestationContextV3,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import { assertSubstrateFederatedNativeGenesisPegInReadCustodyV3,
+  getSubstrateFederatedNativeGenesisPegInFamilyReceiptV3 }
+  from './substrate-federated-isolated-devnet-peg-in-candidate-v3.js';
 import {
   assertSubstrateFederatedNativeGenesisPegInReadCustodyV1,
   getSubstrateFederatedNativeGenesisPegInAttestationProvenanceV1,
@@ -128,6 +137,7 @@ const V2_GENESIS_PROFILES = new WeakMap<object, () => Readonly<{
 const MINT_SOURCE_PROOF_RECEIPTS = new WeakSet<object>();
 const MINT_SOURCE_PROOF_V2_RECEIPTS = new WeakSet<object>();
 const NATIVE_MINT_PROOF_DOMAIN = 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_MINT_SOURCE_PROOF_V1';
+const NATIVE_MINT_PROOF_V3_DOMAIN = 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_MINT_SOURCE_PROOF_V3';
 const NATIVE_OPERATION_FACTORIES = new WeakMap<object, () => Readonly<
   SubstrateFederatedNativeGenesisSourceAttestationOperationV1
 >>();
@@ -139,6 +149,15 @@ const NATIVE_OPERATIONS = new WeakMap<object, Readonly<{
 const NATIVE_MINT_PRODUCERS = new WeakMap<object, (
   input: Readonly<ProduceSubstrateFederatedNativeGenesisMintSourceProofV1Input>,
 ) => Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV1>>();
+const NATIVE_MINT_V3_PRODUCERS = new WeakMap<object, (
+  input: Readonly<ProduceSubstrateFederatedNativeGenesisMintSourceProofV3Input>,
+) => Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV3>>();
+const NATIVE_MINT_V3_RECEIPTS = new WeakMap<object, Readonly<{
+  session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>;
+  operation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>;
+  draft: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV3>;
+  assertCurrent: () => void;
+}>>();
 const NATIVE_MINT_RECEIPTS = new WeakMap<object, Readonly<{
   session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>;
   operation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>;
@@ -435,6 +454,14 @@ export interface ProduceSubstrateFederatedNativeGenesisMintSourceProofV1Input {
   readonly expiresAtNativeHeight: string | number | bigint;
 }
 
+export interface ProduceSubstrateFederatedNativeGenesisMintSourceProofV3Input {
+  readonly draftInputs: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV3Input>;
+  readonly draft: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV3>;
+  readonly evidenceReceipt: Readonly<SubstrateFederatedNativeGenesisCommittedReserveEvidenceReceiptV3>;
+  readonly issuedAtNativeHeight: string | number | bigint;
+  readonly expiresAtNativeHeight: string | number | bigint;
+}
+
 export interface SubstrateFederatedNativeGenesisMintSourceProofReceiptV1 extends Pick<
   SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2,
   'status' | 'sourceAttestationBindingDigestHex' | 'sourceEvidenceReceiptDigestHex'
@@ -450,6 +477,26 @@ export interface SubstrateFederatedNativeGenesisMintSourceProofReceiptV1 extends
   readonly checks: Readonly<{
     exactOriginalDraftInputsBound: true;
     exactRetainedGenesisProfileBound: true;
+    heightZeroProfileRequired: true;
+    exactSourceEvidenceReceiptBound: true;
+    exactThresholdSignatureSetVerified: true;
+    oneShotCapabilityConsumed: true;
+  }>;
+}
+
+/** Source proof only; V3 does not enter the V1 checkpoint or signing route. */
+export interface SubstrateFederatedNativeGenesisMintSourceProofReceiptV3 extends Omit<
+  SubstrateFederatedNativeGenesisMintSourceProofReceiptV1,
+  'schema' | 'version' | 'provenance' | 'checks'
+> {
+  readonly schema: 'e2s.substrate-federated-native-genesis-mint-source-proof.v3';
+  readonly version: 3;
+  readonly provenance: SubstrateFederatedNativeGenesisPegInMintReservationDraftV3['provenance'];
+  readonly familyIdHex: string;
+  readonly checks: Readonly<{
+    exactOriginalDraftInputsBound: true;
+    exactRetainedGenesisProfileBound: true;
+    exactV3FamilyCompilerBound: true;
     heightZeroProfileRequired: true;
     exactSourceEvidenceReceiptBound: true;
     exactThresholdSignatureSetVerified: true;
@@ -1583,6 +1630,10 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
       applicationDigestHex,
     );
     assertCurrent();
+    // Custody validation may synchronously reenter another producer on this operation.
+    if (mintProofProduced || producedNativeMintIdentities.has(draft.reservationKeyHex)) {
+      throw new Error('native mint source-proof capability is already consumed');
+    }
     if (!explicit) {
       if (nativeOperationMode === 'explicit') {
         throw new Error('native source-attestation session is bound to explicit operations');
@@ -1647,6 +1698,174 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
       throw error;
     }
   });
+    NATIVE_MINT_V3_PRODUCERS.set(operation, input => {
+      assertOperationCurrent();
+      if (!explicit) throw new Error('native V3 source proof requires an explicit operation');
+      if (launchSigningStarted) throw new Error('native V3 mint proof cannot use a LAB launch session');
+      if (mintProofProduced) throw new Error('native mint source-proof capability is already consumed');
+      exactRecord(input, ['draftInputs', 'draft', 'evidenceReceipt', 'issuedAtNativeHeight',
+        'expiresAtNativeHeight'], 'native V3 mint source-proof input');
+      if (Reflect.ownKeys(input).length !== 5) {
+        throw new Error('native V3 mint proof requires exact own-data fields');
+      }
+      assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV3(input.draft, input.draftInputs);
+      input = Object.freeze({ ...input, draftInputs: Object.freeze({ ...input.draftInputs }) });
+      const { draft, draftInputs, evidenceReceipt } = input;
+      const { batch, target, packet, committedVaultObservation } = draftInputs;
+      if (producedNativeMintIdentities.has(draft.reservationKeyHex)) {
+        throw new Error('native mint identity is already bound to another source-attestation operation');
+      }
+      const readContext = () => getSubstrateFederatedNativeGenesisRetainedAttestationContextV3(
+        batch, target);
+      const context = readContext();
+      const candidate = context.candidate;
+      const candidateDigestHex = sha256CanonicalJson(candidate);
+      const applicationDigestHex = sha256CanonicalJson(context.application);
+      const runtimeProfile = decodePooledReserveMintReservationRuntimeProfileV4ScaleHex(
+        candidate.runtimeProfileScaleHex);
+      const runtimeProfileIdHex = derivePooledReserveMintReservationRuntimeProfileV4IdHex(runtimeProfile);
+      const familyReceipt = getSubstrateFederatedNativeGenesisPegInFamilyReceiptV3(
+        packet, batch, target);
+      const expectedCompiler = Object.freeze({
+        trackerAnchorSelector: familyReceipt.trackerAnchorSelector,
+        settlementLayout: familyReceipt.settlementLayout,
+        trackerRequestDigestHex: familyReceipt.trackerCompilerRequestDigestHex,
+        trackerReceiptDigestHex: familyReceipt.trackerCompilerReceiptDigestHex,
+        familyRequestDigestHex: familyReceipt.familyCompilerRequestDigestHex,
+        familyReceiptDigestHex: familyReceipt.receiptDigestHex,
+        compilerLockDigestHex: familyReceipt.compilerLockDigestHex,
+      });
+      const assertFamily = () => {
+        const currentFamily = getSubstrateFederatedNativeGenesisPegInFamilyReceiptV3(
+          packet, batch, target);
+        if (currentFamily !== familyReceipt
+          || fixedHex(packet.familyIdHex, 32, 'native V3 packet family ID')
+            !== fixedHex(candidate.familyIdHex, 32, 'native V3 candidate family ID')
+          || fixedHex(runtimeProfile.lineageProfileIdHex, 32, 'native V3 runtime family ID')
+            !== fixedHex(packet.familyIdHex, 32, 'native V3 packet family ID')
+          || fixedHex(familyReceipt.profile.familyIdHex, 32, 'native V3 compiled family ID')
+            !== fixedHex(packet.familyIdHex, 32, 'native V3 packet family ID')
+          || draft.provenance.profile !== 'fed-native-height-zero-v3-reserve-v7') {
+          throw new Error('native V3 mint proof requires the exact retained family');
+        }
+        for (const key of Object.keys(expectedCompiler) as Array<keyof typeof expectedCompiler>) {
+          if (packet.familyCompiler[key] !== expectedCompiler[key]
+            || draft.provenance.familyCompiler[key] !== expectedCompiler[key]) {
+            throw new Error(`native V3 mint proof ${key} compiler binding changed`);
+          }
+        }
+      };
+      if (runtimeProfile.activationHeight !== '0'
+        || runtimeProfileIdHex !== candidate.runtimeProfileIdHex
+        || runtimeProfile.sourceProofProfileIdHex !== federatedMintProfile.proofProfileIdHex
+        || runtimeProfile.sourceProofSystemIdHex !== federatedMintProfile.proofSystemIdHex
+        || sha256CanonicalJson(context.checkpointProfile) !== sha256CanonicalJson(checkpointProfile)) {
+        throw new Error('native V3 mint proof requires the exact retained height-zero federation profile');
+      }
+      assertFamily();
+      const issued = uint64(input.issuedAtNativeHeight, 'native V3 source-proof issue height');
+      const expires = uint64(input.expiresAtNativeHeight, 'native V3 source-proof expiry height');
+      assertMintSourceProofWindow(issued, expires, 0n, BigInt(runtimeProfile.maxPendingBlocks),
+        BigInt(federatedMintProfile.maxValidityBlocks));
+      const assertCurrent = () => {
+        assertOperationCurrent();
+        assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV3(draft, draftInputs);
+        if (assertSubstrateFederatedNativeGenesisPegInReadCustodyV3(packet, batch, target) !== packet) {
+          throw new Error('native V3 mint proof packet read custody changed');
+        }
+        const current = readContext();
+        if (current.candidate !== candidate || current.application !== context.application
+          || sha256CanonicalJson(current.candidate) !== candidateDigestHex
+          || sha256CanonicalJson(current.application) !== applicationDigestHex
+          || sha256CanonicalJson(current.checkpointProfile) !== sha256CanonicalJson(checkpointProfile)) {
+          throw new Error('native V3 mint proof retained genesis or application changed');
+        }
+        assertFamily();
+        assertNativeContextMatchesParent(target, current.candidate, current.application,
+          candidateDigestHex, applicationDigestHex);
+        if (committedVaultObservation.observationDigestHex
+          !== draft.provenance.committedVaultObservationDigestHex) {
+          throw new Error('native V3 mint proof observation changed');
+        }
+      };
+      assertCurrent();
+      retainNativeContext(target, candidate, context.application,
+        candidateDigestHex, applicationDigestHex);
+      assertCurrent();
+      // Both versions claim the same operation slot only after all reentrant reads.
+      if (mintProofProduced || producedNativeMintIdentities.has(draft.reservationKeyHex)) {
+        throw new Error('native mint source-proof capability is already consumed');
+      }
+      nativeMintSigningStarted = true;
+      mintProofProduced = true;
+      producedNativeMintIdentities.add(draft.reservationKeyHex);
+      try {
+        const evidence = consumeSubstrateFederatedNativeGenesisCommittedReserveEvidenceForDraftV3(
+          evidenceReceipt, draft);
+        const request = deepFreeze({ runtimeProfile, statementHex: draft.statementHex,
+          evidence: canonicalEvidence(evidence), issuedAtNativeHeight: issued.toString(),
+          expiresAtNativeHeight: expires.toString() } satisfies FederatedPooledReserveSourceProofRequestV1);
+        const requestDigestHex = deriveFederatedPooledReserveSourceProofRequestDigestForProfileV1Hex(
+          mintProfileInput, request);
+        const result = buildFederatedPooledReserveSourceProofResultFieldsForProfileV1(
+          mintProfileInput, request);
+        const resultIdHex = deriveFederatedPooledReserveSourceProofResultIdForProfileV1Hex(
+          mintProfileInput, request, result);
+        const attestationDigestHex = deriveFederatedPooledReserveSourceProofAttestationDigestV1Hex(
+          resultIdHex);
+        assertCurrent();
+        const signatures = signThreshold(signers, attestationDigestHex).map(value => ({
+          signerPublicKeyHex: `0x${value.signerPublicKeyHex}`, signatureHex: `0x${value.signatureHex}`,
+        }));
+        const signatureVerification = verifyFederatedPooledReserveSourceProofSignaturesForProfileV1(
+          mintProfileInput, request, result, signatures);
+        if (result.requestDigestHex !== requestDigestHex
+          || signatureVerification.resultIdHex !== resultIdHex
+          || signatureVerification.attestationDigestHex !== attestationDigestHex) {
+          throw new Error('native V3 mint proof request/result/signature binding changed');
+        }
+        const envelope = { result, signatures: signatureVerification.signatures };
+        const proofBytesScaleHex = encodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex(
+          mintProfileInput, request, envelope);
+        const sourceProofEnvelopeScaleHex =
+          encodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex(
+            mintProfileInput, request, envelope);
+        assertCurrent();
+        const body = deepFreeze({
+          schema: 'e2s.substrate-federated-native-genesis-mint-source-proof.v3' as const,
+          version: 3 as const, status: 'collected_federated_source_proof_produced' as const,
+          sourceAttestationBindingDigestHex: binding.bindingDigestHex,
+          sourceEvidenceReceiptDigestHex: evidenceReceipt.receiptDigestHex,
+          mintReservationDraftDigestHex: draft.draftDigestHex,
+          mintReservationStatementIdHex: draft.statementIdHex,
+          mintIdentityHex: draft.reservationKeyHex, provenance: draft.provenance,
+          familyIdHex: fixedHex(packet.familyIdHex, 32, 'native V3 packet family ID'),
+          genesisJsonSha256Hex: candidate.genesisJsonSha256Hex,
+          runtimeProfileScaleHex: candidate.runtimeProfileScaleHex, runtimeProfileIdHex,
+          sourceProofProfileIdHex: federatedMintProfile.proofProfileIdHex,
+          sourceProofProfileScaleHex: binding.federatedMintProfileScaleHex,
+          requestDigestHex, request, result, signatureVerification, proofBytesScaleHex,
+          sourceProofEnvelopeScaleHex,
+          sourceProofEnvelopeSha256Hex: createHash('sha256')
+            .update(Buffer.from(sourceProofEnvelopeScaleHex.slice(2), 'hex')).digest('hex'),
+          checks: { exactOriginalDraftInputsBound: true as const,
+            exactRetainedGenesisProfileBound: true as const,
+            exactV3FamilyCompilerBound: true as const,
+            heightZeroProfileRequired: true as const,
+            exactSourceEvidenceReceiptBound: true as const,
+            exactThresholdSignatureSetVerified: true as const,
+            oneShotCapabilityConsumed: true as const },
+          boundary: mintSourceProofBoundaryV2(),
+        });
+        const receipt = deepFreeze({ ...body,
+          receiptDigestHex: sha256CanonicalJson(body, NATIVE_MINT_PROOF_V3_DOMAIN) });
+        NATIVE_MINT_V3_RECEIPTS.set(receipt, Object.freeze({ session, operation, draft, assertCurrent }));
+        return receipt;
+      } catch (error) {
+        invalidateParentCustody();
+        throw error;
+      }
+    });
   NATIVE_CHECKPOINT_PRODUCERS.set(operation, input => {
     const assertAvailable = () => {
       assertOperationCurrent();
@@ -1792,6 +2011,38 @@ export function produceSubstrateFederatedNativeGenesisMintSourceProofForOperatio
   const retained = getNativeGenesisSourceAttestationOperationV1(operation);
   retained.assertCurrent();
   return NATIVE_MINT_PRODUCERS.get(operation)!(input);
+}
+
+/** A V3 source-only proof on the exact explicit native operation. */
+export function produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV3(
+  operation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>,
+  input: Readonly<ProduceSubstrateFederatedNativeGenesisMintSourceProofV3Input>,
+): Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV3> {
+  const retained = getNativeGenesisSourceAttestationOperationV1(operation);
+  retained.assertCurrent();
+  const producer = NATIVE_MINT_V3_PRODUCERS.get(operation);
+  if (producer === undefined) throw new Error('native V3 mint proof requires an explicit operation');
+  return producer(input);
+}
+
+export function assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV3(
+  value: unknown,
+  operation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>,
+  draft: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV3>,
+): asserts value is Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV3> {
+  const owner = getNativeGenesisSourceAttestationOperationV1(operation);
+  const retained = value !== null && typeof value === 'object'
+    ? NATIVE_MINT_V3_RECEIPTS.get(value) : undefined;
+  if (retained === undefined || retained.session !== owner.session
+    || retained.operation !== operation || retained.draft !== draft) {
+    throw new Error('native V3 mint proof lacks exact operation/draft provenance');
+  }
+  retained.assertCurrent();
+  const { receiptDigestHex, ...body } = value as Readonly<
+    SubstrateFederatedNativeGenesisMintSourceProofReceiptV3>;
+  if (receiptDigestHex !== sha256CanonicalJson(body, NATIVE_MINT_PROOF_V3_DOMAIN)) {
+    throw new Error('native V3 mint proof receipt digest changed');
+  }
 }
 
 export function assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1(

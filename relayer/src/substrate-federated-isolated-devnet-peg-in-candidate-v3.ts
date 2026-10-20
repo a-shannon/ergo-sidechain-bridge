@@ -22,7 +22,11 @@ const OUTPUT_DOMAIN = 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_OUTPU
 type Target = Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
 type Batch = Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV3>;
 type Packet = Readonly<SubstrateFederatedPooledReserveDepositV3Packet>;
-const nativePackets = new WeakMap<object, Readonly<{ batch: Batch; target: Target }>>();
+const nativePackets = new WeakMap<object, Readonly<{
+  batch: Batch;
+  target: Target;
+  familyReceipt: ReturnType<typeof getSubstrateFederatedNativeGenesisSetupCompilerInputV3>['familyReceipt'];
+}>>();
 
 export interface BuildSubstrateFederatedNativeGenesisPegInPacketV3Input extends Omit<
   BuildSubstrateFederatedPooledReserveDepositV3Input,
@@ -90,10 +94,11 @@ export async function buildSubstrateFederatedNativeGenesisPegInPacketV3(
   assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3(batch, target);
   assertSubstrateFederatedPooledReserveDepositV3Packet(packet);
   const retained = nativePackets.get(packet);
-  if (retained !== undefined && (retained.batch !== batch || retained.target !== target)) {
+  if (retained !== undefined && (retained.batch !== batch || retained.target !== target
+    || retained.familyReceipt !== compiler.familyReceipt)) {
     throw new Error('native FED V3 peg-in packet is already bound to another setup');
   }
-  nativePackets.set(packet, Object.freeze({ batch, target }));
+  nativePackets.set(packet, Object.freeze({ batch, target, familyReceipt: compiler.familyReceipt }));
   return packet;
 }
 
@@ -124,4 +129,16 @@ export function assertSubstrateFederatedNativeGenesisPegInReadCustodyV3(
   assertSubstrateFederatedNativeGenesisSetupReadCustodyV3(batch, target);
   assertSubstrateFederatedPooledReserveDepositV3Packet(packet);
   return packet;
+}
+
+/** Read only the compiler receipt retained with this exact native V3 packet. */
+export function getSubstrateFederatedNativeGenesisPegInFamilyReceiptV3(
+  packet: Packet,
+  batch: Batch,
+  target: Target,
+): ReturnType<typeof getSubstrateFederatedNativeGenesisSetupCompilerInputV3>['familyReceipt'] {
+  assertSubstrateFederatedNativeGenesisPegInReadCustodyV3(packet, batch, target);
+  const familyReceipt = nativePackets.get(packet)!.familyReceipt;
+  assertSubstrateFederatedNativeGenesisPegInReadCustodyV3(packet, batch, target);
+  return familyReceipt;
 }

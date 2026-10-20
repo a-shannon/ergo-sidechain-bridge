@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { sign as cryptoSign } from 'node:crypto';
 
 const mocks = vi.hoisted(() => ({
   assertCommittedVaultForCandidate: vi.fn(),
@@ -22,6 +23,10 @@ const mocks = vi.hoisted(() => ({
   }>>(),
   nativeEvidence: new WeakMap<object, Readonly<{ draft: object; evidence: object }>>(),
   consumedNativeEvidence: new WeakSet<object>(),
+  nativeV3Packets: new WeakMap<object, Readonly<{ batch: object; target: object }>>(),
+  nativeV3FamilyReceipts: new WeakMap<object, object>(),
+  onV1ContextRead: undefined as undefined | (() => void),
+  onV3ContextRead: undefined as undefined | (() => void),
 }));
 
 vi.mock('node:crypto', async importOriginal => {
@@ -67,6 +72,18 @@ vi.mock(
           mocks.consumedNativeEvidence.add(receipt);
           return retained.evidence;
         }),
+      consumeSubstrateFederatedNativeGenesisCommittedReserveEvidenceForDraftV3:
+        vi.fn((receipt: object, draft: object) => {
+          const retained = mocks.nativeEvidence.get(receipt);
+          if (retained === undefined || retained.draft !== draft) {
+            throw new Error('native V3 committed-reserve evidence provenance missing');
+          }
+          if (mocks.consumedNativeEvidence.has(receipt)) {
+            throw new Error('native V3 committed-reserve evidence is already consumed');
+          }
+          mocks.consumedNativeEvidence.add(receipt);
+          return retained.evidence;
+        }),
     };
   },
 );
@@ -90,6 +107,19 @@ vi.mock(
             throw new Error('native mint-reservation draft lacks boundary provenance');
           }
         }),
+      assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV3:
+        vi.fn((draft: object, input: Readonly<Record<string, object>>) => {
+          const retained = mocks.nativeDraftInputs.get(draft);
+          const fields = ['batch', 'target', 'packet', 'committedVaultObservation'];
+          if (retained === undefined || Reflect.ownKeys(input).length !== fields.length
+            || fields.some(field => input[field] !== retained[field])) {
+            throw new Error('native V3 mint-reservation draft lacks boundary provenance');
+          }
+          if ((input.committedVaultObservation as { finalityTargetHeight?: number })
+            .finalityTargetHeight !== 10) {
+            throw new Error('native V3 finality target changed');
+          }
+        }),
     };
   },
 );
@@ -106,6 +136,7 @@ vi.mock(
       // only the exact batch/target ownership boundary is doubled.
       getSubstrateFederatedNativeGenesisAttestationContextV1:
         vi.fn((batch: object, target: object) => {
+          mocks.onV1ContextRead?.();
           const retained = mocks.nativeContexts.get(batch);
           if (retained === undefined || retained.target !== target) {
             throw new Error('native attestation context lacks boundary provenance');
@@ -114,15 +145,50 @@ vi.mock(
         }),
       getSubstrateFederatedNativeGenesisRetainedAttestationContextV1:
         vi.fn((batch: object, target: object) => {
+          mocks.onV1ContextRead?.();
           const retained = mocks.nativeContexts.get(batch);
           if (retained === undefined || mocks.nativeRetainedTargets.get(batch) !== target) {
             throw new Error('native retained attestation context lacks boundary provenance');
           }
           return retained.context;
         }),
+      getSubstrateFederatedNativeGenesisRetainedAttestationContextV3:
+        vi.fn((batch: object, target: object) => {
+          mocks.onV3ContextRead?.();
+          const retained = mocks.nativeContexts.get(batch);
+          if (retained === undefined || retained.target !== target) {
+            throw new Error('native V3 retained attestation context lacks boundary provenance');
+          }
+          return retained.context;
+        }),
     };
   },
 );
+
+vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v3.js', () => {
+  return {
+    buildSubstrateFederatedNativeGenesisPegInPacketV3: vi.fn(),
+    assertSubstrateFederatedNativeGenesisPegInPacketV3: vi.fn(),
+    assertSubstrateFederatedNativeGenesisPegInReadCustodyV3:
+      vi.fn((packet: object, batch: object, target: object) => {
+        const retained = mocks.nativeV3Packets.get(packet);
+        if (retained === undefined || retained.batch !== batch || retained.target !== target) {
+          throw new Error('native V3 packet lacks exact retained read custody');
+        }
+        return packet;
+      }),
+    getSubstrateFederatedNativeGenesisPegInFamilyReceiptV3:
+      vi.fn((packet: object, batch: object, target: object) => {
+        const retained = mocks.nativeV3Packets.get(packet);
+        const familyReceipt = mocks.nativeV3FamilyReceipts.get(batch);
+        if (retained === undefined || retained.batch !== batch || retained.target !== target
+          || familyReceipt === undefined) {
+          throw new Error('native V3 retained family receipt lacks packet provenance');
+        }
+        return familyReceipt;
+      }),
+  };
+});
 
 vi.mock(
   './substrate-federated-isolated-devnet-peg-in-candidate-v2.js',
@@ -230,9 +296,11 @@ import {
   createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1,
   createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
   createSubstrateFederatedNativeGenesisSourceAttestationOperationV1,
+  assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV3,
   produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1,
   readSubstrateFederatedGenesisProfilesFromSessionV2,
   produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1,
+  produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV3,
   produceSubstrateFederatedNativeGenesisMintSourceProofV1,
   type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV1,
   type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
@@ -300,6 +368,10 @@ beforeEach(() => {
   }>>();
   mocks.nativeEvidence = new WeakMap<object, Readonly<{ draft: object; evidence: object }>>();
   mocks.consumedNativeEvidence = new WeakSet<object>();
+  mocks.nativeV3Packets = new WeakMap();
+  mocks.nativeV3FamilyReceipts = new WeakMap();
+  mocks.onV1ContextRead = undefined;
+  mocks.onV3ContextRead = undefined;
   vi.clearAllMocks();
   mocks.assertCommittedVaultForCandidate.mockImplementation(
     (observation, batch, candidate, target) => {
@@ -1348,6 +1420,133 @@ describe('isolated-devnet synthetic FED-1 mint source-proof production', () => {
   });
 });
 
+describe('native V3 source-only proof on an explicit operation', () => {
+  it('joins the exact V3 family, retained context, evidence and synthetic threshold', () => {
+    const session = sessionV2();
+    const operation = createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+    try {
+      const fixture = nativeV3OperationInput(session, 50);
+      const proof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV3(
+        operation, fixture.input as never);
+      expect(proof).toMatchObject({
+        schema: 'e2s.substrate-federated-native-genesis-mint-source-proof.v3',
+        version: 3,
+        familyIdHex: `0x${fixture.packet.familyIdHex}`,
+        checks: { exactV3FamilyCompilerBound: true, oneShotCapabilityConsumed: true },
+        boundary: { mintExecuted: false, fundsAuthorityEstablished: false,
+          productionReadinessEstablished: false },
+      });
+      expect(proof.signatureVerification.signatures).toHaveLength(2);
+      expect(() => assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV3(
+        proof, operation, fixture.draft as never)).not.toThrow();
+      expect(() => produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV3(
+        operation, fixture.input as never)).toThrow(/already consumed/u);
+      expect(() => produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(
+        operation, nativeCheckpointInput(proof, 50) as never)).toThrow(/original operation mint proof provenance/u);
+    } finally {
+      operation.dispose();
+      session.dispose();
+    }
+  });
+
+  it.each(['batch', 'target', 'packet', 'committedVaultObservation'] as const)(
+    'rejects a cloned V3 %s before consuming the operation', field => {
+      const session = sessionV2();
+      const operation = createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+      try {
+        const fixture = nativeV3OperationInput(session, 51);
+        const badInputs = { ...fixture.draftInputs,
+          [field]: structuredClone(fixture.draftInputs[field]) };
+        expect(() => produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV3(
+          operation, { ...fixture.input, draftInputs: badInputs } as never))
+          .toThrow(/provenance/u);
+        expect(() => produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV3(
+          operation, fixture.input as never)).not.toThrow();
+      } finally {
+        operation.dispose();
+        session.dispose();
+      }
+    });
+
+  it('rejects mutable family compiler and finality drift without consuming the slot', () => {
+    const session = sessionV2();
+    const operation = createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+    try {
+      const fixture = nativeV3OperationInput(session, 52);
+      const originalLock = fixture.familyCompiler.compilerLockDigestHex;
+      fixture.familyCompiler.compilerLockDigestHex = h32('ff');
+      expect(() => produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV3(
+        operation, fixture.input as never)).toThrow(/compiler binding/u);
+      fixture.familyCompiler.compilerLockDigestHex = originalLock;
+      fixture.committedVaultObservation.finalityTargetHeight = 9;
+      expect(() => produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV3(
+        operation, fixture.input as never)).toThrow(/finality target/u);
+      fixture.committedVaultObservation.finalityTargetHeight = 10;
+      expect(() => produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV3(
+        operation, fixture.input as never)).not.toThrow();
+    } finally {
+      operation.dispose();
+      session.dispose();
+    }
+  });
+
+  it('rejects the wrong operation and disposed custody', () => {
+    const session = sessionV2();
+    const foreign = sessionV2();
+    const operation = createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+    const fixture = nativeV3OperationInput(session, 53);
+    const proof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV3(
+      operation, fixture.input as never);
+    const foreignOperation = createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(foreign);
+    expect(() => assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV3(
+      proof, foreignOperation, fixture.draft as never)).toThrow(/operation\/draft provenance/u);
+    foreignOperation.dispose();
+    operation.dispose();
+    expect(() => assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV3(
+      proof, operation, fixture.draft as never)).toThrow(/disposed/u);
+    session.dispose();
+    foreign.dispose();
+  });
+
+  it.each(['V1 then V3', 'V3 then V1'] as const)(
+    'allows only one proof and one threshold set under %s reentrance', direction => {
+      const session = sessionV2();
+      const operation = createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+      try {
+        const v1 = nativeOperationInput(session, 54, { withV3Family: true });
+        const v3 = nativeV3OperationInput(session, 55);
+        let nested: object | undefined;
+        let reads = 0;
+        if (direction === 'V1 then V3') {
+          mocks.onV1ContextRead = () => {
+            if (++reads === 3) {
+              nested = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV3(
+                operation, v3.input as never);
+            }
+          };
+        } else {
+          mocks.onV3ContextRead = () => {
+            if (++reads === 3) {
+              nested = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+                operation, v1.input as never);
+            }
+          };
+        }
+        vi.mocked(cryptoSign).mockClear();
+        expect(() => direction === 'V1 then V3'
+          ? produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+            operation, v1.input as never)
+          : produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV3(
+            operation, v3.input as never)).toThrow(/already consumed/u);
+        expect(nested).toBeDefined();
+        expect(vi.mocked(cryptoSign)).toHaveBeenCalledTimes(2);
+      } finally {
+        operation.dispose();
+        session.dispose();
+      }
+    });
+});
+
 function sessionV1() {
   return createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1({
     ergoAdmissionThreshold: 1,
@@ -1539,6 +1738,7 @@ function nativeOperationInput(
   overrides: Readonly<{
     cloneApplication?: boolean;
     cloneCandidate?: boolean;
+    withV3Family?: boolean;
     foreignTarget?: boolean;
     genesisJsonSha256Hex?: string;
     mutableSourceContext?: boolean;
@@ -1602,6 +1802,8 @@ function nativeOperationInput(
       runtimeProfileScaleHex,
       runtimeProfileIdHex,
       genesisJsonSha256Hex: '90'.repeat(32),
+      ...(overrides.withV3Family
+        ? { familyIdHex: runtimeProfile.lineageProfileIdHex.slice(2) } : {}),
     };
     const application = {
       sourceNetworkIdHex: unprefixed(runtimeProfile.sourceNetworkIdHex),
@@ -1657,6 +1859,59 @@ function nativeOperationInput(
       expiresAtNativeHeight: '32',
     }),
   });
+}
+
+/** Only V3 process-custody edges are doubled; statement codecs and signatures stay real. */
+function nativeV3OperationInput(
+  session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>,
+  variant: number,
+) {
+  const base = nativeOperationInput(session, variant, { withV3Family: true });
+  const { batch, target } = base.input.draftInputs;
+  const candidate = mocks.nativeSourceContexts.get(session)!.candidate;
+  const runtimeProfile = candidate.runtimeProfile as { lineageProfileIdHex: string };
+  const familyIdHex = runtimeProfile.lineageProfileIdHex.slice(2);
+  const familyReceipt = Object.freeze({
+    profile: Object.freeze({ familyIdHex }),
+    trackerAnchorSelector: 'original',
+    settlementLayout: 'pooled-reserve',
+    trackerCompilerRequestDigestHex: h32('a1'),
+    trackerCompilerReceiptDigestHex: h32('a2'),
+    familyCompilerRequestDigestHex: h32('a3'),
+    receiptDigestHex: h32('a4'),
+    compilerLockDigestHex: h32('a5'),
+  });
+  const familyCompiler = {
+    trackerAnchorSelector: familyReceipt.trackerAnchorSelector,
+    settlementLayout: familyReceipt.settlementLayout,
+    trackerRequestDigestHex: familyReceipt.trackerCompilerRequestDigestHex,
+    trackerReceiptDigestHex: familyReceipt.trackerCompilerReceiptDigestHex,
+    familyRequestDigestHex: familyReceipt.familyCompilerRequestDigestHex,
+    familyReceiptDigestHex: familyReceipt.receiptDigestHex,
+    compilerLockDigestHex: familyReceipt.compilerLockDigestHex,
+  };
+  const packet = Object.freeze({ role: `native-v3-packet-${variant}`,
+    familyIdHex, familyCompiler });
+  const committedVaultObservation = { observationDigestHex: h32('b1'),
+    finalityTargetHeight: 10 };
+  const draftInputs = Object.freeze({ batch, target, packet, committedVaultObservation });
+  const draft = Object.freeze({ ...base.draft,
+    schema: 'e2s.substrate-federated-native-genesis-peg-in-mint-reservation-draft.v3',
+    version: 3,
+    provenance: Object.freeze({
+      profile: 'fed-native-height-zero-v3-reserve-v7',
+      familyCompiler: Object.freeze({ ...familyCompiler }),
+      committedVaultObservationDigestHex: committedVaultObservation.observationDigestHex,
+    }),
+  });
+  mocks.nativeDraftInputs.set(draft, draftInputs);
+  mocks.nativeV3Packets.set(packet, Object.freeze({ batch, target }));
+  mocks.nativeV3FamilyReceipts.set(batch, familyReceipt);
+  const evidenceReceipt = Object.freeze({ receiptDigestHex: h32('b2') });
+  mocks.nativeEvidence.set(evidenceReceipt, Object.freeze({ draft, evidence: EVIDENCE }));
+  return Object.freeze({ draft, draftInputs, packet, committedVaultObservation, familyCompiler,
+    input: Object.freeze({ draftInputs, draft, evidenceReceipt,
+      issuedAtNativeHeight: '0', expiresAtNativeHeight: '32' }) });
 }
 
 function nativeCheckpointInput(proof: object, variant: number) {
