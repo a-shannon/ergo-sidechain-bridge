@@ -4,7 +4,9 @@ const mocks = vi.hoisted(() => ({
   assertObservation: vi.fn(),
   assertObservationV2: vi.fn(),
   assertNativeObservation: vi.fn(),
+  assertNativeObservationV3: vi.fn(),
   assertNativePacket: vi.fn(),
+  assertNativeV3Custody: vi.fn(),
   nativeMaterials: [] as Array<{ batch: object; target: object; packet: object; observation: object }>,
   setupActive: true,
   targetActive: true,
@@ -22,8 +24,13 @@ vi.mock(
     assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV2:
       mocks.assertObservationV2,
     assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1: mocks.assertNativeObservation,
+    assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV3: mocks.assertNativeObservationV3,
   }),
 );
+
+vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v3.js', () => ({
+  assertSubstrateFederatedNativeGenesisPegInReadCustodyV3: mocks.assertNativeV3Custody,
+}));
 
 vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v2.js', () => ({
   assertSubstrateFederatedNativeGenesisPegInPacketV1: mocks.assertNativePacket,
@@ -46,6 +53,9 @@ import {
   assertSubstrateFederatedNativeGenesisCommittedReserveEvidenceReceiptV1Provenance as assertNativeReceipt,
   collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1 as collectNative,
   consumeSubstrateFederatedNativeGenesisCommittedReserveEvidenceForDraftV1 as consumeNative,
+  assertSubstrateFederatedNativeGenesisCommittedReserveEvidenceReceiptV3Provenance as assertNativeV3Receipt,
+  collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV3 as collectNativeV3,
+  consumeSubstrateFederatedNativeGenesisCommittedReserveEvidenceForDraftV3 as consumeNativeV3,
   assertSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1Provenance,
   collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1,
   consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV1,
@@ -54,7 +64,10 @@ import {
 } from './substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
 import { buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2 as buildDraftV2,
   buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1 as buildNativeDraft,
+  buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV3 as buildNativeDraftV3,
   type SubstrateFederatedNativeGenesisPegInMintReservationDraftV1Input }
+  from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
+import type { SubstrateFederatedNativeGenesisPegInMintReservationDraftV3Input }
   from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
 import { encodePegInSourceIntentV2Hex } from './peg-in-causal-admission-v2.js';
 
@@ -64,6 +77,13 @@ const TARGET = Object.freeze({ role: 'target' });
 const CANDIDATE = Object.freeze({ candidateDigestHex: h32('11') });
 const CANDIDATE_V2 = Object.freeze({ version: 2, candidateDigestHex: h32('71') });
 const COMPILER_V2 = Object.freeze({
+  trackerRequestDigestHex: h32('72'), trackerReceiptDigestHex: h32('73'),
+  familyRequestDigestHex: h32('74'), familyReceiptDigestHex: h32('75'),
+  compilerLockDigestHex: h32('76'),
+});
+const COMPILER_V3 = Object.freeze({
+  trackerAnchorSelector: 'absolute-ergo-header-height',
+  settlementLayout: 'native-erg-federated-family-reserve-v7',
   trackerRequestDigestHex: h32('72'), trackerReceiptDigestHex: h32('73'),
   familyRequestDigestHex: h32('74'), familyReceiptDigestHex: h32('75'),
   compilerLockDigestHex: h32('76'),
@@ -87,6 +107,21 @@ beforeEach(() => {
     if (!mocks.targetActive) throw new Error('native target custody disposed');
     if (!mocks.nativeMaterials.some(value => value.observation === observation && value.packet === packet
       && value.batch === batch && value.target === target)) throw new Error('native observation provenance missing');
+    return assertedPacket;
+  });
+  mocks.assertNativeV3Custody.mockImplementation((packet, batch, target) => {
+    if (!mocks.setupActive) throw new Error('native V3 setup custody disposed');
+    if (!mocks.targetActive) throw new Error('native V3 target custody disposed');
+    if (!mocks.nativeMaterials.some(value => value.packet === packet && value.batch === batch
+      && value.target === target)) throw new Error('native V3 packet provenance missing');
+    return packet;
+  });
+  mocks.assertNativeObservationV3.mockImplementation((observation, target, batch, packet) => {
+    const assertedPacket = mocks.assertNativeV3Custody(packet, batch, target);
+    if (!mocks.nativeMaterials.some(value => value.observation === observation
+      && value.packet === packet && value.batch === batch && value.target === target)) {
+      throw new Error('native V3 observation provenance missing');
+    }
     return assertedPacket;
   });
   mocks.drafts = new WeakSet<object>();
@@ -320,6 +355,130 @@ function nativeInput(mutableLineage = false) {
     observation: input.committedVaultObservation });
   return { ...input, draft: buildNativeDraft(input) };
 }
+
+function nativeV3Input(mutableLineage = false) {
+  prepareV2Packet();
+  const base = { ...mocks.packet,
+    schema: 'e2s.substrate-federated-pooled-reserve-deposit.v3',
+    version: 3,
+    familyCompiler: COMPILER_V3 };
+  const input = {
+    batch: Object.freeze({ profile: 'fed-native-height-zero-v3-reserve-v7',
+      request: Object.freeze({ requestDigestHex: h32('81') }),
+      receipt: Object.freeze({ receiptDigestHex: h32('82') }) }),
+    target: Object.freeze({ ...TARGET }),
+    packet: mutableLineage ? structuredClone(base) : Object.freeze(base),
+    committedVaultObservation: mutableLineage ? structuredClone(observation()) : observation(),
+  } as unknown as SubstrateFederatedNativeGenesisPegInMintReservationDraftV3Input;
+  mocks.nativeMaterials.push({ batch: input.batch, target: input.target, packet: input.packet,
+    observation: input.committedVaultObservation });
+  return { ...input, draft: buildNativeDraftV3(input) };
+}
+
+describe('native V3 committed-reserve evidence join', () => {
+  it('retains the exact draft and packet in a separate nonauthorizing receipt and consumes once', () => {
+    const input = nativeV3Input();
+    const receipt = collectNativeV3(input);
+    expect(receipt).toMatchObject({
+      schema: 'e2s.substrate-federated-native-genesis-committed-reserve-evidence.v3',
+      version: 3,
+      mintReservationDraftDigestHex: input.draft.draftDigestHex,
+      provenance: input.draft.provenance,
+      checks: { exactSameProcessDraftBatchPacketAndObservationBound: true,
+        callerSuppliedEvidenceAccepted: false },
+      boundaries: { mintAuthorized: false, fundsAuthorityEstablished: false,
+        ergoPowAuthenticated: false, gate5Closed: false, productionReadinessEstablished: false },
+    });
+    expect(receipt.provenance).toBe(input.draft.provenance);
+    expect(receipt).not.toHaveProperty('candidateDigestHex');
+    expect(decodeCanonicalObject(receipt.evidence.sourceLockBoxCanonicalHex).box)
+      .toEqual(input.packet.boxes.sourceLock);
+    expect(decodeCanonicalObject(receipt.evidence.reserveTransitionTransactionCanonicalHex).transaction)
+      .toEqual(input.packet.transactions.reserveTransition.eip12Tx);
+    expect(() => assertNativeV3Receipt(receipt)).not.toThrow();
+    expect(consumeNativeV3(receipt, input.draft)).toBe(receipt.evidence);
+    expect(() => consumeNativeV3(receipt, input.draft)).toThrow(/already consumed/u);
+  });
+
+  it.each(['batch', 'target', 'packet', 'committedVaultObservation', 'draft'] as const)(
+    'rejects cloned %s at collection', field => {
+      const input = nativeV3Input();
+      expect(() => collectNativeV3({ ...input, [field]: structuredClone(input[field]) } as never))
+        .toThrow(/original|provenance/u);
+    },
+  );
+
+  it.each(Object.keys(COMPILER_V3) as Array<keyof typeof COMPILER_V3>)(
+    'rejects V3 compiler drift at collection and consumption: %s', field => {
+      const input = nativeV3Input(true);
+      const receipt = collectNativeV3(input);
+      const compiler = input.packet.familyCompiler as Record<string, string>;
+      const original = compiler[field];
+      compiler[field] = field === 'trackerAnchorSelector' || field === 'settlementLayout'
+        ? 'other-profile' : h32('ff');
+      expect(() => collectNativeV3(input)).toThrow(/lineage|changed/u);
+      expect(() => consumeNativeV3(receipt, input.draft)).toThrow(/lineage|changed/u);
+      compiler[field] = original;
+      expect(consumeNativeV3(receipt, input.draft)).toBe(receipt.evidence);
+    },
+  );
+
+  it.each([
+    ['transition', (input: ReturnType<typeof nativeV3Input>) => {
+      (input.packet.transactions.reserveTransition as any).txId = h32('ff');
+    }],
+    ['finality', (input: ReturnType<typeof nativeV3Input>) => {
+      (input.committedVaultObservation as any).finalityTargetHeight -= 1;
+    }],
+  ] as const)('rejects stale %s lineage without burning the receipt', (_fault, mutate) => {
+    const input = nativeV3Input(true);
+    const receipt = collectNativeV3(input);
+    mutate(input);
+    const rejection = _fault === 'finality'
+      ? /finality target does not match the required successor depth/u
+      : /lineage changed/u;
+    expect(() => collectNativeV3(input)).toThrow(rejection);
+    expect(() => consumeNativeV3(receipt, input.draft)).toThrow(rejection);
+  });
+
+  it('revalidates custody after collection before consumption', () => {
+    const input = nativeV3Input();
+    const receipt = collectNativeV3(input);
+    mocks.setupActive = false;
+    expect(() => assertNativeV3Receipt(receipt)).toThrow(/disposed/u);
+    expect(() => consumeNativeV3(receipt, input.draft)).toThrow(/disposed/u);
+    mocks.setupActive = true;
+    expect(consumeNativeV3(receipt, input.draft)).toBe(receipt.evidence);
+  });
+
+  it('rejects cloned receipts and drafts, wrong real drafts, and V1 cross-profile inputs', () => {
+    const input = nativeV3Input();
+    const receipt = collectNativeV3(input);
+    const otherDraft = buildNativeDraftV3({ batch: input.batch, target: input.target,
+      packet: input.packet, committedVaultObservation: input.committedVaultObservation });
+    expect(otherDraft).toEqual(input.draft);
+    expect(otherDraft).not.toBe(input.draft);
+    expect(() => consumeNativeV3(receipt, otherDraft)).toThrow(/different/u);
+    expect(() => consumeNativeV3(receipt, structuredClone(input.draft))).toThrow(/provenance/u);
+    expect(() => assertNativeV3Receipt(structuredClone(receipt))).toThrow(/provenance/u);
+    const v1 = nativeInput();
+    const v1Receipt = collectNative(v1);
+    expect(() => collectNativeV3({ ...input, draft: v1.draft as never })).toThrow(/provenance/u);
+    expect(() => assertNativeV3Receipt(v1Receipt)).toThrow(/provenance/u);
+    expect(() => assertNativeReceipt(receipt)).toThrow(/provenance/u);
+    expect(consumeNativeV3(receipt, input.draft)).toBe(receipt.evidence);
+  });
+
+  it.each(['batch', 'target', 'packet', 'committedVaultObservation', 'draft'] as const)(
+    'rejects a %s getter before invoking it', field => {
+      const input = nativeV3Input();
+      const getter = vi.fn(() => input[field]);
+      Object.defineProperty(input, field, { enumerable: true, get: getter });
+      expect(() => collectNativeV3(input)).toThrow(/must contain exactly/u);
+      expect(getter).not.toHaveBeenCalled();
+    },
+  );
+});
 
 describe('native genesis committed-reserve evidence join', () => {
   it('collects unchanged evidence schemas and returns the exact bytes once from a real native draft', () => {

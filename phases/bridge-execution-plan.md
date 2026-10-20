@@ -219,6 +219,18 @@ provenance, journal, transport and output reads; a real join of the producer,
 root and worker and any two-cycle outcome remain unverified. No campaign is
 selected by this source change.
 
+A distinct native V3 mint-reservation draft and committed-reserve evidence
+pair now binds the retained V3 setup batch, target, deposit packet and
+committed-vault observation, including all seven V3 family-compiler fields.
+The draft keeps the canonical V4 mint statement while using a separate V3
+digest and provenance; the evidence retains those exact process-owned inputs
+and permits one consumption. Focused tests pass 160/160, TypeScript noEmit and
+layered imports pass, and independent exact-four-file review found no blocking
+source defect. Cloned or mutated inputs, cross-profile receipts, revoked
+custody and stale transaction/finality lineage reject. These are source-only,
+nonauthorizing results: the V3 source-proof and worker joins, genuine
+two-cycle, recovery/operator/FED7 and external acceptance remain open.
+
 C74 is consumed and permanently held; no successor campaign is selected. The
 purpose-specific deposit selector was locally promoted at
 `9e70f876a46999383f6fc975ce47d816ada5d235` after exact independent review and

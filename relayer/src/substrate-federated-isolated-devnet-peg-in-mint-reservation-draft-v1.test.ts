@@ -4,7 +4,9 @@ const mocks = vi.hoisted(() => ({
   assertCommittedVaultForCandidate: vi.fn(),
   assertCommittedVaultForCandidateV2: vi.fn(),
   assertNativeObservation: vi.fn(),
+  assertNativeObservationV3: vi.fn(),
   assertNativePacket: vi.fn(),
+  assertNativeV3Custody: vi.fn(),
 }));
 
 vi.mock(
@@ -16,11 +18,15 @@ vi.mock(
     assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV2:
       mocks.assertCommittedVaultForCandidateV2,
     assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1: mocks.assertNativeObservation,
+    assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV3: mocks.assertNativeObservationV3,
   }),
 );
 
 vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v2.js', () => ({
   assertSubstrateFederatedNativeGenesisPegInPacketV1: mocks.assertNativePacket,
+}));
+vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v3.js', () => ({
+  assertSubstrateFederatedNativeGenesisPegInReadCustodyV3: mocks.assertNativeV3Custody,
 }));
 
 import {
@@ -29,6 +35,8 @@ import {
 import {
   buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1 as buildNativeDraft,
   assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV1 as assertNativeDraft,
+  buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV3 as buildNativeDraftV3,
+  assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV3 as assertNativeDraftV3,
   assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
   buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
   buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2 as buildDraftV2,
@@ -111,9 +119,40 @@ const NATIVE_OBSERVATION = Object.freeze({ ...OBSERVATION,
   processBindingDigestHex: h32('53'), executionTargetIdentityDigestHex: h32('54') });
 const nativeInput = () => ({ batch: NATIVE_BATCH as never, target: TARGET as never,
   packet: PACKET_V2 as never, committedVaultObservation: NATIVE_OBSERVATION as never });
+const COMPILER_V3 = Object.freeze({
+  trackerAnchorSelector: 'absolute-ergo-header-height',
+  settlementLayout: 'native-erg-federated-family-reserve-v7',
+  trackerRequestDigestHex: h32('61'), trackerReceiptDigestHex: h32('62'),
+  familyRequestDigestHex: h32('63'), familyReceiptDigestHex: h32('64'),
+  compilerLockDigestHex: h32('65'),
+});
+const NATIVE_V3_BATCH = Object.freeze({ profile: 'fed-native-height-zero-v3-reserve-v7',
+  request: Object.freeze({ requestDigestHex: h32('66') }),
+  receipt: Object.freeze({ receiptDigestHex: h32('67') }) });
+const NATIVE_V3_OBSERVATION = Object.freeze({ ...NATIVE_OBSERVATION });
+const PACKET_V3 = Object.freeze({ ...PACKET,
+  schema: 'e2s.substrate-federated-pooled-reserve-deposit.v3', version: 3,
+  familyCompiler: COMPILER_V3 });
+let nativeV3Packet: typeof PACKET_V3 | Record<string, unknown> = PACKET_V3;
+const nativeV3Input = () => ({ batch: NATIVE_V3_BATCH as never, target: TARGET as never,
+  packet: nativeV3Packet as never, committedVaultObservation: NATIVE_V3_OBSERVATION as never });
 
 beforeEach(() => {
   vi.clearAllMocks();
+  nativeV3Packet = PACKET_V3;
+  mocks.assertNativeV3Custody.mockImplementation((packet, batch, target) => {
+    if (packet !== nativeV3Packet || batch !== NATIVE_V3_BATCH || target !== TARGET) {
+      throw new Error('native V3 packet retained custody missing');
+    }
+    return packet;
+  });
+  mocks.assertNativeObservationV3.mockImplementation((observation, target, batch, packet) => {
+    if (observation !== NATIVE_V3_OBSERVATION || target !== TARGET
+      || batch !== NATIVE_V3_BATCH || packet !== nativeV3Packet) {
+      throw new Error('native V3 committed-vault observation provenance missing');
+    }
+    return packet;
+  });
   mocks.assertNativePacket.mockImplementation((packet, batch, target) => {
     if (packet !== PACKET_V2 || batch !== NATIVE_BATCH || target !== TARGET) {
       throw new Error('native packet provenance missing');
@@ -144,6 +183,109 @@ beforeEach(() => {
         throw new Error('committed-vault candidate provenance missing');
       }
       return PACKET;
+    },
+  );
+});
+
+describe('native genesis mint-reservation draft V3', () => {
+  it('retains the seven V3 compiler scalars with a distinct digest and unchanged canonical V4 bytes', () => {
+    const input = nativeV3Input();
+    const draft = buildNativeDraftV3(input);
+    const legacyV1 = buildNativeDraft(nativeInput());
+    const legacyV2 = buildDraftV2(draftV2Input());
+    expect(draft).toMatchObject({
+      schema: 'e2s.substrate-federated-native-genesis-peg-in-mint-reservation-draft.v3',
+      version: 3,
+      provenance: {
+        profile: 'fed-native-height-zero-v3-reserve-v7',
+        setupRequestDigestHex: NATIVE_V3_BATCH.request.requestDigestHex,
+        setupCheckReceiptDigestHex: NATIVE_V3_BATCH.receipt.receiptDigestHex,
+        committedVaultObservationDigestHex: NATIVE_V3_OBSERVATION.observationDigestHex,
+        familyCompiler: COMPILER_V3,
+        exactSameProcessBatchPacketAndObservationBound: true,
+      },
+    });
+    expect(Reflect.ownKeys(draft.provenance.familyCompiler)).toEqual(Reflect.ownKeys(COMPILER_V3));
+    expect(Object.isFrozen(draft.provenance.familyCompiler)).toBe(true);
+    expect(draft.statementHex).toBe(SUBSTRATE_FEDERATED_ISOLATED_DEVNET_REFERENCE_MINT_RESERVATION_STATEMENT_V4_HEX);
+    expect(draft.statementHex).toBe(legacyV1.statementHex);
+    expect(draft.statementHex).toBe(legacyV2.statementHex);
+    expect(draft.statementIdHex).toBe(legacyV2.statementIdHex);
+    expect(draft.reservationKeyHex).toBe(legacyV2.reservationKeyHex);
+    expect(draft.boundary).toEqual(legacyV1.boundary);
+    expect(draft.draftDigestHex).not.toBe(legacyV1.draftDigestHex);
+    expect(draft.draftDigestHex).not.toBe(legacyV2.draftDigestHex);
+    expect(Object.values(draft.boundary).filter(Boolean)).toEqual([true, true, true]);
+    expect(() => assertNativeDraftV3(draft, input)).not.toThrow();
+    expect(mocks.assertNativeV3Custody).toHaveBeenCalledWith(PACKET_V3, NATIVE_V3_BATCH, TARGET);
+    expect(mocks.assertNativeObservationV3).toHaveBeenCalledWith(
+      NATIVE_V3_OBSERVATION, TARGET, NATIVE_V3_BATCH, PACKET_V3,
+    );
+  });
+
+  it.each(Object.keys(COMPILER_V3) as Array<keyof typeof COMPILER_V3>)(
+    'binds V3 compiler field %s into the draft digest without changing the V4 statement', field => {
+      const original = buildNativeDraftV3(nativeV3Input());
+      nativeV3Packet = { ...PACKET_V3, familyCompiler: { ...COMPILER_V3, [field]:
+        field === 'trackerAnchorSelector' || field === 'settlementLayout' ? 'other-profile' : h32('ff') } };
+      const changed = buildNativeDraftV3(nativeV3Input());
+      expect((changed.provenance.familyCompiler as Record<string, unknown>)[field])
+        .not.toBe(original.provenance.familyCompiler[field]);
+      expect(changed.draftDigestHex).not.toBe(original.draftDigestHex);
+      expect(changed.statementHex).toBe(original.statementHex);
+    },
+  );
+
+  it.each(['batch', 'target', 'packet', 'committedVaultObservation'] as const)(
+    'rejects cloned %s identities at construction and assertion', field => {
+      const input = nativeV3Input();
+      const draft = buildNativeDraftV3(input);
+      const copy = { ...input, [field]: structuredClone(input[field]) };
+      expect(() => buildNativeDraftV3(copy as never)).toThrow(/custody|provenance/);
+      expect(() => assertNativeDraftV3(draft, copy as never)).toThrow(/exact original/);
+    },
+  );
+
+  it('rejects copied drafts and V1/V2 cross-profile evidence', () => {
+    const draft = buildNativeDraftV3(nativeV3Input());
+    expect(() => assertNativeDraftV3(structuredClone(draft))).toThrow(/provenance/);
+    expect(() => assertNativeDraftV3(buildNativeDraft(nativeInput()))).toThrow(/provenance/);
+    expect(() => assertNativeDraftV3(buildDraftV2(draftV2Input()))).toThrow(/provenance/);
+    expect(() => assertNativeDraft(draft)).toThrow(/provenance/);
+    expect(() => assertDraftV2(draft)).toThrow(/provenance/);
+    expect(() => buildNativeDraftV3({ ...nativeV3Input(), batch: NATIVE_BATCH as never }))
+      .toThrow(/V3 reserve profile/);
+    expect(() => buildNativeDraftV3({ ...nativeV3Input(), packet: PACKET_V2 as never }))
+      .toThrow(/V3 reserve profile/);
+  });
+
+  it.each(['setup-custody', 'observation-custody'] as const)(
+    'revalidates %s when the draft is asserted', fault => {
+      const draft = buildNativeDraftV3(nativeV3Input());
+      const check = fault === 'setup-custody' ? mocks.assertNativeV3Custody : mocks.assertNativeObservationV3;
+      check.mockImplementation(() => { throw new Error(`${fault} revoked`); });
+      expect(() => assertNativeDraftV3(draft)).toThrow(/revoked/);
+    },
+  );
+
+  it.each(['batch', 'target', 'packet', 'committedVaultObservation'] as const)(
+    'rejects a %s getter before invoking it', field => {
+      const input = nativeV3Input();
+      const getter = vi.fn(() => input[field]);
+      Object.defineProperty(input, field, { enumerable: true, get: getter });
+      expect(() => buildNativeDraftV3(input)).toThrow(/own-data fields/);
+      expect(getter).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['symbol', 'hidden', 'prototype', 'null-prototype'] as const)(
+    'rejects %s input fields', fault => {
+      const input = nativeV3Input();
+      if (fault === 'symbol') Object.defineProperty(input, Symbol('extra'), { value: true });
+      if (fault === 'hidden') Object.defineProperty(input, 'extra', { value: true });
+      if (fault === 'prototype') Object.setPrototypeOf(input, { inherited: true });
+      if (fault === 'null-prototype') Object.setPrototypeOf(input, null);
+      expect(() => buildNativeDraftV3(input)).toThrow(/own-data fields/);
     },
   );
 });
