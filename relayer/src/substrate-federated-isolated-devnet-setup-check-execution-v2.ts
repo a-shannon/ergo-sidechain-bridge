@@ -3489,6 +3489,18 @@ export function getSubstrateFederatedNativeGenesisRetainedAttestationContextV1(
     application: compiled.preparation.application });
 }
 
+/** Retained V3 context only; this does not renew setup or grant signing authority. */
+export function getSubstrateFederatedNativeGenesisRetainedAttestationContextV3(
+  batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV3>,
+  originalSetupTarget: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+) {
+  assertSubstrateFederatedNativeGenesisSetupReadCustodyV3(batch, originalSetupTarget);
+  const compiled = NATIVE_V3_EXECUTION_BATCHES.get(batch)!.compiled;
+  return Object.freeze({ candidate: compiled.candidate,
+    checkpointProfile: compiled.preparation.checkpointProfile,
+    application: compiled.preparation.application });
+}
+
 // Only the session can pair a pre-check process binding with its own result.
 function promoteSetupExecutionBatchV3(
   result: Readonly<FixedSetupCheckRunV3>,

@@ -59,6 +59,7 @@ import { createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2 }
 import { assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1,
   assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3,
   assertSubstrateFederatedNativeGenesisSetupReadCustodyV3,
+  getSubstrateFederatedNativeGenesisRetainedAttestationContextV3,
   assertSubstrateFederatedNativeGenesisPegInSourceLockExecutionCheckV3,
   assertSubstrateFederatedNativeGenesisPegInCommittedVaultExecutionCheckV3,
   promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1,
@@ -297,6 +298,18 @@ describe('observed FED genesis V3 compilation and retained execution', () => {
       .not.toThrow();
     expect(() => assertSubstrateFederatedNativeGenesisSetupReadCustodyV3(batch, target))
       .not.toThrow();
+    const attestationContext = getSubstrateFederatedNativeGenesisRetainedAttestationContextV3(
+      batch, target);
+    expect(Reflect.ownKeys(attestationContext))
+      .toEqual(['candidate', 'checkpointProfile', 'application']);
+    expect(Object.isFrozen(attestationContext)).toBe(true);
+    expect(attestationContext.candidate).toBe(compiled.candidate);
+    expect(attestationContext.checkpointProfile).toBe(compiled.preparation.checkpointProfile);
+    expect(attestationContext.application).toBe(compiled.preparation.application);
+    expect(() => getSubstrateFederatedNativeGenesisRetainedAttestationContextV3(
+      { ...batch }, target)).toThrow(/read custody/);
+    expect(() => getSubstrateFederatedNativeGenesisRetainedAttestationContextV3(
+      batch, { ...target })).toThrow(/read custody/);
     expect(() => assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3(
       { ...batch }, target)).toThrow(/process provenance/);
     expect(() => assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3(
@@ -600,6 +613,8 @@ describe('observed FED genesis V3 compilation and retained execution', () => {
     await expect(setup.runNativeGenesisRetainingSignerV3(compiled, target)).rejects.toThrow();
     expect(helpers.ncheck).toHaveBeenCalledTimes(12);
     expect(() => assertSubstrateFederatedNativeGenesisSetupReadCustodyV3(batch, target))
+      .toThrow();
+    expect(() => getSubstrateFederatedNativeGenesisRetainedAttestationContextV3(batch, target))
       .toThrow();
     expect(() => assertNativePegInV3(pegInPacket, batch, target)).toThrow();
     expect(() => assertNativeReadCustodyV3(pegInPacket, batch, target)).toThrow();
