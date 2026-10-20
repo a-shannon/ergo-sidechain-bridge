@@ -25,11 +25,13 @@ const mocked = vi.hoisted(() => ({
   discoverFunding: vi.fn(),
   promoteSource: vi.fn(),
   promoteVault: vi.fn(),
+  assertVaultExecutionCheckV3: vi.fn(),
   createObserver: vi.fn(),
   projectProgress: vi.fn(),
   createSourceAuthorizer: vi.fn(),
   createSourceAuthorizerV3: vi.fn(),
   createVaultAuthorization: vi.fn(),
+  createVaultAuthorizationV3: vi.fn(),
   createSourceJournal: vi.fn(),
   createVaultJournal: vi.fn(),
   createSourceTransport: vi.fn(),
@@ -40,6 +42,8 @@ const mocked = vi.hoisted(() => ({
   assertSourceOutputsV3: vi.fn(),
   observeVaultOutputs: vi.fn(),
   assertVaultOutputs: vi.fn(),
+  observeVaultOutputsV3: vi.fn(),
+  assertVaultOutputsV3: vi.fn(),
 }));
 
 vi.mock('../../substrate-federated-isolated-devnet-ergo-node-process-v1.js', async importOriginal => ({
@@ -66,6 +70,7 @@ vi.mock('../../substrate-federated-isolated-devnet-setup-check-execution-v2.js',
   ...(await importOriginal<typeof import('../../substrate-federated-isolated-devnet-setup-check-execution-v2.js')>()),
   promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1: mocked.promoteSource,
   promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1: mocked.promoteVault,
+  assertSubstrateFederatedNativeGenesisPegInCommittedVaultExecutionCheckV3: mocked.assertVaultExecutionCheckV3,
 }));
 
 vi.mock('../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js', async importOriginal => ({
@@ -83,6 +88,7 @@ vi.mock('../../substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-
 vi.mock('../../substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.js')>()),
   createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV1: mocked.createVaultAuthorization,
+  createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV3: mocked.createVaultAuthorizationV3,
 }));
 
 vi.mock('../../substrate-federated-local-devnet-peg-in-source-lock-journal-v1.js', () => ({
@@ -111,12 +117,15 @@ vi.mock('../../substrate-federated-isolated-devnet-peg-in-committed-vault-output
   ...(await importOriginal<typeof import('../../substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js')>()),
   observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV1: mocked.observeVaultOutputs,
   assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1: mocked.assertVaultOutputs,
+  observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV3: mocked.observeVaultOutputsV3,
+  assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV3: mocked.assertVaultOutputsV3,
 }));
 
 import {
   executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1,
   executeSubstrateFederatedNativeContinuationPegInSourceLockV1,
   executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1,
+  executeSubstrateFederatedNativeGenesisPegInCommittedVaultV3,
   executeSubstrateFederatedNativeGenesisPegInSourceLockV1,
   executeSubstrateFederatedNativeGenesisPegInSourceLockV3,
 } from './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
@@ -124,6 +133,7 @@ import {
 const hex = (value: string) => value.repeat(64).slice(0, 64);
 const PRIMARY = 'http://127.0.0.1:9051';
 const WITNESS = 'http://127.0.0.1:9052';
+const V3_SOURCE_OBSERVATION = Object.freeze({ kind: 'retained-v3-source-observation' });
 const CURRENT_TARGET_BINDING = Object.freeze({
   processBindingDigestHex: hex('c'),
   executionTargetIdentityDigestHex: hex('d'),
@@ -166,6 +176,11 @@ describe('native continuation peg-in execution transport', () => {
     mocked.discoverFunding.mockImplementation(async (_signer, _target) => ({ observation: fundingObservation() }));
     mocked.promoteSource.mockImplementation(receipt => sourceExecutionCheck(receipt));
     mocked.promoteVault.mockImplementation(receipt => vaultExecutionCheck(receipt));
+    mocked.assertVaultExecutionCheckV3.mockImplementation((check, packet, batch, target) => {
+      expect(check).toBe(mocked.promoteVault.mock.results.at(-1)?.value);
+      mocked.assertPacketV3(packet, batch, target);
+      return CURRENT_TARGET_BINDING;
+    });
     mocked.createObserver.mockReturnValue({
       schema: 'test-observer', reconciliationIdentityDigestHex: CURRENT_TARGET_BINDING.executionTargetIdentityDigestHex,
       observe: vi.fn(async () => confirmation),
@@ -185,6 +200,7 @@ describe('native continuation peg-in execution transport', () => {
       },
       takePreTransportObservation: vi.fn(() => preTransport),
     });
+    mocked.createVaultAuthorizationV3.mockImplementation(() => mocked.createVaultAuthorization.getMockImplementation()!());
     mocked.createSourceJournal.mockImplementation(() => sourceJournal());
     mocked.createVaultJournal.mockImplementation(() => vaultJournal());
     mocked.createSourceTransport.mockReturnValue({
@@ -205,7 +221,7 @@ describe('native continuation peg-in execution transport', () => {
     });
     mocked.observeSourceOutputsV3.mockImplementation(async () => sourceOutput);
     mocked.assertSourceOutputsV3.mockImplementation((value, target, batch, retainedPacket) => {
-      expect(value).toBe(sourceOutput);
+      expect([sourceOutput, V3_SOURCE_OBSERVATION]).toContain(value);
       mocked.assertPacketV3(retainedPacket, batch, target);
       return retainedPacket;
     });
@@ -213,6 +229,12 @@ describe('native continuation peg-in execution transport', () => {
     mocked.assertVaultOutputs.mockImplementation((value, target, batch, retainedPacket) => {
       expect(value).toBe(vaultOutput);
       mocked.assertPacket(retainedPacket, batch, target);
+    });
+    mocked.observeVaultOutputsV3.mockImplementation(async () => vaultOutput);
+    mocked.assertVaultOutputsV3.mockImplementation((value, target, batch, retainedPacket) => {
+      expect(value).toBe(vaultOutput);
+      mocked.assertPacketV3(retainedPacket, batch, target);
+      return retainedPacket;
     });
   });
 
@@ -312,6 +334,108 @@ describe('native continuation peg-in execution transport', () => {
     expect(mocked.createSourceJournal).toHaveBeenCalledOnce();
     expect(mocked.createSourceTransport).not.toHaveBeenCalled();
     expect(mocked.observeSourceOutputsV3).not.toHaveBeenCalled();
+  });
+
+  it('routes the exact V3 committed-vault packet through its check, authorizer and output custody', async () => {
+    const fixture = v3SourceFixture();
+    const result = await executeSubstrateFederatedNativeGenesisPegInCommittedVaultV3(
+      fixture.vaultInput as never,
+    );
+
+    expect(fixture.session.checkNativePegInCommittedVaultRetainingSignerV3)
+      .toHaveBeenCalledWith(fixture.packet, fixture.target);
+    expect(fixture.session.checkNativePegInCommittedVaultRetainingSignerV1).not.toHaveBeenCalled();
+    expect(fixture.session.checkNativeContinuationPegInCommittedVaultRetainingSignerV1).not.toHaveBeenCalled();
+    expect(mocked.assertSourceOutputsV3).toHaveBeenCalledWith(
+      V3_SOURCE_OBSERVATION, fixture.target, fixture.batch, fixture.packet,
+    );
+    expect(mocked.createVaultAuthorizationV3).toHaveBeenCalledWith(expect.objectContaining({
+      target: fixture.target, batch: fixture.batch, packet: fixture.packet,
+      executionCheck: mocked.promoteVault.mock.results[0]?.value,
+      sourceLockObservation: V3_SOURCE_OBSERVATION,
+    }));
+    expect(mocked.assertVaultExecutionCheckV3).toHaveBeenCalledWith(
+      mocked.promoteVault.mock.results[0]?.value, fixture.packet, fixture.batch, fixture.target,
+    );
+    expect(mocked.createVaultAuthorization).not.toHaveBeenCalled();
+    expect(mocked.createVaultJournal.mock.calls[0]?.[0].executionTargetIdentityDigestHex)
+      .toBe(CURRENT_TARGET_BINDING.executionTargetIdentityDigestHex);
+    expect(mocked.createVaultTransport.mock.results[0]?.value.submit).toHaveBeenCalledOnce();
+    expect(mocked.observeVaultOutputsV3).toHaveBeenCalledWith(expect.objectContaining({
+      target: fixture.target, batch: fixture.batch, packet: fixture.packet,
+    }));
+    expect(mocked.assertVaultOutputsV3).toHaveBeenCalledWith(
+      vaultOutput, fixture.target, fixture.batch, fixture.packet,
+    );
+    expect(mocked.assertVaultOutputs).not.toHaveBeenCalled();
+    expect(result.preTransportObservation).toBe(preTransport);
+    expect(result.outputObservation).toBe(vaultOutput);
+  });
+
+  it('rejects a cloned V3 committed-vault packet before native check or journal', async () => {
+    const fixture = v3SourceFixture();
+    mocked.assertPacketV3.mockImplementation(value => {
+      if (value !== fixture.packet) throw new Error('foreign V3 vault packet');
+      return value;
+    });
+
+    await expect(executeSubstrateFederatedNativeGenesisPegInCommittedVaultV3({
+      ...fixture.vaultInput, packet: structuredClone(fixture.packet),
+    } as never)).rejects.toThrow('foreign V3 vault packet');
+    expect(fixture.session.checkNativePegInCommittedVaultRetainingSignerV3).not.toHaveBeenCalled();
+    expect(mocked.createVaultAuthorizationV3).not.toHaveBeenCalled();
+    expect(mocked.createVaultJournal).not.toHaveBeenCalled();
+    expect(mocked.createVaultTransport).not.toHaveBeenCalled();
+  });
+
+  it('rejects a V1-profile source observation before the V3 committed-vault check', async () => {
+    const fixture = v3SourceFixture();
+    mocked.assertSourceOutputsV3.mockImplementation(value => {
+      if (value !== V3_SOURCE_OBSERVATION) throw new Error('foreign V3 source observation');
+      return fixture.packet;
+    });
+
+    await expect(executeSubstrateFederatedNativeGenesisPegInCommittedVaultV3({
+      ...fixture.vaultInput, sourceLockObservation: fixture.sourceObservation,
+    } as never)).rejects.toThrow('foreign V3 source observation');
+    expect(mocked.assertSourceOutputs).not.toHaveBeenCalled();
+    expect(fixture.session.checkNativePegInCommittedVaultRetainingSignerV3).not.toHaveBeenCalled();
+    expect(mocked.createVaultAuthorizationV3).not.toHaveBeenCalled();
+    expect(mocked.createVaultTransport).not.toHaveBeenCalled();
+  });
+
+  it('stops after asynchronous V3 committed-vault custody revocation before authorization', async () => {
+    const fixture = v3SourceFixture();
+    const revoked = new Error('V3 vault packet custody revoked');
+    let lost = false;
+    fixture.session.checkNativePegInCommittedVaultRetainingSignerV3.mockImplementation(async () => {
+      lost = true;
+      return vaultReceipt(fixture.packet);
+    });
+    mocked.assertPacketV3.mockImplementation(value => {
+      if (lost) throw revoked;
+      return value;
+    });
+
+    await expect(executeSubstrateFederatedNativeGenesisPegInCommittedVaultV3(
+      fixture.vaultInput as never,
+    )).rejects.toBe(revoked);
+    expect(mocked.promoteVault).not.toHaveBeenCalled();
+    expect(mocked.createVaultAuthorizationV3).not.toHaveBeenCalled();
+    expect(mocked.createVaultJournal).not.toHaveBeenCalled();
+    expect(mocked.createVaultTransport).not.toHaveBeenCalled();
+  });
+
+  it('refuses a prior V3 committed-vault attempt without a second submission', async () => {
+    const fixture = v3SourceFixture();
+    vaultPrior = 'confirmed';
+
+    await expect(executeSubstrateFederatedNativeGenesisPegInCommittedVaultV3(
+      fixture.vaultInput as never,
+    )).rejects.toThrow(/prior native committed-vault attempt/);
+    expect(mocked.createVaultJournal).toHaveBeenCalledOnce();
+    expect(mocked.createVaultTransport).not.toHaveBeenCalled();
+    expect(mocked.observeVaultOutputsV3).not.toHaveBeenCalled();
   });
 
   it('uses the continuation committed-vault check and forwards the original source observation', async () => {
@@ -759,6 +883,7 @@ function v3SourceFixture() {
   const session = Object.freeze({
     ...base.session,
     checkNativePegInSourceLockRetainingSignerV3: vi.fn(async () => sourceReceipt(v3Packet)),
+    checkNativePegInCommittedVaultRetainingSignerV3: vi.fn(async () => vaultReceipt(v3Packet)),
   });
   return {
     ...base,
@@ -766,6 +891,8 @@ function v3SourceFixture() {
     packet: v3Packet,
     session,
     sourceInput: { target: base.target, batch: v3Batch, packet: v3Packet, setupSession: session, state: {} },
+    vaultInput: { target: base.target, batch: v3Batch, packet: v3Packet,
+      sourceLockObservation: V3_SOURCE_OBSERVATION, setupSession: session, state: {} },
   };
 }
 

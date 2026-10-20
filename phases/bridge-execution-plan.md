@@ -209,6 +209,16 @@ packet provenance and node reads. A positive join with the real V3 producer,
 committed-vault root and worker remains open; no actual deposit or campaign
 authority follows from this source-only result.
 
+The native V3 genesis committed-vault operational root now follows a separate
+route through the V3 packet and source-observation guards, retained signer
+check, promoted-check assertion, authorizer and output observer. It keeps the
+existing journal, transport, confirmation budgets and failure staging. Direct
+route tests pass 97/97, TypeScript and architecture pass, and independent
+review found no blocking source defect. Those direct tests mock packet
+provenance, journal, transport and output reads; a real join of the producer,
+root and worker and any two-cycle outcome remain unverified. No campaign is
+selected by this source change.
+
 C74 is consumed and permanently held; no successor campaign is selected. The
 purpose-specific deposit selector was locally promoted at
 `9e70f876a46999383f6fc975ce47d816ada5d235` after exact independent review and

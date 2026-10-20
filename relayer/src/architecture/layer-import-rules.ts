@@ -933,6 +933,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
           'claimSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1',
           'discardSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1',
           'discardSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1',
+          'assertSubstrateFederatedNativeGenesisPegInCommittedVaultExecutionCheckV3',
           'promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1',
           'promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1',
           'promoteSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1',
@@ -987,6 +988,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         new Set([
           'createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1',
           'createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV1',
+          'createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV3',
           'SubstrateFederatedIsolatedDevnetPegInCommittedVaultPreTransportObservationV1',
         ]),
       ],
@@ -997,6 +999,8 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
           'observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1',
           'assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1',
           'observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV1',
+          'assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV3',
+          'observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV3',
           'SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1',
         ]),
       ],
@@ -1430,6 +1434,7 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
           'claimSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1',
           'discardSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1',
           'discardSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1',
+          'assertSubstrateFederatedNativeGenesisPegInCommittedVaultExecutionCheckV3',
           'promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1',
           'promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1',
           'promoteSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1',
@@ -1464,6 +1469,7 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
         new Set([
           'createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1',
           'createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV1',
+          'createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV3',
         ]),
       ],
       [
@@ -1473,6 +1479,8 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
           'observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1',
           'assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1',
           'observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV1',
+          'assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV3',
+          'observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV3',
         ]),
       ],
       [
@@ -1845,6 +1853,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'executeSubstrateFederatedNativeGenesisPegInSourceLockV1',
       'executeSubstrateFederatedNativeGenesisPegInSourceLockV3',
       'executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1',
+      'executeSubstrateFederatedNativeGenesisPegInCommittedVaultV3',
       'executeSubstrateFederatedNativeContinuationPegInSourceLockV1',
       'executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1',
       'executeSubstrateFederatedIsolatedDevnetGenesisBatchV3',

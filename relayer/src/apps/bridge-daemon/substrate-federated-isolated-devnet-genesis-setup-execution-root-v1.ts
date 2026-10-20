@@ -257,6 +257,7 @@ import {
   assertSubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1,
   assertSubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV2,
   assertSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1,
+  assertSubstrateFederatedNativeGenesisPegInCommittedVaultExecutionCheckV3,
   claimSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1,
   discardSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1,
   promoteSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1,
@@ -315,6 +316,7 @@ import {
 import {
   createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1,
   createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV1,
+  createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV3,
   type SubstrateFederatedIsolatedDevnetPegInCommittedVaultPreTransportObservationV1,
 } from '../../substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.js';
 import {
@@ -340,6 +342,8 @@ import {
   observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1,
   observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV1,
   assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1,
+  observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV3,
+  assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV3,
   type SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1,
 } from '../../substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js';
 import {
@@ -2982,6 +2986,16 @@ type NativePegInCommittedVaultExecutionInputV1 = Readonly<{
   state: SubstrateFederatedLocalDevnetPegInCommittedVaultJournalStateV1;
 }>;
 
+type NativePegInCommittedVaultExecutionInputV3 = Readonly<{
+  captureConfirmationProgress?: true;
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+  batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV3>;
+  packet: ReturnType<typeof assertSubstrateFederatedNativeGenesisPegInPacketV3>;
+  sourceLockObservation: Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1>;
+  setupSession: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>;
+  state: SubstrateFederatedLocalDevnetPegInCommittedVaultJournalStateV1;
+}>;
+
 type NativePegInCommittedVaultExecutionResultV1 = Readonly<{
   expectedTxId: string;
   transportStatus: 'accepted' | 'reconciled';
@@ -3182,6 +3196,171 @@ async function executeSubstrateFederatedNativePegInCommittedVaultV1(
     preTransportObservation, outputObservation });
   } catch (error) {
     throw tagSubstrateFederatedNativeCommittedReserveFailureStageV1(error, failureStage, committedReserveKind);
+  }
+}
+
+export async function executeSubstrateFederatedNativeGenesisPegInCommittedVaultV3(
+  input: NativePegInCommittedVaultExecutionInputV3,
+): Promise<NativePegInCommittedVaultExecutionResultV1> {
+  const session = input.setupSession;
+  const check = session.checkNativePegInCommittedVaultRetainingSignerV3;
+  let failureStage: SubstrateFederatedNativeCommittedReserveFailureStageV1 = 'ingress';
+  try {
+  const { target, batch, packet, sourceLockObservation, state } = input;
+  const targetBinding = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  const assertActive = () => {
+    assertSubstrateFederatedNativeGenesisPegInPacketV3(packet, batch, target);
+    assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV3(sourceLockObservation, target, batch, packet);
+  };
+  assertActive();
+  const completionDeadline = performance.now() + TRANSACTION_CONFIRMATION_BUDGET_MS + NON_CONFIRMATION_ACTION_BUDGET_MS;
+  const observer = input.captureConfirmationProgress === true
+    ? createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+        target, batch.request.target.genesisHeaderIdHex, packet.transactions.reserveTransition.txId)
+    : createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+        target, batch.request.target.genesisHeaderIdHex);
+  failureStage = 'native-check';
+  const receipt = await check.call(session, packet, target);
+  assertActive();
+  failureStage = 'check-promotion';
+  const executionCheck = promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1(receipt, target);
+  assertSubstrateFederatedNativeGenesisPegInCommittedVaultExecutionCheckV3(executionCheck, packet, batch, target);
+  failureStage = 'authorization';
+  const authorizationSession = createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV3({
+    target, batch, packet, executionCheck, sourceLockObservation,
+  });
+  const journal = createSubstrateFederatedLocalDevnetPegInCommittedVaultJournalV1({
+    state, authorizer: authorizationSession.broadcastAuthorizer,
+    executionTargetIdentityDigestHex: targetBinding.executionTargetIdentityDigestHex,
+    targetGenesisHeaderIdHex: batch.request.target.genesisHeaderIdHex,
+  });
+  failureStage = 'journal-reconciliation';
+  const prior = await journal.reconcileActive(observer);
+  assertActive();
+  if (prior !== 'none') throw new Error('unexpected prior native committed-vault attempt was reconciled');
+  const transport = createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1(
+    target, authorizationSession.broadcastAuthorizer, true,
+  );
+  const transaction = packet.transactions.reserveTransition;
+  const inputBoxIds = [packet.boxes.reservePredecessor.boxId, packet.boxes.sourceLock.boxId, packet.boxes.transitionFeeFunding.boxId] as const;
+  failureStage = 'operational-execution';
+  const result = await runErgoOperationalTransaction({
+    operationProfile: PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
+    expectedTxId: transaction.txId, sourceBoxId: inputBoxIds[0]!, inputBoxIds,
+    attemptedAtHeight: receipt.signer.stateContextTipHeight,
+    targetSidechainHeight: null, targetSidechainBlockHashHex: null, heartbeatKeyHex: null,
+    unsignedTransaction: transaction.eip12Tx,
+  }, {
+    sign: async admission => {
+      failureStage = 'operational-sign';
+      assertActive();
+      assertCommittedVaultOperationalAdmission(admission, executionCheck, transaction.eip12Tx,
+        receipt.signer.stateContextTipHeight, inputBoxIds);
+      return Object.freeze({ nodeOrigin: target.primaryNodeOrigin,
+        signedTransactionDigestHex: receipt.signedTransactionCanonicalJsonSha256Hex, signerArtifact: executionCheck.signedCandidate });
+    },
+    check: async signed => {
+      failureStage = 'operational-check';
+      assertActive();
+      if (signed.signerArtifact !== executionCheck.signedCandidate
+        || signed.signedTransactionDigestHex !== receipt.signedTransactionCanonicalJsonSha256Hex) {
+        throw new Error('native committed-vault checked signer binding changed');
+      }
+      return Object.freeze({ checkResponseDigestHex: executionCheck.checkedAcceptance.submissionHandle.checkResponseDigestHex,
+        checkerArtifact: executionCheck.checkedAcceptance.submissionHandle });
+    },
+    revalidate: async checked => {
+      failureStage = 'operational-revalidate';
+      try { assertActive(); }
+      catch (cause) {
+        throw tagNativeCommittedReserveRevalidationOriginV1(cause, 'callback-observation-guard');
+      }
+      try { return await authorizationSession.revalidator.revalidate(checked); }
+      catch (cause) {
+        throw tagNativeCommittedReserveRevalidationOriginV1(cause, 'revalidator-call');
+      }
+    },
+    authorize: value => {
+      failureStage = 'operational-authorize';
+      return authorizationSession.broadcastAuthorizer.authorize(value);
+    },
+    reserve: value => {
+      failureStage = 'operational-reserve';
+      return journal.journal.reserve(value);
+    },
+    finalize: value => {
+      failureStage = 'operational-finalize';
+      return journal.journal.finalize(value);
+    },
+    submit: attempt => {
+      failureStage = 'operational-submit';
+      assertActive();
+      assertFullConfirmationWindowAvailable(completionDeadline, 'native committed-vault');
+      return transport.submit(attempt);
+    },
+  });
+  failureStage = 'transport-validation';
+  assertCommittedVaultTransportExecution(result, transaction.txId);
+  assertActive();
+  const preTransportObservation = authorizationSession.takePreTransportObservation();
+  failureStage = 'confirmation';
+  const assertConfirmationActive = () => {
+    try { assertActive(); }
+    catch (cause) {
+      throw tagNativeCommittedReserveConfirmationOriginV1(cause, 'active-guard');
+    }
+  };
+  try {
+    await waitForCanonicalConfirmation(observer, transaction.txId, completionDeadline,
+      'native committed-vault', assertConfirmationActive,
+      deadline => completeSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(target, transaction.txId, deadline));
+    assertConfirmationActive();
+  } catch (cause) {
+    const diagnostic = projectTrackerCanonicalConfirmationFailureDiagnosticV1(cause);
+    if (diagnostic !== null && diagnostic.category !== 'confirmation_phase_failure') {
+      tagNativeCommittedReserveConfirmationOriginV1(cause,
+        'confirmation-observation', diagnostic.category);
+      // Export only the last completed read of this exact observer. Failed or
+      // mismatched optional capture cannot replace the original thrown value.
+      if (input.captureConfirmationProgress === true && diagnostic.lastObservation !== null) {
+        try {
+          const progress = projectSubstrateFederatedIsolatedDevnetConfirmationProgressV1(
+            observer, transaction.txId, targetBinding.executionTargetIdentityDigestHex);
+          if (progress !== null && diagnostic.expectedTransactionIdHex === transaction.txId
+            && diagnostic.executionTargetIdentityDigestHex === targetBinding.executionTargetIdentityDigestHex) {
+            tagNativeCommittedReserveConfirmationProgressV1(cause, {
+              confirmationCategory: diagnostic.category,
+              progress,
+              expectedTransactionIdHex: transaction.txId,
+              executionTargetIdentityDigestHex: targetBinding.executionTargetIdentityDigestHex,
+              targetGenesisHeaderIdHex: batch.request.target.genesisHeaderIdHex,
+              observationCount: diagnostic.observationCount,
+              lastObservationDigestHex: diagnostic.lastObservation.observationDigestHex,
+              lastObservationHeight: diagnostic.lastObservation.observedAtHeight,
+            });
+          }
+        } catch { /* Optional metrics confer no completion or retry authority. */ }
+      }
+    }
+    throw cause;
+  }
+  failureStage = 'confirmed-journal';
+  const reconciled = await journal.reconcileActive(observer);
+  assertActive();
+  if (reconciled !== 'confirmed') throw new Error('native committed-vault journal did not retain exact confirmation');
+  const confirmations = await journal.revalidateConfirmed(observer, transaction.txId);
+  assertActive();
+  if (confirmations.length !== 1) throw new Error('native committed-vault confirmed attempt count changed');
+  failureStage = 'output-observation';
+  const outputObservation = await observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV3({
+    target, batch, packet, confirmation: confirmations[0]!,
+  });
+  assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV3(outputObservation, target, batch, packet);
+  return Object.freeze({ expectedTxId: transaction.txId, transportStatus: result.status === 'accepted' ? 'accepted' : 'reconciled',
+    durableAttemptDigestHex: result.durableAttemptDigestHex, journalDigestHex: result.journalDigestHex,
+    preTransportObservation, outputObservation });
+  } catch (error) {
+    throw tagSubstrateFederatedNativeCommittedReserveFailureStageV1(error, failureStage, 'genesis');
   }
 }
 
