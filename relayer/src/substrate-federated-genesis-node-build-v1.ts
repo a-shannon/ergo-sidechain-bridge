@@ -11,7 +11,9 @@ import {
   inspectSubstrateFederatedAuthoritySafePinnedToolchainV1,
 } from './substrate-federated-authority-safe-devnet-build-environment-v1.js';
 import {
+  assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1,
   readSubstrateFederatedGenesisProfilesFromSessionV2,
+  type SubstrateFederatedNativeGenesisSourceAttestationOperationV1,
   type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
 } from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
 import {
@@ -30,6 +32,11 @@ const SOURCE_TREE = '8dca3c37da8e24cb37d40c8121465e5d14e8a58c';
 const CARGO_ARGS = ['build', '--offline', '--locked', '-p', 'frontier-template-node',
   '--no-default-features', '--features', 'bridge-federated-v4-genesis-node'] as const;
 const WASM_PATH = 'debug/wbuild/frontier-template-v4-fed-genesis-runtime/frontier_template_v4_fed_genesis_runtime.wasm';
+const SUCCESSFUL_BUILDS = new WeakMap<object, Readonly<{
+  parent: string;
+  sourceSession: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>;
+  assertCustody: () => void;
+}>>();
 
 export interface BuildSubstrateFederatedGenesisNodeV1Input {
   readonly bridgeRoot: string;
@@ -161,9 +168,30 @@ export async function buildSubstrateFederatedGenesisNodeV1(input: BuildSubstrate
   if (!readFileSync(wasm.path).subarray(0, 8).equals(Buffer.from('0061736d01000000', 'hex'))) {
     throw new Error('FED selected runtime is not a WASM version-one module');
   }
-  return Object.freeze({ sourceTreeId: SOURCE_TREE, sourceDirectory: source, targetDirectory: target,
+  const result = Object.freeze({ sourceTreeId: SOURCE_TREE, sourceDirectory: source, targetDirectory: target,
     sourceProofProfileScaleHex: profileScaleHex, sourceProofProfileIdHex: mintProfile.proofProfileIdHex,
     node, wasm, toolchain, protocSha256Hex });
+  SUCCESSFUL_BUILDS.set(result, { parent, sourceSession: input.sourceSession, assertCustody });
+  return result;
+}
+
+/** Consume one original successful build for the same retained source operation. */
+export function claimSubstrateFederatedGenesisNodeBuildForOperationV3(
+  built: object,
+  expectedBuildParentDirectory: string,
+  operation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>,
+): void {
+  if (built === null || typeof built !== 'object') {
+    throw new Error('FED V3 requires an original successful node build');
+  }
+  const retained = SUCCESSFUL_BUILDS.get(built);
+  if (retained === undefined) throw new Error('FED V3 requires an original successful node build');
+  SUCCESSFUL_BUILDS.delete(built);
+  if (directory(expectedBuildParentDirectory) !== retained.parent) {
+    throw new Error('FED V3 build belongs to a different parent');
+  }
+  assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1(operation, retained.sourceSession);
+  retained.assertCustody();
 }
 
 function exactInput(input: BuildSubstrateFederatedGenesisNodeV1Input): Readonly<BuildSubstrateFederatedGenesisNodeV1Input> {

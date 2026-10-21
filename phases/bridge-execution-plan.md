@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-10-20
+Updated: 2026-10-21
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,7 +28,13 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Close the exact tracker-V2/reserve-V7 R7 path. The V6
+**Now:** Prepare a separately selected fresh owned Frontier/Ergo run for the
+reviewed V3 source candidate. Before V3 Ergo assembly, a bounded diagnostic
+must establish the effective project and meta-build SBT resolvers under the
+same pinned inputs; the declared file-only lock is not that observation.
+An operational worker or campaign remains a separate decision. The exact R7
+source correction and its two isolated
+changed-input JVM tests are locally closed; no R7 rebuild is pending. The V6
 compiled reserve accepts an additional dense R7 on a successor that the next
 deposit builder refuses. A pinned JVM reduction exposed that acceptance.
 The V7 template adds three fail-closed R7 guards; its coherent V1-tracker
@@ -228,8 +234,87 @@ and permits one consumption. Focused tests pass 160/160, TypeScript noEmit and
 layered imports pass, and independent exact-four-file review found no blocking
 source defect. Cloned or mutated inputs, cross-profile receipts, revoked
 custody and stale transaction/finality lineage reject. These are source-only,
-nonauthorizing results: the V3 source-proof and worker joins, genuine
-two-cycle, recovery/operator/FED7 and external acceptance remain open.
+nonauthorizing results.
+
+The explicit V3 operation now produces a separately owned source-proof receipt
+bound to that draft and its original retained family receipt. V1 and V3 share
+the one-use operation slot; both recheck it before threshold signing after
+reentrant reads. The V1 checkpoint and native reservation signer remain V1-only.
+Local commit `5c1c29e66fdac4f15f7b9467cfd8e605bb49c98b` passed the focused
+source-proof tests (60/60), final affected architecture tests (446/446),
+real V3 packet identity test (9/9), TypeScript and import layering. Independent
+exact-source review found no blocking defect. The separately named V3 sign-only
+intake was then committed locally at
+`8c5990774cd0c3662fb09bae9e7272d158c447b5` after its direct 76/76,
+architecture 449/449, TypeScript and import checks and independent scoped
+review. A broader V1 consumer run hit existing 5-second test timeouts, so that
+closure remains open. A separate V3 reservation-only executor was committed
+locally at `968c10779e419652cc524fe68e2067372a7ddc88` and retains that proof
+through one local synthetic attempt. Its focused test passed 86/86,
+including a real create-new hold and duplicate refusal before mocked transport;
+architecture passed 450/450, TypeScript and import checks passed, and exact
+independent review and parent-to-commit publication guard passed. A proposed
+small route was rejected because its packet fixture had already spent both
+root one-shots. A fresh local V3 fixture now compiles with the signing
+operator, creates its tracker before effects and retains the same batch,
+target and packet through the source-lock and vault output-observer producers.
+It rejects a same-digest cloned source observation before any vault attempt,
+then confirms two ordered Arm and POST calls and two journal attempts using
+the original observation. The test exposed a post-consumption binding check
+that could not pass after Arm; a callback-scoped validator now preserves that
+check while public consumed-handle provenance still rejects. Five affected
+suites pass 396/396, the final V3 join passes 1/1, architecture passes
+450/450, TypeScript noEmit passes, and independent review of the exact
+source/test delta found no blocking defect. Node, funding, history and
+transport responses remain explicit doubles. That same V3 test now feeds the
+original vault observation into a draft, committed-reserve evidence and an
+explicit one-use source proof. A same-digest clone fails before draft or
+signing; the original proof retains exact evidence, draft, mint and family
+joins with false mint, funds and readiness flags. The extended test passes
+1/1, TypeScript noEmit and architecture 450/450 pass, and independent review
+of the exact test delta found no blocking defect. The original proof also
+reaches the V3 sign-only consumer: a copied proof rejects before the doubled
+Frontier observation and signature, while the original is observed and signed
+once with false reservation, mint and broadcast flags. The same original proof
+now reaches the separate V3 reservation-only executor in a focused 1/1 test:
+a copied proof rejects before observation, signature or attempt, while the
+original passes two exact doubled target observations, one signature, a modeled
+attempt and ordered submit, seal and inclusion callbacks. TypeScript noEmit
+passes; the unchanged import graph previously passed for this test. Exact
+independent review accepted this mocked join and identified no blocking source
+defect. Frontier custody, node responses and transport remain doubled; this
+does not establish a durable hold, actual node inclusion or an operational
+reservation. A distinct V3-only source root now claims a builder-issued
+one-use result before writing fresh typed genesis, invokes build-spec --raw,
+compares exact raw storage, owns a two-node Frontier session and drives the
+reservation-only consumer while that session is live. The final focused
+builder suite passes 51/51, affected root and architecture suites remain green,
+TypeScript noEmit passes, and independent review accepted the exact
+provenance and import-owner deltas. Node responses, custody and transport in
+these tests are doubled. The next batch requires a separately selected fresh
+Frontier build and owned two-node execution with exact current source pins;
+the source root alone proves no actual reservation, durable hold or inclusion.
+No C75 or campaign is selected; genuine two-cycle, recovery/operator/FED7
+and external acceptance remain open.
+
+The separate V3 owned composition root is now coded to retain the original
+Frontier builder result, start fresh owned Frontier and Ergo targets, execute
+the three ordered V3 issuances, then hold one full-block snapshot. Before
+deposit funding it checks on both nodes that the three source boxes are spent
+and the compiled singleton outputs are current EIP-12 boxes under that held
+tip. It requires the later funding observation to match the same genesis and
+held header, and passes the resulting source-lock, committed-vault evidence
+and original one-use proof to the reservation-only target. The separately
+versioned V3 Ergo builder and lock preserve the reviewed V1 build mechanics
+while binding their own receipt and state parent. The owned-root test passes
+13/13, V3 builder 7/7, affected V1 Frontier builder 51/51 and held reader
+23/23; architecture passes 468/468, TypeScript noEmit and layered imports
+pass over 141 modules and 946 TypeScript files. An independent exact-source
+review reproduced the 13-file candidate aggregate and found no blocking
+source defect. The root and builder tests use mocked process or node
+boundaries. Effective SBT project and meta-build resolvers have not been
+observed for V3; no fresh node build, issuance, deposit, reservation,
+two-cycle or recovery run has occurred in this lot.
 
 C74 is consumed and permanently held; no successor campaign is selected. The
 purpose-specific deposit selector was locally promoted at
@@ -2409,7 +2494,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Pooled-reserve R7 exact V2/V7 family -> operational route | Retain the permanent C74 hold; use the locally promoted synthetic whole-burn fixture and JVM consumer to select a separate versioned operational route without changing historical callers | V6 compiled reserve accepted dense successor R7 while the next deposit builder refused it. V7 guards, tracker-V2/V7 compiler and receipt equality, TypeScript identity checks, exact-family JVM deposit and reserve-only burn reductions passed within their stated scopes. The promoted synthetic whole-burn JVM matrix accepts reserve/DUP/fee with tracker DATA_INPUTS(0) and rejects seven focused variants. The operational route and genuine lifecycle remain open; no C74 cause or automatic campaign claim |
+| **Now** | Native V3 source proof -> reservation-only consumer | Separately select a fresh owned Frontier/Ergo run; first verify the effective V3 project and meta-build SBT resolvers before assembly, then carry the original proof through the reservation-only executor. Keep worker and campaign separate | Mocked root 13/13, V3 builder 7/7, affected V1 builder 51/51, held reader 23/23 and architecture 468/468 pass with TypeScript, imports and exact independent 13-file source review. No V3 resolver diagnostic or actual owned-node build, hold, inclusion, worker or lifecycle run has passed. C74 stays consumed and no C75 is selected |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Separately select and admit one local synthetic campaign after a deciding checkpoint, exact local source identity, applicable checks/review and fresh runtime/source/output/custody/fee gates; apply guarded publication and due exact-head CI at public promotion | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |

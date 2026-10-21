@@ -26,6 +26,18 @@ const GENESIS_SETUP_ROOT =
   'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
 const FEDERATED_GENESIS_TARGET_ROOT =
   'apps/bridge-daemon/substrate-federated-genesis-target-root-v1.ts';
+const FEDERATED_V3_TARGET_ROOT =
+  'apps/bridge-daemon/substrate-federated-v3-frontier-reservation-target-root.ts';
+const FEDERATED_V3_TARGET_ROOT_TEST =
+  'apps/bridge-daemon/substrate-federated-v3-frontier-reservation-target-root.test.ts';
+const FEDERATED_V3_HELD_CONFIRMATIONS =
+  'apps/bridge-daemon/substrate-federated-v3-held-issuance-confirmation.ts';
+const FEDERATED_V3_HELD_CONFIRMATIONS_TEST =
+  'apps/bridge-daemon/substrate-federated-v3-held-issuance-confirmation.test.ts';
+const FEDERATED_V3_OWNED_RESERVATION_ROOT =
+  'apps/bridge-daemon/substrate-federated-v3-owned-genesis-reservation-root.ts';
+const FEDERATED_V3_OWNED_RESERVATION_ROOT_TEST =
+  'apps/bridge-daemon/substrate-federated-v3-owned-genesis-reservation-root.test.ts';
 const FEDERATED_GENESIS_OPERATOR = 'adapters/federated-genesis-operator-v1.ts';
 const FEDERATED_GENESIS_OPERATOR_SPECIFIER = '../../adapters/federated-genesis-operator-v1.js';
 
@@ -1051,13 +1063,16 @@ describe('layer import rules', () => {
       `exclusive authority module must use named runtime imports: ${specifier}`);
   });
 
-  it('limits V3 reservation execution to its named direct test, without granting a runtime caller', () => {
+  it('limits V3 reservation execution to its direct test and exact V3 target root', () => {
     const signer = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
     const test = 'substrate-federated-isolated-devnet-source-attestation-mint-proof-v1.test.ts';
     const specifier = `./${signer.replace(/\.ts$/, '.js')}`;
     const v3 = 'executeFrontierNativeProofBoundReservationV3';
     expect(inspect(staticAppFixture(test,
       `import { ${v3} } from '${specifier}'; await ${v3}({});`))).toEqual([]);
+    expect(inspect(staticAppFixture(FEDERATED_V3_TARGET_ROOT,
+      `import { ${v3} } from './frontier-native-proof-bound-reservation-signing-v1.js'; await ${v3}({});`)))
+      .toEqual([]);
     expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
       `import { ${v3} } from './frontier-native-proof-bound-reservation-signing-v1.js'; ${v3}({});`))
       .map(item => item.message)).toContain(
@@ -1068,6 +1083,212 @@ describe('layer import rules', () => {
     expect(inspect(staticAppFixture(test,
       `import { ${v3} as execute } from '${specifier}'; execute({});`)).map(item => item.message)).toContain(
       `exclusive authority import must not be aliased: ${specifier}#${v3}`);
+  });
+
+  it.each([
+    ['native-executable-pin-v1', 'native-executable-pin', 'verifyExecutableSha256'],
+    ['bounded-process', 'pinned-local-native-verifier-build', 'runBoundedProcess'],
+    ['tool-environment', 'substrate-federated-authority-safe-devnet-build-environment-v1',
+      'buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1'],
+    ['builder', 'substrate-federated-genesis-node-build-v1', 'buildSubstrateFederatedGenesisNodeV1'],
+    ['builder claim', 'substrate-federated-genesis-node-build-v1',
+      'claimSubstrateFederatedGenesisNodeBuildForOperationV3'],
+    ['owned-session', 'substrate-federated-authority-safe-devnet-process-v1',
+      'createOwnedFederatedGenesisDevnetProcessSessionV1'],
+    ['owned-target', 'substrate-federated-authority-safe-devnet-process-v1',
+      'assertOwnedFederatedGenesisDevnetTargetV1'],
+    ['ergo-target', 'substrate-federated-isolated-devnet-ergo-node-process-v1',
+      'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1'],
+    ['compiled', 'substrate-federated-observed-genesis-v3', 'assertObservedSubstrateFederatedGenesisV3'],
+    ['draft', 'substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1',
+      'assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV3'],
+    ['proof', 'substrate-federated-isolated-devnet-source-attestation-session-v1',
+      'assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV3'],
+  ])('keeps V3 %s legacy authority at its one exact root', (_label, module, binding) => {
+    const specifier = `../../${module}.js`;
+    const source = `import { ${binding} } from '${specifier}'; ${binding}();`;
+    expect(inspect(staticAppFixture(FEDERATED_V3_TARGET_ROOT, source))).toEqual([]);
+    expect(inspect(staticAppFixture('apps/bridge-daemon/foreign-v3.ts', source))
+      .map(item => item.message)).toContain(
+      `apps must not import an unclassified legacy module: ${module}.ts`,
+    );
+    expect(inspect(staticAppFixture(FEDERATED_V3_TARGET_ROOT,
+      `import { ${binding} as escaped } from '${specifier}'; escaped();`))
+      .map(item => item.message)).toContain(
+      `restricted capability import binding must not be aliased: ${specifier}#${binding}`,
+    );
+  });
+
+  it('keeps V3 type queries erased and rejects runtime escape of their imported functions', () => {
+    for (const [specifier, binding] of [
+      ['../../substrate-federated-genesis-node-build-v1.js', 'buildSubstrateFederatedGenesisNodeV1'],
+      ['./frontier-native-proof-bound-reservation-signing-v1.js',
+        'executeFrontierNativeProofBoundReservationV3'],
+    ]) {
+      const declaration = `import { ${binding} } from '${specifier}';`;
+      expect(inspect(staticAppFixture(FEDERATED_V3_TARGET_ROOT,
+        `${declaration} type T = ReturnType<typeof ${binding}>;`))).toEqual([]);
+      for (const use of [`const escaped = ${binding};`, `capture(${binding});`, `export { ${binding} };`]) {
+        expect(inspect(staticAppFixture(FEDERATED_V3_TARGET_ROOT,
+          `${declaration} type T = ReturnType<typeof ${binding}>; ${use}`))
+          .map(item => item.message)).toContain(
+          use.startsWith('export')
+            ? `restricted capability binding must not be re-exported: ${specifier}#${binding}`
+            : `restricted capability binding must not escape its reviewed call: ${specifier}#${binding}`,
+        );
+      }
+    }
+  });
+
+  it('reserves the one-shot V3 builder claim to its exact root and producer test', () => {
+    const binding = 'claimSubstrateFederatedGenesisNodeBuildForOperationV3';
+    const rootSpecifier = '../../substrate-federated-genesis-node-build-v1.js';
+    const directSpecifier = './substrate-federated-genesis-node-build-v1.js';
+    expect(inspect(staticAppFixture(FEDERATED_V3_TARGET_ROOT,
+      `import { ${binding} } from '${rootSpecifier}'; ${binding}({}, '', {});`))).toEqual([]);
+    expect(inspect(staticAppFixture('substrate-federated-genesis-node-build-v1.test.ts',
+      `import { ${binding} } from '${directSpecifier}'; ${binding}({}, '', {});`))).toEqual([]);
+    expect(inspect(staticAppFixture('substrate-federated-foreign-claim.ts',
+      `import { ${binding} } from '${directSpecifier}'; ${binding}({}, '', {});`))
+      .map(item => item.message)).toContain(
+      `exclusive authority import has the wrong owner: ${directSpecifier}#${binding}`);
+    expect(inspect(staticAppFixture(FEDERATED_V3_TARGET_ROOT,
+      `import { ${binding} as claim } from '${rootSpecifier}'; claim({}, '', {});`))
+      .map(item => item.message)).toContain(
+      `exclusive authority import must not be aliased: ${rootSpecifier}#${binding}`);
+    expect(inspect(staticAppFixture(FEDERATED_V3_TARGET_ROOT,
+      `import * as builder from '${rootSpecifier}'; builder.${binding}({}, '', {});`))
+      .map(item => item.message)).toContain(
+      `exclusive authority module must use named runtime imports: ${rootSpecifier}`);
+  });
+
+  it('allows only the V3 target root direct platform call, never ambient process or reflection', () => {
+    const specifier = 'node:os';
+    expect(inspect(staticAppFixture(FEDERATED_V3_TARGET_ROOT,
+      `import { platform } from '${specifier}'; platform();`))).toEqual([]);
+    for (const [source, message] of [
+      [`import { platform as host } from '${specifier}'; host();`,
+        `restricted capability import binding must not be aliased: ${specifier}#platform`],
+      [`import * as os from '${specifier}'; os.platform();`,
+        `restricted capability import must use reviewed named bindings: ${specifier}`],
+      [`import { platform } from '${specifier}'; const leaked = platform;`,
+        `restricted capability binding must not escape its reviewed call: ${specifier}#platform`],
+      [`import { cpus } from '${specifier}'; cpus();`,
+        `restricted capability import binding is not allowlisted: ${specifier}#cpus`],
+      ['process.platform;', 'apps must not access unbound global capability: process'],
+      ['Reflect.ownKeys({});', 'apps must not access unbound global capability: Reflect'],
+    ]) {
+      expect(inspect(staticAppFixture(FEDERATED_V3_TARGET_ROOT, source))
+        .map(item => item.message)).toContain(message);
+    }
+  });
+
+  it('keeps the V3 target root test-only and its public exports exact', () => {
+    const specifier = './substrate-federated-v3-frontier-reservation-target-root.js';
+    const execute = 'executeSubstrateFederatedV3FrontierReservationTarget';
+    const parse = 'parseSubstrateFederatedV3RawGenesisStorage';
+    expect(inspect(staticAppFixture(FEDERATED_V3_TARGET_ROOT_TEST,
+      `import { ${execute}, ${parse} } from '${specifier}'; ${execute}({}); ${parse}({});`)))
+      .toEqual([]);
+    for (const file of [FEDERATED_GENESIS_TARGET_ROOT, 'apps/bridge-daemon/foreign-v3.ts']) {
+      expect(inspect(staticAppFixture(file,
+        `import { ${execute} } from '${specifier}'; ${execute}({});`))
+        .map(item => item.message)).toContain(
+        `exclusive runtime module import has the wrong owner: ${specifier}`,
+      );
+    }
+    expect(inspect(staticAppFixture(FEDERATED_V3_TARGET_ROOT_TEST,
+      `import { ${execute} as run } from '${specifier}'; run({});`))
+      .map(item => item.message)).toContain(
+      `exclusive authority import must not be aliased: ${specifier}#${execute}`,
+    );
+    for (const source of [
+      `import * as target from '${specifier}'; target.${execute}({});`,
+      `export { ${execute} } from '${specifier}';`,
+      `const target = await import('${specifier}'); target.${execute}({});`,
+    ]) {
+      const files = staticAppFixture(FEDERATED_V3_TARGET_ROOT_TEST, source);
+      files[FEDERATED_V3_TARGET_ROOT] = 'export {};';
+      expect(inspect(files)
+        .map(item => item.message)).toContain(
+        `exclusive authority module must use named runtime imports: ${specifier}`,
+      );
+    }
+    expect(inspect({ [FEDERATED_V3_TARGET_ROOT]: 'export function unreviewedV3Authority() {}' })
+      .map(item => item.message)).toContain('reviewed app root export is not allowlisted: unreviewedV3Authority');
+  });
+
+  it('grants the held V3 confirmation reader only its two reviewed legacy capabilities', () => {
+    const spv = '../../authenticated-spv-tracker-read-only-node-client.js';
+    const read = 'createBoundedAuthenticatedSpvTrackerReadOnlySource';
+    expect(inspect(staticAppFixture(FEDERATED_V3_HELD_CONFIRMATIONS,
+      `import { ${read} } from '${spv}'; ${read}('http://127.0.0.1:9051');`))).toEqual([]);
+    expect(inspect(staticAppFixture('apps/bridge-daemon/foreign-v3.ts',
+      `import { ${read} } from '${spv}'; ${read}('http://127.0.0.1:9051');`))
+      .map(item => item.message)).toContain(
+      'apps must not import an unclassified legacy module: authenticated-spv-tracker-read-only-node-client.ts');
+    expect(inspect(staticAppFixture(FEDERATED_V3_HELD_CONFIRMATIONS,
+      `import { ${read} as escaped } from '${spv}'; escaped('http://127.0.0.1:9051');`))
+      .map(item => item.message)).toContain(
+      `restricted capability import binding must not be aliased: ${spv}#${read}`);
+    expect(inspect(staticAppFixture(FEDERATED_V3_HELD_CONFIRMATIONS,
+      `import { ${read} } from '${spv}'; export { ${read} };`))
+      .map(item => item.message)).toContain(
+      `restricted capability binding must not be re-exported: ${spv}#${read}`);
+  });
+
+  it('keeps the V3 held reader and reservation target at the one owned root', () => {
+    for (const [specifier, binding] of [
+      ['./substrate-federated-v3-held-issuance-confirmation.js',
+        'assertSubstrateFederatedV3HeldIssuanceConfirmations'],
+      ['./substrate-federated-v3-frontier-reservation-target-root.js',
+        'executeSubstrateFederatedV3FrontierReservationTarget'],
+    ]) {
+      const source = `import { ${binding} } from '${specifier}'; ${binding}({});`;
+      expect(inspect(staticAppFixture(FEDERATED_V3_OWNED_RESERVATION_ROOT, source))).toEqual([]);
+      expect(inspect(staticAppFixture('apps/bridge-daemon/foreign-v3.ts', source))
+        .map(item => item.message)).toContain(
+        `exclusive runtime module import has the wrong owner: ${specifier}`);
+      expect(inspect(staticAppFixture(FEDERATED_V3_OWNED_RESERVATION_ROOT,
+        `import { ${binding} as escaped } from '${specifier}'; escaped({});`))
+        .map(item => item.message)).toContain(
+        `exclusive authority import must not be aliased: ${specifier}#${binding}`);
+      expect(inspect(staticAppFixture(FEDERATED_V3_OWNED_RESERVATION_ROOT,
+        `import * as authority from '${specifier}'; authority.${binding}({});`))
+        .map(item => item.message)).toContain(
+        `exclusive authority module must use named runtime imports: ${specifier}`);
+    }
+    const heldSpecifier = './substrate-federated-v3-held-issuance-confirmation.js';
+    expect(inspect(staticAppFixture(FEDERATED_V3_HELD_CONFIRMATIONS_TEST,
+      `import { assertSubstrateFederatedV3HeldIssuanceConfirmations } from '${heldSpecifier}';`
+      + ' assertSubstrateFederatedV3HeldIssuanceConfirmations({});'))).toEqual([]);
+    expect(inspect({ [FEDERATED_V3_OWNED_RESERVATION_ROOT]:
+      'export function unreviewedV3Execution() {}' }).map(item => item.message))
+      .toContain('reviewed app root export is not allowlisted: unreviewedV3Execution');
+    expect(inspect({ [FEDERATED_V3_HELD_CONFIRMATIONS]:
+      'export function unreviewedV3Read() {}' }).map(item => item.message))
+      .toContain('reviewed app root export is not allowlisted: unreviewedV3Read');
+    expect(inspect(staticAppFixture(FEDERATED_V3_OWNED_RESERVATION_ROOT_TEST,
+      'import { runSubstrateFederatedV3OwnedGenesisReservationRoot }'
+      + " from './substrate-federated-v3-owned-genesis-reservation-root.js';"
+      + ' runSubstrateFederatedV3OwnedGenesisReservationRoot({});'))).toEqual([]);
+  });
+
+  it('pins the V3 Ergo builder to the owned reservation root only', () => {
+    const v3 = '../../substrate-federated-isolated-devnet-ergo-node-build-v3.js';
+    const current = `import { buildSubstrateFederatedIsolatedDevnetErgoNodeV3,
+      type BuildSubstrateFederatedIsolatedDevnetErgoNodeV3Input } from '${v3}';
+      buildSubstrateFederatedIsolatedDevnetErgoNodeV3({} as BuildSubstrateFederatedIsolatedDevnetErgoNodeV3Input);`;
+    expect(inspect(staticAppFixture(FEDERATED_V3_OWNED_RESERVATION_ROOT, current))).toEqual([]);
+    expect(inspect(staticAppFixture('apps/bridge-daemon/foreign-v3.ts', current))
+      .map(item => item.message)).toContain(
+      'apps must not import an unclassified legacy module: substrate-federated-isolated-devnet-ergo-node-build-v3.ts');
+    const historical = '../../substrate-federated-isolated-devnet-ergo-node-build-v1.js';
+    expect(inspect(staticAppFixture(FEDERATED_V3_OWNED_RESERVATION_ROOT,
+      `import { buildSubstrateFederatedIsolatedDevnetErgoNodeV1 } from '${historical}';
+       buildSubstrateFederatedIsolatedDevnetErgoNodeV1({});`))
+      .map(item => item.message)).toContain(
+      'apps must not import an unclassified legacy module: substrate-federated-isolated-devnet-ergo-node-build-v1.ts');
   });
 
   it.each([

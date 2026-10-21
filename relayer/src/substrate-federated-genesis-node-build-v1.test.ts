@@ -18,8 +18,11 @@ vi.mock('./substrate-federated-authority-safe-devnet-build-environment-v1.js', a
   inspectSubstrateFederatedAuthoritySafePinnedToolchainV1: mocks.toolchain,
 }));
 
-import { buildSubstrateFederatedGenesisNodeV1, type BuildSubstrateFederatedGenesisNodeV1Input } from './substrate-federated-genesis-node-build-v1.js';
+import { buildSubstrateFederatedGenesisNodeV1,
+  claimSubstrateFederatedGenesisNodeBuildForOperationV3,
+  type BuildSubstrateFederatedGenesisNodeV1Input } from './substrate-federated-genesis-node-build-v1.js';
 import { createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
+  createSubstrateFederatedNativeGenesisSourceAttestationOperationV1,
   readSubstrateFederatedGenesisProfilesFromSessionV2 } from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
 import { encodeFederatedPooledReserveSourceProofProfileScaleV1Hex } from './substrate-federated-pooled-reserve-source-proof-v1.js';
 
@@ -150,6 +153,51 @@ describe('FED genesis build owner', () => {
     expect(mocks.run.mock.calls.filter(([call]) => call.args[0] !== 'build')
       .every(([call]) => call.args.slice(0, 6).join(' ') ===
         '-c gc.auto=0 -c maintenance.auto=false -c core.autocrlf=false')).toBe(true);
+  });
+
+  it('claims only the original successful build for its retained operation, once', async () => {
+    const built = await buildSubstrateFederatedGenesisNodeV1(input);
+    const operation = createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+    expect(() => claimSubstrateFederatedGenesisNodeBuildForOperationV3(
+      { ...built }, input.buildParentDirectory, operation)).toThrow(/original successful node build/);
+    expect(() => claimSubstrateFederatedGenesisNodeBuildForOperationV3(
+      { ...built, node: { ...built.node } }, input.buildParentDirectory, operation))
+      .toThrow(/original successful node build/);
+    expect(() => claimSubstrateFederatedGenesisNodeBuildForOperationV3(
+      built, input.buildParentDirectory, operation)).not.toThrow();
+    expect(() => claimSubstrateFederatedGenesisNodeBuildForOperationV3(
+      built, input.buildParentDirectory, operation)).toThrow(/original successful node build/);
+  });
+
+  it('consumes a build claimed for a different parent or source operation', async () => {
+    const operation = createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+    const first = await buildSubstrateFederatedGenesisNodeV1(input);
+    expect(() => claimSubstrateFederatedGenesisNodeBuildForOperationV3(
+      first, join(root, 'repository'), operation)).toThrow(/different parent/);
+    expect(() => claimSubstrateFederatedGenesisNodeBuildForOperationV3(
+      first, input.buildParentDirectory, operation)).toThrow(/original successful node build/);
+
+    const foreign = createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2({
+      ergoAdmissionThreshold: 1, ergoAdmissionPublicKeysHex: ['02' + '22'.repeat(32)],
+    });
+    try {
+      const foreignOperation = createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(foreign);
+      const second = await buildSubstrateFederatedGenesisNodeV1(input);
+      expect(() => claimSubstrateFederatedGenesisNodeBuildForOperationV3(
+        second, input.buildParentDirectory, foreignOperation)).toThrow(/different parent session/);
+      expect(() => claimSubstrateFederatedGenesisNodeBuildForOperationV3(
+        second, input.buildParentDirectory, operation)).toThrow(/original successful node build/);
+    } finally { foreign.dispose(); }
+  });
+
+  it('consumes a build rejected after its retained source operation is revoked', async () => {
+    const built = await buildSubstrateFederatedGenesisNodeV1(input);
+    const operation = createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+    operation.dispose();
+    expect(() => claimSubstrateFederatedGenesisNodeBuildForOperationV3(
+      built, input.buildParentDirectory, operation)).toThrow(/disposed/);
+    expect(() => claimSubstrateFederatedGenesisNodeBuildForOperationV3(
+      built, input.buildParentDirectory, operation)).toThrow(/original successful node build/);
   });
 
   it.each(['missing', 'hash', 'export', 'build'])('rejects native burn patch %s drift', async selected => {

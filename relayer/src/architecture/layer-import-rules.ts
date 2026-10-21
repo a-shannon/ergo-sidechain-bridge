@@ -202,6 +202,18 @@ const REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS: ReadonlyMap<
 
 const FEDERATED_GENESIS_TARGET_ROOT =
   'apps/bridge-daemon/substrate-federated-genesis-target-root-v1.ts';
+const FEDERATED_V3_TARGET_ROOT =
+  'apps/bridge-daemon/substrate-federated-v3-frontier-reservation-target-root.ts';
+const FEDERATED_V3_TARGET_ROOT_TEST =
+  'apps/bridge-daemon/substrate-federated-v3-frontier-reservation-target-root.test.ts';
+const FEDERATED_V3_HELD_CONFIRMATIONS =
+  'apps/bridge-daemon/substrate-federated-v3-held-issuance-confirmation.ts';
+const FEDERATED_V3_HELD_CONFIRMATIONS_TEST =
+  'apps/bridge-daemon/substrate-federated-v3-held-issuance-confirmation.test.ts';
+const FEDERATED_V3_OWNED_RESERVATION_ROOT =
+  'apps/bridge-daemon/substrate-federated-v3-owned-genesis-reservation-root.ts';
+const FEDERATED_V3_OWNED_RESERVATION_ROOT_TEST =
+  'apps/bridge-daemon/substrate-federated-v3-owned-genesis-reservation-root.test.ts';
 const FEDERATED_NATIVE_TWO_CYCLE_WORKER =
   'scripts/run-substrate-federated-native-two-cycle-worker-v1.ts';
 const FEDERATED_GENESIS_OPERATOR = 'adapters/federated-genesis-operator-v1.ts';
@@ -422,6 +434,150 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
   ['substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.ts', new Set(['buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1'])],
   ['substrate-federated-isolated-devnet-committed-reserve-evidence-v1.ts', new Set(['collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1'])],
 ]);
+// The V3 materialization seam is separate from the much wider V1 two-cycle root.
+const REVIEWED_FEDERATED_V3_TARGET_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['native-executable-pin.ts', new Set(['verifyExecutableSha256'])],
+  ['pinned-local-native-verifier-build.ts', new Set(['runBoundedProcess'])],
+  ['substrate-federated-authority-safe-devnet-build-environment-v1.ts', new Set([
+    'buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1',
+  ])],
+  ['substrate-federated-genesis-node-build-v1.ts', new Set([
+    'buildSubstrateFederatedGenesisNodeV1', 'claimSubstrateFederatedGenesisNodeBuildForOperationV3',
+  ])],
+  ['substrate-federated-authority-safe-devnet-process-v1.ts', new Set([
+    'createOwnedFederatedGenesisDevnetProcessSessionV1', 'assertOwnedFederatedGenesisDevnetTargetV1',
+  ])],
+  ['substrate-federated-isolated-devnet-ergo-node-process-v1.ts', new Set([
+    'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1',
+  ])],
+  ['substrate-federated-observed-genesis-v3.ts', new Set(['assertObservedSubstrateFederatedGenesisV3'])],
+  ['substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.ts', new Set([
+    'assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV3',
+  ])],
+  ['substrate-federated-isolated-devnet-source-attestation-session-v1.ts', new Set([
+    'assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV3',
+  ])],
+]);
+const REVIEWED_FEDERATED_V3_TARGET_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ...[...REVIEWED_FEDERATED_V3_TARGET_LEGACY_BINDINGS].map(
+    ([target, bindings]) => [`../../${target.replace(/\.ts$/, '.js')}`, bindings] as const,
+  ),
+  ['../../ergo-settlement-core/strict-json.js', new Set(['assertNoDuplicateJsonKeys'])],
+  ['../../adapters/federated-genesis-operator-v1.js', new Set(['assertFederatedGenesisOperatorV1'])],
+  ['../../adapters/federated-genesis-target-observation-v1.js', new Set(['observeFederatedGenesisTargetsV1'])],
+  ['./frontier-native-proof-bound-reservation-signing-v1.js', new Set([
+    'executeFrontierNativeProofBoundReservationV3',
+  ])],
+  ['node:crypto', new Set(['createHash'])],
+  ['node:fs', new Set(['lstatSync', 'readFileSync', 'realpathSync', 'writeFileSync'])],
+  ['node:os', new Set(['platform'])],
+  ['node:path', new Set(['basename', 'dirname', 'isAbsolute', 'join', 'resolve'])],
+]);
+// The V3 held confirmation read is restricted to its own node and SPV capabilities.
+const REVIEWED_FEDERATED_V3_HELD_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['authenticated-spv-tracker-read-only-node-client.ts', new Set([
+    'createBoundedAuthenticatedSpvTrackerReadOnlySource',
+  ])],
+  ['unsigned-ergo-transaction.ts', new Set(['normalizeEip12Box', 'Eip12Box'])],
+  ['substrate-federated-isolated-devnet-ergo-node-process-v1.ts', new Set([
+    'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1',
+    'SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1',
+  ])],
+]);
+const REVIEWED_FEDERATED_V3_HELD_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ...[...REVIEWED_FEDERATED_V3_HELD_LEGACY_BINDINGS].map(
+    ([target, bindings]) => [`../../${target.replace(/\.ts$/, '.js')}`, bindings] as const,
+  ),
+  ['../../ergo-settlement-core/ergo-full-block-observation-v1.js', new Set([
+    'ERGO_FULL_BLOCK_HEADER_PROOF_MAX_ROWS_V1', 'assertErgoFullBlockHeaderProofV1',
+    'parseErgoFullBlockObservationV1',
+  ])],
+  ['../../ergo-settlement-core/strict-json.js', new Set(['canonicalJson'])],
+]);
+// This one lifetime joins fresh node ownership to the already separate V3 target.
+const REVIEWED_FEDERATED_V3_OWNED_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['state-tracker.ts', new Set(['StateTracker'])],
+  ['substrate-federated-genesis-node-build-v1.ts', new Set([
+    'buildSubstrateFederatedGenesisNodeV1', 'BuildSubstrateFederatedGenesisNodeV1Input',
+  ])],
+  ['substrate-federated-isolated-devnet-ergo-node-build-v3.ts', new Set([
+    'buildSubstrateFederatedIsolatedDevnetErgoNodeV3', 'BuildSubstrateFederatedIsolatedDevnetErgoNodeV3Input',
+  ])],
+  ['substrate-federated-isolated-devnet-ergo-node-process-v1.ts', new Set([
+    'createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2',
+    'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1',
+    'holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1',
+    'SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2',
+  ])],
+  ['substrate-federated-isolated-devnet-setup-check-runner-v2.ts', new Set([
+    'createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2',
+    'claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2',
+    'SubstrateFederatedIsolatedDevnetSetupCheckSessionV2',
+  ])],
+  ['substrate-federated-isolated-devnet-setup-check-signer-binding-v2.ts', new Set([
+    'assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance',
+  ])],
+  ['substrate-federated-isolated-devnet-mining-credential-v1.ts', new Set([
+    'revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1',
+    'SubstrateFederatedIsolatedDevnetMiningCredentialV1',
+  ])],
+  ['substrate-federated-isolated-devnet-source-attestation-session-v1.ts', new Set([
+    'createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2',
+    'readSubstrateFederatedGenesisProfilesFromSessionV2',
+    'createSubstrateFederatedNativeGenesisSourceAttestationOperationV1',
+    'produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV3',
+    'SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2',
+    'SubstrateFederatedNativeGenesisSourceAttestationOperationV1',
+  ])],
+  ['substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.ts', new Set([
+    'discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1',
+    'createSubstrateFederatedDepositFundingRequirementsV1',
+    'discoverSubstrateFederatedDepositFundingForOwnedExecutionTargetV1',
+    'assertSubstrateFederatedIsolatedDevnetOwnedDepositFundingDiscoveryV1',
+  ])],
+  ['substrate-federated-isolated-devnet-ergo-history-artifacts-v1.ts', new Set([
+    'collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2',
+  ])],
+  ['substrate-federated-observed-genesis-v3.ts', new Set(['compileObservedSubstrateFederatedGenesisV3'])],
+  ['substrate-federated-isolated-devnet-setup-check-execution-v2.ts', new Set([
+    'assertSubstrateFederatedNativeGenesisSetupExecutionBatchV3',
+  ])],
+  ['substrate-federated-settlement-family-v1.ts', new Set([
+    'decodeSubstrateFederatedSettlementFamilyV1Profile',
+  ])],
+  ['peg-in-causal-admission-v2.ts', new Set(['decodePegInSourceIntentV2Hex'])],
+  ['substrate-federated-isolated-devnet-peg-in-candidate-v3.ts', new Set([
+    'buildSubstrateFederatedNativeGenesisPegInPacketV3',
+  ])],
+  ['substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.ts', new Set([
+    'buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV3',
+  ])],
+  ['substrate-federated-isolated-devnet-committed-reserve-evidence-v1.ts', new Set([
+    'collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV3',
+  ])],
+]);
+const REVIEWED_FEDERATED_V3_OWNED_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ...[...REVIEWED_FEDERATED_V3_OWNED_LEGACY_BINDINGS].map(
+    ([target, bindings]) => [`../../${target.replace(/\.ts$/, '.js')}`, bindings] as const,
+  ),
+  ['../../adapters/federated-genesis-operator-v1.js', new Set([
+    'createFederatedGenesisOperatorV1', 'assertFederatedGenesisOperatorV1',
+    'disposeFederatedGenesisOperatorV1', 'FederatedGenesisOperatorV1',
+  ])],
+  ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', new Set([
+    'executeSubstrateFederatedNativeGenesisBatchV3',
+    'executeSubstrateFederatedNativeGenesisPegInSourceLockV3',
+    'executeSubstrateFederatedNativeGenesisPegInCommittedVaultV3',
+  ])],
+  ['./substrate-federated-v3-held-issuance-confirmation.js', new Set([
+    'assertSubstrateFederatedV3HeldIssuanceConfirmations',
+  ])],
+  ['./substrate-federated-v3-frontier-reservation-target-root.js', new Set([
+    'executeSubstrateFederatedV3FrontierReservationTarget',
+  ])],
+  ['node:fs', new Set(['lstatSync', 'mkdtempSync', 'mkdirSync', 'opendirSync', 'readFileSync', 'realpathSync'])],
+  ['node:path', new Set(['basename', 'dirname', 'isAbsolute', 'join', 'relative', 'resolve', 'sep'])],
+]);
 const REVIEWED_FEDERATED_GENESIS_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ...[...REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS].map(
     ([target, bindings]) => [`../../${target.replace(/\.ts$/, '.js')}`, bindings] as const,
@@ -464,6 +620,9 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
 > = new Map([
   [FEDERATED_NATIVE_RESERVATION_SIGNING, new Set(REVIEWED_NATIVE_RESERVATION_SIGNING_BINDINGS.keys())],
   [FEDERATED_GENESIS_TARGET_ROOT, new Set(REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS.keys())],
+  [FEDERATED_V3_TARGET_ROOT, new Set(REVIEWED_FEDERATED_V3_TARGET_LEGACY_BINDINGS.keys())],
+  [FEDERATED_V3_HELD_CONFIRMATIONS, new Set(REVIEWED_FEDERATED_V3_HELD_LEGACY_BINDINGS.keys())],
+  [FEDERATED_V3_OWNED_RESERVATION_ROOT, new Set(REVIEWED_FEDERATED_V3_OWNED_LEGACY_BINDINGS.keys())],
   ...[...REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS].map(
     ([file, bindings]) => [file, new Set(bindings.keys())] as const,
   ),
@@ -596,6 +755,9 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
 > = new Map([
   [FEDERATED_NATIVE_RESERVATION_SIGNING, REVIEWED_NATIVE_RESERVATION_SIGNING_BINDINGS],
   [FEDERATED_GENESIS_TARGET_ROOT, REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS],
+  [FEDERATED_V3_TARGET_ROOT, REVIEWED_FEDERATED_V3_TARGET_LEGACY_BINDINGS],
+  [FEDERATED_V3_HELD_CONFIRMATIONS, REVIEWED_FEDERATED_V3_HELD_LEGACY_BINDINGS],
+  [FEDERATED_V3_OWNED_RESERVATION_ROOT, REVIEWED_FEDERATED_V3_OWNED_LEGACY_BINDINGS],
   ...REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS,
   [
     'apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.ts',
@@ -1216,6 +1378,9 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
 > = new Map([
   [FEDERATED_NATIVE_RESERVATION_SIGNING, REVIEWED_NATIVE_RESERVATION_IMPORT_BINDINGS],
   [FEDERATED_GENESIS_TARGET_ROOT, REVIEWED_FEDERATED_GENESIS_IMPORT_BINDINGS],
+  [FEDERATED_V3_TARGET_ROOT, REVIEWED_FEDERATED_V3_TARGET_IMPORT_BINDINGS],
+  [FEDERATED_V3_HELD_CONFIRMATIONS, REVIEWED_FEDERATED_V3_HELD_IMPORT_BINDINGS],
+  [FEDERATED_V3_OWNED_RESERVATION_ROOT, REVIEWED_FEDERATED_V3_OWNED_IMPORT_BINDINGS],
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.ts',
     new Map([
@@ -1652,6 +1817,14 @@ const REVIEWED_APP_READ_ONLY_VALUE_BINDINGS: ReadonlyMap<
   string,
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
+  [FEDERATED_V3_HELD_CONFIRMATIONS, new Map([
+    ['../../ergo-settlement-core/ergo-full-block-observation-v1.js', new Set([
+      'ERGO_FULL_BLOCK_HEADER_PROOF_MAX_ROWS_V1',
+    ])],
+  ])],
+  [FEDERATED_V3_OWNED_RESERVATION_ROOT, new Map([
+    ['node:path', new Set(['sep'])],
+  ])],
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.ts',
     new Map([
@@ -1754,6 +1927,20 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
     'RunSubstrateFederatedGenesisTargetRootV1Input', 'runSubstrateFederatedGenesisTargetRootV1',
     'projectSubstrateFederatedNativeTrackerConfirmationFailureV1',
     'projectSubstrateFederatedNativeTrackerConfirmationProgressV1',
+  ])],
+  [FEDERATED_V3_TARGET_ROOT, new Set([
+    'SubstrateFederatedV3FrontierReservationTargetInput',
+    'executeSubstrateFederatedV3FrontierReservationTarget',
+    'parseSubstrateFederatedV3RawGenesisStorage',
+  ])],
+  [FEDERATED_V3_HELD_CONFIRMATIONS, new Set([
+    'SubstrateFederatedV3HeldIssuanceSnapshot', 'SubstrateFederatedV3IssuanceConfirmation',
+    'SubstrateFederatedV3HeldIssuanceBoxExpectation',
+    'assertSubstrateFederatedV3HeldIssuanceConfirmations',
+  ])],
+  [FEDERATED_V3_OWNED_RESERVATION_ROOT, new Set([
+    'RunSubstrateFederatedV3OwnedGenesisReservationRootInput',
+    'runSubstrateFederatedV3OwnedGenesisReservationRoot',
   ])],
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.ts',
@@ -1944,6 +2131,9 @@ const CAPABILITY_RESTRICTED_FILE_IMPORT_BINDINGS: ReadonlyMap<
 > = new Map([
   [FEDERATED_NATIVE_RESERVATION_SIGNING, REVIEWED_NATIVE_RESERVATION_IMPORT_BINDINGS],
   [FEDERATED_GENESIS_TARGET_ROOT, REVIEWED_FEDERATED_GENESIS_IMPORT_BINDINGS],
+  [FEDERATED_V3_TARGET_ROOT, REVIEWED_FEDERATED_V3_TARGET_IMPORT_BINDINGS],
+  [FEDERATED_V3_HELD_CONFIRMATIONS, REVIEWED_FEDERATED_V3_HELD_IMPORT_BINDINGS],
+  [FEDERATED_V3_OWNED_RESERVATION_ROOT, REVIEWED_FEDERATED_V3_OWNED_IMPORT_BINDINGS],
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
     new Map([
@@ -2064,10 +2254,33 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
   [FEDERATED_GENESIS_TARGET_ROOT, new Map([
     ['runSubstrateFederatedGenesisTargetRootV1', new Set([FEDERATED_NATIVE_TWO_CYCLE_WORKER])],
   ])],
+  [FEDERATED_V3_TARGET_ROOT, new Map([
+    ['executeSubstrateFederatedV3FrontierReservationTarget', new Set([
+      FEDERATED_V3_TARGET_ROOT_TEST, FEDERATED_V3_OWNED_RESERVATION_ROOT,
+    ])],
+    ['parseSubstrateFederatedV3RawGenesisStorage', new Set([FEDERATED_V3_TARGET_ROOT_TEST])],
+  ])],
+  [FEDERATED_V3_HELD_CONFIRMATIONS, new Map([
+    ['assertSubstrateFederatedV3HeldIssuanceConfirmations', new Set([
+      FEDERATED_V3_HELD_CONFIRMATIONS_TEST, FEDERATED_V3_OWNED_RESERVATION_ROOT,
+    ])],
+  ])],
+  ['substrate-federated-genesis-node-build-v1.ts', new Map([
+    ['claimSubstrateFederatedGenesisNodeBuildForOperationV3', new Set([
+      FEDERATED_V3_TARGET_ROOT, 'substrate-federated-genesis-node-build-v1.test.ts',
+    ])],
+  ])],
   [FEDERATED_GENESIS_OPERATOR, new Map([
-    ['createFederatedGenesisOperatorV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
-    ['assertFederatedGenesisOperatorV1', new Set([FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_NATIVE_RESERVATION_SIGNING])],
-    ['disposeFederatedGenesisOperatorV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
+    ['createFederatedGenesisOperatorV1', new Set([
+      FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_V3_OWNED_RESERVATION_ROOT,
+    ])],
+    ['assertFederatedGenesisOperatorV1', new Set([
+      FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_NATIVE_RESERVATION_SIGNING, FEDERATED_V3_TARGET_ROOT,
+      FEDERATED_V3_OWNED_RESERVATION_ROOT,
+    ])],
+    ['disposeFederatedGenesisOperatorV1', new Set([
+      FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_V3_OWNED_RESERVATION_ROOT,
+    ])],
     ['signFederatedGenesisReservationV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['signFederatedGenesisContinuationReservationV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['signFederatedGenesisContinuationMintV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
@@ -2085,6 +2298,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
     ['executeFrontierNativeProofBoundReservationV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['executeFrontierNativeProofBoundReservationV3', new Set([
       'substrate-federated-isolated-devnet-source-attestation-mint-proof-v1.test.ts',
+      FEDERATED_V3_TARGET_ROOT,
     ])],
     ['executeFrontierNativeProofBoundContinuationReservationV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['executeFrontierNativeProofBoundContinuationMintAndBurnV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
@@ -2119,11 +2333,15 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
     ['collectFederatedNativeBurnCommitmentV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
   ])],
   ['substrate-federated-authority-safe-devnet-process-v1.ts', new Map([
-    ['createOwnedFederatedGenesisDevnetProcessSessionV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
-    ['assertOwnedFederatedGenesisDevnetTargetV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING, FEDERATED_GENESIS_TARGET_ROOT])],
+    ['createOwnedFederatedGenesisDevnetProcessSessionV1', new Set([
+      FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_V3_TARGET_ROOT,
+    ])],
+    ['assertOwnedFederatedGenesisDevnetTargetV1', new Set([
+      FEDERATED_NATIVE_RESERVATION_SIGNING, FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_V3_TARGET_ROOT,
+    ])],
   ])],
   [FEDERATED_GENESIS_TARGET_OBSERVATION, new Map([
-    ['observeFederatedGenesisTargetsV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
+    ['observeFederatedGenesisTargetsV1', new Set([FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_V3_TARGET_ROOT])],
     ['observeFederatedGenesisReservationTargetV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
   ])],
   [
@@ -2452,6 +2670,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
         'revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1',
         new Set([
           FEDERATED_GENESIS_TARGET_ROOT,
+          FEDERATED_V3_OWNED_RESERVATION_ROOT,
           'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
           'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
           'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
@@ -2480,6 +2699,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
         'claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2',
         new Set([
           FEDERATED_GENESIS_TARGET_ROOT,
+          FEDERATED_V3_OWNED_RESERVATION_ROOT,
           'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
           'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
         ]),
@@ -2561,13 +2781,26 @@ const EXCLUSIVE_RUNTIME_MODULE_IMPORT_OWNERS: ReadonlyMap<
   ReadonlySet<string>
 > = new Map([
   [FEDERATED_GENESIS_TARGET_ROOT, new Set([FEDERATED_NATIVE_TWO_CYCLE_WORKER])],
+  [FEDERATED_V3_TARGET_ROOT, new Set([
+    FEDERATED_V3_TARGET_ROOT_TEST, FEDERATED_V3_OWNED_RESERVATION_ROOT,
+  ])],
+  [FEDERATED_V3_HELD_CONFIRMATIONS, new Set([
+    FEDERATED_V3_HELD_CONFIRMATIONS_TEST, FEDERATED_V3_OWNED_RESERVATION_ROOT,
+  ])],
+  [FEDERATED_V3_OWNED_RESERVATION_ROOT, new Set([FEDERATED_V3_OWNED_RESERVATION_ROOT_TEST])],
   [FEDERATED_NATIVE_TWO_CYCLE_WORKER, new Set<string>()],
-  [FEDERATED_GENESIS_OPERATOR, new Set([FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_NATIVE_RESERVATION_SIGNING])],
+  [FEDERATED_GENESIS_OPERATOR, new Set([
+    FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_NATIVE_RESERVATION_SIGNING, FEDERATED_V3_TARGET_ROOT,
+    FEDERATED_V3_OWNED_RESERVATION_ROOT,
+  ])],
   [FEDERATED_NATIVE_RESERVATION_SIGNING, new Set([
     FEDERATED_GENESIS_TARGET_ROOT,
+    FEDERATED_V3_TARGET_ROOT,
     'substrate-federated-isolated-devnet-source-attestation-mint-proof-v1.test.ts',
   ])],
-  [FEDERATED_GENESIS_TARGET_OBSERVATION, new Set([FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_NATIVE_RESERVATION_SIGNING])],
+  [FEDERATED_GENESIS_TARGET_OBSERVATION, new Set([
+    FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_NATIVE_RESERVATION_SIGNING, FEDERATED_V3_TARGET_ROOT,
+  ])],
   [FEDERATED_NATIVE_RESERVATION_EXECUTION, new Set([FEDERATED_NATIVE_RESERVATION_SIGNING, FEDERATED_GENESIS_OPERATOR])],
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
@@ -3372,6 +3605,20 @@ function collectCapabilityRestrictedLayerViolations(
                 'finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2'].includes(restricted.binding))
             || (restricted.moduleSpecifier === '../../substrate-federated-native-two-cycle-callback-timing-v1.js'
               && restricted.binding === 'beginNativeTwoCycleCallbackTimingV1'));
+        const isReviewedV3TargetTypeQuery = file === FEDERATED_V3_TARGET_ROOT
+          && ts.isTypeQueryNode(node.parent) && node.parent.exprName === node
+          && ((restricted.moduleSpecifier === '../../substrate-federated-genesis-node-build-v1.js'
+              && restricted.binding === 'buildSubstrateFederatedGenesisNodeV1')
+            || (restricted.moduleSpecifier === './frontier-native-proof-bound-reservation-signing-v1.js'
+              && restricted.binding === 'executeFrontierNativeProofBoundReservationV3'));
+        const isReviewedV3OwnedTypeReference = file === FEDERATED_V3_OWNED_RESERVATION_ROOT
+          && restricted.moduleSpecifier === '../../state-tracker.js'
+          && restricted.binding === 'StateTracker'
+          && ts.isTypeReferenceNode(node.parent) && node.parent.typeName === node;
+        const isReviewedV3OwnedTypeQuery = file === FEDERATED_V3_OWNED_RESERVATION_ROOT
+          && restricted.moduleSpecifier === './substrate-federated-v3-frontier-reservation-target-root.js'
+          && restricted.binding === 'executeSubstrateFederatedV3FrontierReservationTarget'
+          && ts.isTypeQueryNode(node.parent) && node.parent.exprName === node;
         if (
           !isReviewedEcdhCall
           && !isReviewedCryptoFactoryCall
@@ -3380,6 +3627,9 @@ function collectCapabilityRestrictedLayerViolations(
           && !isReviewedReadOnlyValue
           && !isReviewedErasedTypeReference
           && !isReviewedNativeReturnTypeQuery
+          && !isReviewedV3TargetTypeQuery
+          && !isReviewedV3OwnedTypeReference
+          && !isReviewedV3OwnedTypeQuery
         ) {
           addViolation(
             node,
