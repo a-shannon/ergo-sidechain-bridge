@@ -1,8 +1,10 @@
 import { sha256CanonicalJson } from './ergo-settlement-core/strict-json.js';
 import {
+  assertLocalWasmConsumedSubmissionCallbackBindingV1,
   assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding,
   assertLocalWasmCheckedSubmissionHandleV1Provenance,
   assertLocalWasmSignedCheckCandidateProvenance,
+  type LocalWasmConsumedSubmissionBindingValidatorV1,
 } from './fleet-signer.js';
 import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
@@ -364,6 +366,7 @@ export function assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAu
   authorizer:
     Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1>,
   authorization: ErgoOperationalBroadcastAuthorization,
+  consumedBindingValidator?: LocalWasmConsumedSubmissionBindingValidatorV1,
 ): void {
   const material = assertAuthorizer(authorizer);
   const stored = AUTHORIZATIONS.get(authorization.authorizationArtifact);
@@ -377,7 +380,7 @@ export function assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAu
       'isolated source-lock authorization lacks exact process provenance',
     );
   }
-  validateRevalidated(material, authorization.revalidated);
+  validateRevalidated(material, authorization.revalidated, consumedBindingValidator);
   const artifact = authorization.authorizationArtifact as Partial<
     SubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1
   >;
@@ -433,17 +436,19 @@ function assertAuthorizer(
 function validateRevalidated(
   material: AuthorizerMaterialV1,
   revalidated: ErgoOperationalRevalidatedCandidate,
+  consumedBindingValidator?: LocalWasmConsumedSubmissionBindingValidatorV1,
 ): void {
   const admission = revalidated.checked.signed.admission;
   const packet = material.packet;
   const executionCheck = material.executionCheck;
   const handle = executionCheck.checkedAcceptance.submissionHandle;
   assertLocalWasmSignedCheckCandidateProvenance(executionCheck.signedCandidate);
-  assertLocalWasmCheckedSubmissionHandleV1Provenance(handle);
-  assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(
-    handle,
-    material.binding,
-  );
+  if (consumedBindingValidator === undefined) {
+    assertLocalWasmCheckedSubmissionHandleV1Provenance(handle);
+    assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(handle, material.binding);
+  } else {
+    assertLocalWasmConsumedSubmissionCallbackBindingV1(handle, material.binding, consumedBindingValidator);
+  }
   if (
     admission.operationProfile
       !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE

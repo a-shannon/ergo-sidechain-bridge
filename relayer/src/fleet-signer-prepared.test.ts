@@ -271,6 +271,8 @@ vi.mock('axios', () => ({
 }));
 
 import {
+  assertLocalWasmConsumedSubmissionCallbackBindingV1,
+  assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding,
   assertLocalWasmCheckedSubmissionHandleV1Provenance,
   assertLocalWasmSignedCheckCandidateProvenance,
   checkSignedTransaction,
@@ -750,6 +752,59 @@ describe('separate authenticated check signer and checker capabilities', () => {
       accepted!.submissionHandle,
       signed!,
       async () => 'reused',
+    )).rejects.toThrow(/already consumed/);
+  });
+
+  it('revalidates a consumed handle only inside its active submission callback', async () => {
+    const input = candidate('federated-setup', firstTxId, 1);
+    const signed = await signTransactionForCheck(
+      input.eip12Tx, 'Federated setup', firstTxId, 'http://127.0.0.1:9052',
+    );
+    expect(signed).not.toBeNull();
+    const checked = await checkSignedTransaction(
+      signed!, 'Federated setup', 'http://127.0.0.1:9052',
+    );
+    expect(checked).not.toBeNull();
+    let active = true;
+    const accepted = promoteLocalWasmCheckedTransactionForSubmissionV1(
+      signed!, checked!, currentExecutionBinding(),
+      () => { if (!active) throw new Error('synthetic session is inactive'); },
+    );
+    let escaped: ((binding: ReturnType<typeof currentExecutionBinding>) => void) | undefined;
+    await expect(consumeLocalWasmCheckedSubmissionHandleV1(
+      accepted.submissionHandle, signed!, async (_transaction, assertCurrentBinding) => {
+        escaped = assertCurrentBinding;
+        expect(() => assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(
+          accepted.submissionHandle, currentExecutionBinding(),
+        )).toThrow(/already consumed/);
+        await Promise.resolve();
+        expect(() => assertCurrentBinding(currentExecutionBinding())).not.toThrow();
+        expect(() => assertLocalWasmConsumedSubmissionCallbackBindingV1(
+          accepted.submissionHandle, currentExecutionBinding(), assertCurrentBinding,
+        )).not.toThrow();
+        expect(() => assertLocalWasmConsumedSubmissionCallbackBindingV1(
+          accepted.submissionHandle, currentExecutionBinding(), () => undefined,
+        )).toThrow(/provenance/);
+        expect(() => assertLocalWasmConsumedSubmissionCallbackBindingV1(
+          Object.freeze({ ...accepted.submissionHandle }),
+          currentExecutionBinding(), assertCurrentBinding,
+        )).toThrow(/provenance/);
+        expect(() => assertCurrentBinding({
+          ...currentExecutionBinding(), executionTargetIdentityDigestHex: 'ff'.repeat(32),
+        })).toThrow(/binding changed/);
+        active = false;
+        expect(() => assertCurrentBinding(currentExecutionBinding())).toThrow(/session is inactive/);
+        active = true;
+        assertCurrentBinding(currentExecutionBinding());
+        return 'submitted';
+      },
+    )).resolves.toBe('submitted');
+    expect(() => escaped!(currentExecutionBinding())).toThrow(/no longer active/);
+    expect(() => assertLocalWasmConsumedSubmissionCallbackBindingV1(
+      accepted.submissionHandle, currentExecutionBinding(), escaped!,
+    )).toThrow(/provenance/);
+    await expect(consumeLocalWasmCheckedSubmissionHandleV1(
+      accepted.submissionHandle, signed!, async () => 'reused',
     )).rejects.toThrow(/already consumed/);
   });
 

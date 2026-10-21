@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   assertNativePacketV3: vi.fn(),
   assertNativeV3Check: vi.fn(),
   assertExecutionCheck: vi.fn(),
+  assertConsumedBinding: vi.fn(),
   assertHandleBinding: vi.fn(),
   assertHandle: vi.fn(),
   assertOwnedReward: vi.fn(),
@@ -52,6 +53,7 @@ vi.mock('./substrate-federated-isolated-devnet-setup-check-execution-v2.js', () 
     mocks.assertNativeV3Check,
 }));
 vi.mock('./fleet-signer.js', () => ({
+  assertLocalWasmConsumedSubmissionCallbackBindingV1: mocks.assertConsumedBinding,
   assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding:
     mocks.assertHandleBinding,
   assertLocalWasmCheckedSubmissionHandleV1Provenance: mocks.assertHandle,
@@ -208,6 +210,8 @@ function fixture(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.assertHandle.mockReset();
+  mocks.assertConsumedBinding.mockReset();
   mocks.assertTarget.mockImplementation((value: unknown) => {
     if (value !== TARGET) throw new Error('target provenance missing');
     return BINDING;
@@ -422,6 +426,40 @@ describe('native V3 source-lock authorization boundary (mocked exact packet prov
 });
 
 describe('isolated source-lock broadcast authorizer V1', () => {
+  it('rechecks the exact artifact only with an active consumed-handle callback', () => {
+    const { authorizer, revalidated } = fixture();
+    const evidence = authorizer.authorize(revalidated as never);
+    const authorization = Object.freeze({ revalidated, ...evidence });
+    const trusted = vi.fn();
+    mocks.assertHandle.mockImplementation(() => {
+      throw new Error('checked handle is already consumed');
+    });
+    mocks.assertConsumedBinding.mockImplementation((handle, binding, validator) => {
+      if (handle !== HANDLE || binding !== BINDING || validator !== trusted) {
+        throw new Error('consumed callback provenance is missing');
+      }
+      trusted(binding);
+    });
+    expect(() => assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1(
+      authorizer, authorization as never,
+    )).toThrow(/already consumed/);
+    expect(() => assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1(
+      authorizer, authorization as never, trusted,
+    )).not.toThrow();
+    expect(trusted).toHaveBeenCalledWith(BINDING);
+    expect(() => assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1(
+      authorizer, authorization as never, () => undefined,
+    )).toThrow(/callback provenance/);
+    expect(() => assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1(
+      authorizer, { ...authorization, authorizationArtifact: { ...evidence.authorizationArtifact } } as never,
+      trusted,
+    )).toThrow(/provenance/);
+    expect(() => assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1(
+      authorizer, { ...authorization, revalidated: { ...revalidated, revalidationDigestHex: hex('ff') } } as never,
+      trusted,
+    )).toThrow();
+  });
+
   it('authorizes one exact checked and freshly revalidated source-lock creation', () => {
     const { authorizer, revalidated } = fixture();
     const evidence = authorizer.authorize(revalidated as never);

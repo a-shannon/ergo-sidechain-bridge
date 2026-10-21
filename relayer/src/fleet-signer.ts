@@ -194,6 +194,14 @@ const LOCAL_WASM_CHECKED_SUBMISSION_MATERIAL = new WeakMap<
   }>
 >();
 const CONSUMED_LOCAL_WASM_CHECKED_SUBMISSION_HANDLES = new WeakSet<object>();
+const ACTIVE_LOCAL_WASM_SUBMISSION_BINDING_VALIDATORS = new WeakMap<
+  LocalWasmConsumedSubmissionBindingValidatorV1,
+  Readonly<{ handle: Readonly<LocalWasmCheckedSubmissionHandleV1> }>
+>();
+
+export type LocalWasmConsumedSubmissionBindingValidatorV1 = (
+  executionBinding: Readonly<LocalWasmSubmissionExecutionBindingV1>,
+) => void;
 
 export interface LocalWasmCheckCandidate {
   role: string;
@@ -1216,6 +1224,13 @@ export function promoteLocalWasmCheckedTransactionForSubmissionV1(
 export function assertLocalWasmCheckedSubmissionHandleV1Provenance(
   value: unknown,
 ): asserts value is Readonly<LocalWasmCheckedSubmissionHandleV1> {
+  assertLocalWasmCheckedSubmissionHandleV1Material(value, false);
+}
+
+function assertLocalWasmCheckedSubmissionHandleV1Material(
+  value: unknown,
+  allowConsumed: boolean,
+): asserts value is Readonly<LocalWasmCheckedSubmissionHandleV1> {
   if (
     value === null
     || typeof value !== 'object'
@@ -1223,7 +1238,7 @@ export function assertLocalWasmCheckedSubmissionHandleV1Provenance(
   ) {
     throw new Error('local WASM checked submission handle provenance is missing');
   }
-  if (CONSUMED_LOCAL_WASM_CHECKED_SUBMISSION_HANDLES.has(value)) {
+  if (!allowConsumed && CONSUMED_LOCAL_WASM_CHECKED_SUBMISSION_HANDLES.has(value)) {
     throw new Error('local WASM checked submission handle is already consumed');
   }
   const handle = value as Readonly<LocalWasmCheckedSubmissionHandleV1>;
@@ -1264,6 +1279,15 @@ export function assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(
 ): void {
   assertLocalWasmCheckedSubmissionHandleV1Provenance(handle);
   const material = LOCAL_WASM_CHECKED_SUBMISSION_MATERIAL.get(handle);
+  assertLocalWasmCheckedSubmissionExecutionBindingMaterial(material, executionBinding);
+}
+
+function assertLocalWasmCheckedSubmissionExecutionBindingMaterial(
+  material: Readonly<{
+    executionBinding: Readonly<LocalWasmSubmissionExecutionBindingV1>;
+  }> | undefined,
+  executionBinding: Readonly<LocalWasmSubmissionExecutionBindingV1>,
+): void {
   const expected = snapshotSubmissionExecutionBindingV1(executionBinding);
   if (
     material === undefined
@@ -1276,6 +1300,20 @@ export function assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(
   }
 }
 
+export function assertLocalWasmConsumedSubmissionCallbackBindingV1(
+  handle: Readonly<LocalWasmCheckedSubmissionHandleV1>,
+  executionBinding: Readonly<LocalWasmSubmissionExecutionBindingV1>,
+  validator: LocalWasmConsumedSubmissionBindingValidatorV1,
+): void {
+  if (
+    typeof validator !== 'function'
+    || ACTIVE_LOCAL_WASM_SUBMISSION_BINDING_VALIDATORS.get(validator)?.handle !== handle
+  ) {
+    throw new Error('checked submission callback binding provenance is missing');
+  }
+  validator(executionBinding);
+}
+
 /**
  * Give the exact signed object to one reviewed transport callback, once.
  * Callers cannot recover the object from the handle or invoke the callback a
@@ -1286,6 +1324,7 @@ export async function consumeLocalWasmCheckedSubmissionHandleV1<T>(
   signedCandidate: LocalWasmExactBytesSignedCheckCandidate,
   consume: (
     signedTransaction: Readonly<Record<string, unknown>>,
+    assertCurrentExecutionBinding: LocalWasmConsumedSubmissionBindingValidatorV1,
   ) => Promise<T>,
 ): Promise<T> {
   assertLocalWasmCheckedSubmissionHandleV1Provenance(handle);
@@ -1298,7 +1337,30 @@ export async function consumeLocalWasmCheckedSubmissionHandleV1<T>(
   }
   CONSUMED_LOCAL_WASM_CHECKED_SUBMISSION_HANDLES.add(handle);
   const signedMaterial = requireLocalWasmSignedCheckMaterial(signedCandidate);
-  return await consume(signedMaterial.signedTx);
+  let callbackActive = true;
+  const assertCurrentExecutionBinding = (
+    executionBinding: Readonly<LocalWasmSubmissionExecutionBindingV1>,
+  ): void => {
+    if (
+      !callbackActive
+      || !CONSUMED_LOCAL_WASM_CHECKED_SUBMISSION_HANDLES.has(handle)
+      || LOCAL_WASM_CHECKED_SUBMISSION_MATERIAL.get(handle) !== material
+      || material.signedCandidate !== signedCandidate
+    ) {
+      throw new Error('checked submission callback binding is no longer active');
+    }
+    assertLocalWasmCheckedSubmissionHandleV1Material(handle, true);
+    assertLocalWasmCheckedSubmissionExecutionBindingMaterial(material, executionBinding);
+  };
+  ACTIVE_LOCAL_WASM_SUBMISSION_BINDING_VALIDATORS.set(
+    assertCurrentExecutionBinding, Object.freeze({ handle }),
+  );
+  try {
+    return await consume(signedMaterial.signedTx, assertCurrentExecutionBinding);
+  } finally {
+    callbackActive = false;
+    ACTIVE_LOCAL_WASM_SUBMISSION_BINDING_VALIDATORS.delete(assertCurrentExecutionBinding);
+  }
 }
 
 function requireLocalWasmSignedCheckMaterial(

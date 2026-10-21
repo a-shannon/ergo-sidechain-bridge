@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   assertNativeSourceV3: vi.fn(),
   assertExecutionCheckV3: vi.fn(),
   assertExecutionCheck: vi.fn(),
+  assertConsumedBinding: vi.fn(),
   assertHandleBinding: vi.fn(),
   assertHandle: vi.fn(),
   assertSigned: vi.fn(),
@@ -61,6 +62,7 @@ vi.mock('./authenticated-spv-tracker-read-only-node-client.js', () => ({
   },
 }));
 vi.mock('./fleet-signer.js', () => ({
+  assertLocalWasmConsumedSubmissionCallbackBindingV1: mocks.assertConsumedBinding,
   assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding:
     mocks.assertHandleBinding,
   assertLocalWasmCheckedSubmissionHandleV1Provenance: mocks.assertHandle,
@@ -335,6 +337,8 @@ function fixture(heights: { source?: number; successor?: number } = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.assertHandle.mockReset();
+  mocks.assertConsumedBinding.mockReset();
   mocks.boxes.clear();
   mocks.tipCalls.clear();
   mocks.tipResponses.clear();
@@ -1286,6 +1290,50 @@ describe('isolated committed-vault V2 authorization boundary (mocked provenance 
 });
 
 describe('isolated committed-vault broadcast authorizer V1', () => {
+  it('rechecks the exact artifact only with an active consumed-handle callback', async () => {
+    const f = fixture();
+    const session = createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1(
+      f.input as never,
+    );
+    const revalidation = await session.revalidator.revalidate(f.checked as never);
+    const revalidated = Object.freeze({
+      checked: f.checked, revalidationDigestHex: revalidation.revalidationDigestHex,
+    });
+    const evidence = session.broadcastAuthorizer.authorize(revalidated as never);
+    const authorization = Object.freeze({ revalidated, ...evidence });
+    const handle = f.executionCheck.checkedAcceptance.submissionHandle;
+    const trusted = vi.fn();
+    mocks.assertHandle.mockImplementation(() => {
+      throw new Error('checked handle is already consumed');
+    });
+    mocks.assertConsumedBinding.mockImplementation((value, binding, validator) => {
+      if (value !== handle || binding !== BINDING || validator !== trusted) {
+        throw new Error('consumed callback provenance is missing');
+      }
+      trusted(binding);
+    });
+    expect(() => assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1(
+      session.broadcastAuthorizer, authorization as never,
+    )).toThrow(/already consumed/);
+    expect(() => assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1(
+      session.broadcastAuthorizer, authorization as never, trusted,
+    )).not.toThrow();
+    expect(trusted).toHaveBeenCalledWith(BINDING);
+    expect(() => assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1(
+      session.broadcastAuthorizer, authorization as never, () => undefined,
+    )).toThrow(/callback provenance/);
+    expect(() => assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1(
+      session.broadcastAuthorizer,
+      { ...authorization, authorizationArtifact: { ...evidence.authorizationArtifact } } as never,
+      trusted,
+    )).toThrow(/provenance/);
+    expect(() => assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1(
+      session.broadcastAuthorizer,
+      { ...authorization, revalidated: { ...revalidated, revalidationDigestHex: hex('ff') } } as never,
+      trusted,
+    )).toThrow();
+  });
+
   it('rechecks exact signed bytes and authorizes one current transition', async () => {
     const f = fixture();
     const session =

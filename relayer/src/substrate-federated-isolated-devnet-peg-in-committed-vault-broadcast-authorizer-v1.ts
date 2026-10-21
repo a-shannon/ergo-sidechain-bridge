@@ -4,10 +4,12 @@ import {
   sha256CanonicalJson,
 } from './ergo-settlement-core/strict-json.js';
 import {
+  assertLocalWasmConsumedSubmissionCallbackBindingV1,
   assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding,
   assertLocalWasmCheckedSubmissionHandleV1Provenance,
   assertLocalWasmSignedCheckCandidateProvenance,
   checkSignedTransaction,
+  type LocalWasmConsumedSubmissionBindingValidatorV1,
 } from './fleet-signer.js';
 import {
   PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
@@ -573,6 +575,7 @@ export function assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadca
   authorizer:
     Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1>,
   authorization: ErgoOperationalBroadcastAuthorization,
+  consumedBindingValidator?: LocalWasmConsumedSubmissionBindingValidatorV1,
 ): void {
   const material = assertAuthorizer(authorizer);
   const stored = AUTHORIZATIONS.get(authorization.authorizationArtifact);
@@ -586,7 +589,7 @@ export function assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadca
       'isolated committed-vault authorization lacks exact process provenance',
     );
   }
-  validateRevalidated(material, authorization.revalidated);
+  validateRevalidated(material, authorization.revalidated, consumedBindingValidator);
   const artifact = authorization.authorizationArtifact as Partial<
     SubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1
   >;
@@ -646,17 +649,19 @@ function assertAuthorizer(
 function validateChecked(
   material: AuthorizerMaterialV1,
   checked: ErgoOperationalCheckedCandidate,
+  consumedBindingValidator?: LocalWasmConsumedSubmissionBindingValidatorV1,
 ): void {
   const packet = material.packet;
   const executionCheck = material.executionCheck;
   const admission = checked.signed.admission;
   const handle = executionCheck.checkedAcceptance.submissionHandle;
   assertLocalWasmSignedCheckCandidateProvenance(executionCheck.signedCandidate);
-  assertLocalWasmCheckedSubmissionHandleV1Provenance(handle);
-  assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(
-    handle,
-    material.binding,
-  );
+  if (consumedBindingValidator === undefined) {
+    assertLocalWasmCheckedSubmissionHandleV1Provenance(handle);
+    assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(handle, material.binding);
+  } else {
+    assertLocalWasmConsumedSubmissionCallbackBindingV1(handle, material.binding, consumedBindingValidator);
+  }
   const expectedInputs = [
     packet.boxes.reservePredecessor.boxId,
     packet.boxes.sourceLock.boxId,
@@ -687,8 +692,9 @@ function validateChecked(
 function validateRevalidated(
   material: AuthorizerMaterialV1,
   revalidated: ErgoOperationalRevalidatedCandidate,
+  consumedBindingValidator?: LocalWasmConsumedSubmissionBindingValidatorV1,
 ): void {
-  validateChecked(material, revalidated.checked);
+  validateChecked(material, revalidated.checked, consumedBindingValidator);
   if (
     material.revalidationState !== 'revalidated'
     || material.revalidation === undefined

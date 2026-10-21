@@ -231,12 +231,12 @@ async function submitFeeFunding(
     target.primaryNodeOrigin, check.signedCandidate.signedTransactionDigestHex,
     handle.checkResponseDigestHex);
   const submission = await consumeLocalWasmCheckedSubmissionHandleV1(handle, check.signedCandidate,
-    async signed => {
+    async (signed, assertCurrentExecutionBinding) => {
       if (transactionPermitsEnabled) {
         assertSubstrateFederatedIsolatedDevnetFeeFundingTransportActiveV1(attempt, target);
         await armSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(target, attempt.expectedTxId);
         assertSubstrateFederatedIsolatedDevnetFeeFundingTransportActiveV1(attempt, target);
-        assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(handle, binding);
+        assertCurrentExecutionBinding(assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target));
       }
       return await submitExactTransaction(signed, attempt.expectedTxId,
         attempt.durableAttemptDigestHex, authorization.authorizationDigestHex,
@@ -510,13 +510,15 @@ export function createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubm
       return await consumeLocalWasmCheckedSubmissionHandleV1(
         exactHandle,
         exactSignedCandidate,
-        async signedTransaction => {
+        async (signedTransaction, assertCurrentExecutionBinding) => {
           assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1(authorizer, target);
           if (transactionPermitsEnabled) {
             await armSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(target, admission.expectedTxId);
             assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1(authorizer, target);
-            assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1(authorizer, attempt.authorization);
-            assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(exactHandle, binding);
+            assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1(
+              authorizer, attempt.authorization, assertCurrentExecutionBinding,
+            );
+            assertCurrentExecutionBinding(assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target));
           }
           return await submitExactTransaction(
             signedTransaction, admission.expectedTxId, attempt.durableAttemptDigestHex,
@@ -614,13 +616,15 @@ export function createSubstrateFederatedIsolatedDevnetPegInCommittedVaultChecked
       return await consumeLocalWasmCheckedSubmissionHandleV1(
         exactHandle,
         exactSignedCandidate,
-        async signedTransaction => {
+        async (signedTransaction, assertCurrentExecutionBinding) => {
           assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1(authorizer, target);
           if (transactionPermitsEnabled) {
             await armSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(target, admission.expectedTxId);
             assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1(authorizer, target);
-            assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1(authorizer, attempt.authorization);
-            assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(exactHandle, binding);
+            assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1(
+              authorizer, attempt.authorization, assertCurrentExecutionBinding,
+            );
+            assertCurrentExecutionBinding(assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target));
           }
           return await submitExactTransaction(
             signedTransaction, admission.expectedTxId, attempt.durableAttemptDigestHex,

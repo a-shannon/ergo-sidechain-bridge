@@ -835,6 +835,26 @@ describe('native FED managed setup session', () => {
     const state = new StateTracker(join(directory, 'state.sqlite'));
     let sent = false;
     let vaultSent = false;
+    const sourceId = packet.transactions.sourceLockCreation.txId;
+    const reserveId = packet.transactions.reserveTransition.txId;
+    const permitPhase = new Map<string, 'unarmed' | 'armed' | 'posted' | 'completed'>([
+      [sourceId, 'unarmed'], [reserveId, 'unarmed'],
+    ]);
+    vi.spyOn(owned, 'armSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1')
+      .mockImplementation(async (currentTarget, id) => {
+        expect(currentTarget).toBe(target);
+        expect(permitPhase.get(id)).toBe('unarmed');
+        if (id === reserveId) expect(permitPhase.get(sourceId)).toBe('completed');
+        permitPhase.set(id, 'armed');
+      });
+    vi.spyOn(owned, 'completeSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1')
+      .mockImplementation(async (currentTarget, id, deadline) => {
+        expect(currentTarget).toBe(target);
+        expect(permitPhase.get(id)).toBe('posted');
+        expect(Number.isFinite(deadline) && deadline > performance.now()).toBe(true);
+        expect(id === sourceId ? sent : vaultSent).toBe(true);
+        permitPhase.set(id, 'completed');
+      });
     const headerId = (height: number): string => height === 1000 ? '71'.repeat(32)
       : height === 1020 ? '70'.repeat(32) : height.toString(16).padStart(64, '0');
     vi.spyOn(axios, 'create').mockImplementation(options => ({ get: async (path: string, config?: { responseType?: string }) => {
@@ -887,6 +907,8 @@ describe('native FED managed setup session', () => {
       expect(state.getErgoOperationalTransactionAttempt(body.id)?.status).toBe('pending');
       const signed = wasm.Transaction.from_json(JSON.stringify(body)); const id = signed.id();
       try { expect(id.to_str()).toBe(body.id); } finally { id.free(); signed.free(); }
+      expect(permitPhase.get(body.id)).toBe('armed');
+      permitPhase.set(body.id, 'posted');
       if (body.id === packet.transactions.sourceLockCreation.txId) sent = true;
       else vaultSent = true;
       postCallback();
@@ -913,8 +935,8 @@ describe('native FED managed setup session', () => {
           const authorize = original.authorize;
           const artifactAssert = sourceLockAuthority.assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1;
           vi.spyOn(sourceLockAuthority, 'assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1')
-            .mockImplementation((authorizer, authorization) => {
-              artifactAssert(authorizer, authorization);
+            .mockImplementation((authorizer, authorization, consumedBindingValidator) => {
+              artifactAssert(authorizer, authorization, consumedBindingValidator);
               scopes.push((authorization.authorizationArtifact as { authorizationScope: string }).authorizationScope);
             });
           expect(authorize).toBeTypeOf('function');
@@ -1044,7 +1066,9 @@ describe('native FED managed setup session', () => {
     await withNativeSourceLock(async ({ input, post }) => {
       const consume = fleet.consumeLocalWasmCheckedSubmissionHandleV1;
       vi.spyOn(fleet, 'consumeLocalWasmCheckedSubmissionHandleV1').mockImplementation(async (handle, candidate, callback) =>
-        consume(handle, candidate, async signed => { session.dispose(); return callback(signed); }));
+        consume(handle, candidate, async (signed, assertCurrentBinding) => {
+          session.dispose(); return callback(signed, assertCurrentBinding);
+        }));
       await expect(executeNativeSourceLock(input)).rejects.toThrow(/not transported|inactive/);
       expect(post).not.toHaveBeenCalled();
       expect(input.state.getErgoOperationalTransactionAttempt(input.packet.transactions.sourceLockCreation.txId)).not.toBeNull();
@@ -1135,8 +1159,8 @@ describe('native FED managed setup session', () => {
       const artifactAssert = vaultAuthority.assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1;
       const scopes: string[] = [];
       vi.spyOn(vaultAuthority, 'assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1')
-        .mockImplementation((authorizer, authorization) => {
-          artifactAssert(authorizer, authorization);
+        .mockImplementation((authorizer, authorization, consumedBindingValidator) => {
+          artifactAssert(authorizer, authorization, consumedBindingValidator);
           scopes.push((authorization.authorizationArtifact as { authorizationScope: string }).authorizationScope);
         });
       const result = await executeNativeVault({ ...input, setupSession });
@@ -2727,7 +2751,9 @@ describe('native FED managed setup session', () => {
       if (stage === 'transport callback') {
         const consume = fleet.consumeLocalWasmCheckedSubmissionHandleV1;
         vi.spyOn(fleet, 'consumeLocalWasmCheckedSubmissionHandleV1').mockImplementation((handle, candidate, callback) =>
-          consume(handle, candidate, async signed => { session.dispose(); return callback(signed); }));
+          consume(handle, candidate, async (signed, assertCurrentBinding) => {
+            session.dispose(); return callback(signed, assertCurrentBinding);
+          }));
       }
       await expect(executeNativeVault(input)).rejects.toThrow(/inactive|not transported/);
       expect(post).toHaveBeenCalledTimes(1);

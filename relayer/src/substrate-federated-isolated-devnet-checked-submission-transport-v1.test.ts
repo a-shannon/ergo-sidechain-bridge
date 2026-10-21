@@ -76,6 +76,7 @@ const boundary = vi.hoisted(() => {
     assertExecutionBinding: vi.fn(),
     signedTransaction: Object.freeze({ id: expectedTxId, proofs: ['opaque'] }),
     consumed: false,
+    activeValidator: undefined as unknown,
     consume: vi.fn(),
   };
 });
@@ -198,6 +199,7 @@ vi.mock(
     assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1: (
       value: unknown,
       authorization: Readonly<{ authorizationArtifact?: unknown }>,
+      consumedBindingValidator?: unknown,
     ) => {
       permitBoundary.events.push('source-artifact');
       if (
@@ -205,6 +207,10 @@ vi.mock(
         || authorization.authorizationArtifact
           !== boundary.sourceLockAuthorizationArtifact
         || !permitBoundary.artifactActive
+        || (boundary.consumed && (
+          typeof boundary.activeValidator !== 'function'
+          || consumedBindingValidator !== boundary.activeValidator
+        ))
       ) {
         throw new Error('synthetic source-lock authorization is missing');
       }
@@ -233,6 +239,7 @@ vi.mock(
     assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1: (
       value: unknown,
       authorization: Readonly<{ authorizationArtifact?: unknown }>,
+      consumedBindingValidator?: unknown,
     ) => {
       permitBoundary.events.push('reserve-artifact');
       if (
@@ -240,6 +247,10 @@ vi.mock(
         || authorization.authorizationArtifact
           !== boundary.committedVaultAuthorizationArtifact
         || !permitBoundary.artifactActive
+        || (boundary.consumed && (
+          typeof boundary.activeValidator !== 'function'
+          || consumedBindingValidator !== boundary.activeValidator
+        ))
       ) {
         throw new Error(
           'synthetic committed-vault authorization is missing',
@@ -551,7 +562,7 @@ beforeEach(() => {
   boundary.handleProcessBindingDigestHex = '11'.repeat(32);
   boundary.handleExecutionTargetIdentityDigestHex = '10'.repeat(32);
   boundary.assertExecutionBinding.mockReset();
-  boundary.assertExecutionBinding.mockImplementation((
+  const checkExecutionBinding = (
     value: unknown,
     binding: Readonly<{
       processBindingDigestHex: string;
@@ -572,13 +583,22 @@ beforeEach(() => {
     ) {
       throw new Error('synthetic checked handle execution binding changed');
     }
+  };
+  boundary.assertExecutionBinding.mockImplementation((value, binding) => {
+    if (boundary.consumed) throw new Error('synthetic checked handle is already consumed');
+    checkExecutionBinding(value, binding);
   });
   boundary.consume.mockReset();
   boundary.consume.mockImplementation(async (
     handle: unknown,
     signedCandidate: unknown,
-    consume: (signedTransaction: Readonly<Record<string, unknown>>) =>
-      Promise<unknown>,
+    consume: (
+      signedTransaction: Readonly<Record<string, unknown>>,
+      assertCurrentExecutionBinding: (binding: Readonly<{
+        processBindingDigestHex: string;
+        executionTargetIdentityDigestHex: string;
+      }>) => void,
+    ) => Promise<unknown>,
   ) => {
     if (
       handle !== boundary.checkedHandle
@@ -592,7 +612,21 @@ beforeEach(() => {
     genesisBoundary.events.push('consume');
     trackerBoundary.events.push('consume');
     await trackerBoundary.beforeCheckedCallback();
-    return await consume(boundary.signedTransaction);
+    let callbackActive = true;
+    const assertCurrentExecutionBinding = (binding: Readonly<{
+      processBindingDigestHex: string;
+      executionTargetIdentityDigestHex: string;
+    }>) => {
+      if (!callbackActive || !boundary.consumed) throw new Error('synthetic consumed callback is inactive');
+      checkExecutionBinding(handle, binding);
+    };
+    boundary.activeValidator = assertCurrentExecutionBinding;
+    try {
+      return await consume(boundary.signedTransaction, assertCurrentExecutionBinding);
+    } finally {
+      callbackActive = false;
+      boundary.activeValidator = undefined;
+    }
   });
   node.post.mockReset();
   journalBoundary.assertDurableAttempt.mockReset();
@@ -1245,6 +1279,24 @@ describe('opt-in transaction permit checked submission boundary', () => {
       await expect(fixture.run()).rejects.toThrow(); expect(permitBoundary.arm).toHaveBeenCalledTimes(1);
       expect(node.post).not.toHaveBeenCalled();
       await expect(fixture.run()).rejects.toThrow(); expect(permitBoundary.arm).toHaveBeenCalledTimes(1);
+      expect(node.post).not.toHaveBeenCalled();
+    });
+
+  it.each(permitSubmissionKinds.flatMap(kind =>
+    (['processBindingDigestHex', 'reconciliationIdentityDigestHex'] as const)
+      .map(field => ({ kind, field }))))(
+    '$kind refuses current target $field drift after Arm without a POST or second Arm',
+    async ({ kind, field }) => {
+      const fixture = permitSubmission(kind, true);
+      permitBoundary.arm.mockImplementationOnce(async () => {
+        expect(boundary.consumed).toBe(true);
+        processBoundary[field] = 'ee'.repeat(32);
+      });
+      await expect(fixture.run()).rejects.toThrow();
+      expect(permitBoundary.arm).toHaveBeenCalledTimes(1);
+      expect(node.post).not.toHaveBeenCalled();
+      await expect(fixture.run()).rejects.toThrow();
+      expect(permitBoundary.arm).toHaveBeenCalledTimes(1);
       expect(node.post).not.toHaveBeenCalled();
     });
 
