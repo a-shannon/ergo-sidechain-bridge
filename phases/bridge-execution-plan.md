@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-10-21
+Updated: 2026-10-22
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,11 +28,56 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Prepare a separately selected fresh owned Frontier/Ergo run for the
-reviewed V3 source candidate. Before V3 Ergo assembly, a bounded diagnostic
-must establish the effective project and meta-build SBT resolvers under the
-same pinned inputs; the declared file-only lock is not that observation.
-An operational worker or campaign remains a separate decision. The exact R7
+**Now:** Select the smallest distinct executable consumer after the independently
+reviewed source08 V4 static assembly; do not transfer its JAR as fresh runtime
+authority or re-enter source07. A distinct,
+reviewed source07 assembly Job ran once after the
+file-only resolver and focused `avldb / update`. Its inner Java Job returned
+within its bounds and produced a 78,435,452-byte JAR. The outer launcher
+refused the overall result and no canonical assembly observation was created.
+A read-only static check passed the JAR ZIP, main-class and manifest predicates,
+but cannot retroactively establish the failed postchecks or acceptance.
+The independently reviewed resolver -05 observation lists only the selected
+three local `file:` repositories across six project and meta-build blocks.
+A separately reviewed, one-time `avldb / update` succeeded on that same
+source and state. Its report resolves `org.ethereum:leveldbjni-all:1.18.3`
+directly from the pinned local overlay JAR with no missing artifacts across
+16 configurations. The overlay POM marks
+`org.fusesource.leveldbjni:leveldbjni:1.8` as `provided`; it was not shown as
+fetched, although the selected JAR contains its classes and native binaries.
+The precise outer refusal remains unknown from the selected public files.
+Two stable metadata-only walks of the public generated `target` found 41,207
+files and 428,805,877 bytes, above the unchanged global 20,000-file cap.
+Its assembly streams subtree contains 40,077 files, predominantly class-shaped
+extraction/merge inputs. The cap would refuse this tree if reached, but the
+historical first refusal remains unknown. Preserve this consumed assembly and
+its outputs. Static bytecode of the pinned plugin shows that disabling
+`assemblyCacheUnzip` deletes the prior cache and re-extracts the inputs; it
+does not prevent their creation. `assemblyCacheOutput=false` bypasses only
+final-JAR caching. No setting in the pinned plugin was found that preserves
+the same fat-JAR under the consumed attempt's 20,000-file global cap. The user
+authorized 50,000 files for the global `target` post-assembly limit in one new,
+distinct attempt only. The 4,096-directory and 512 MiB limits, all other root
+limits, file hashing, timeouts and independent review remain unchanged. This
+does not establish the first cause of the consumed refusal or accept its JAR.
+A new streaming producer would need exact classpath, merge and ZIP-semantic
+differential evidence; none is selected or qualified. Do not split the global
+cap into smaller per-group caps or exclude, move or delete outputs to claim
+acceptance. A new source08 checkout is prepared and physically observed. Its
+file-only resolver -06 and focused `avldb / update` -02 each ran once and
+passed separate independent reviews of their exact public outputs. The
+update-cache contains 16 configurations, zero missing artifacts and the pinned
+local LevelDB overlay JAR. The separate source08 assembly -03 entered once
+under a reviewed bounded Job and exited 0. Its public receipt, all six generated
+output roots and isolated state passed independent exact-byte review. The
+global `target` has 41,207 files, 1,563 directories and 428,805,713 bytes,
+within the user-authorized 50,000-file cap and unchanged directory/byte caps.
+The fresh 78,435,452-byte JAR passes ZIP, class and manifest checks. This is a
+scoped static assembly GO: the producer keeps its review, acceptance,
+dependency-closure and admission flags false, and neither its JAR nor the
+consumed source07 attempt supplies fresh runtime authority. No OS-level network
+isolation, worker or campaign result follows from this lane.
+No new operational worker or campaign ran in this V4 assembly lane; C75 is not selected. The exact R7
 source correction and its two isolated
 changed-input JVM tests are locally closed; no R7 rebuild is pending. The V6
 compiled reserve accepts an additional dense R7 on a successor that the next
@@ -2494,7 +2539,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Native V3 source proof -> reservation-only consumer | Separately select a fresh owned Frontier/Ergo run; first verify the effective V3 project and meta-build SBT resolvers before assembly, then carry the original proof through the reservation-only executor. Keep worker and campaign separate | Mocked root 13/13, V3 builder 7/7, affected V1 builder 51/51, held reader 23/23 and architecture 468/468 pass with TypeScript, imports and exact independent 13-file source review. No V3 resolver diagnostic or actual owned-node build, hold, inclusion, worker or lifecycle run has passed. C74 stays consumed and no C75 is selected |
+| **Now** | Reviewed source08 V4 static assembly -> distinct executable consumer | Preserve consumed source07/-03 entries. Select the cheapest separate producer-to-consumer check that can advance runtime evidence without treating the reviewed JAR as fresh-node authority. Keep builder, worker and campaign contracts separate; no automatic C75 selection | Source08 receipt, physical observation, file-only resolver -06, focused update -02 and assembly -03 have scoped independent GOs. The one source08 assembly -03 outer entry exited 0; independent review rehashed six output roots and state. Its target has 41,207 files within the authorized 50,000-file cap and its fresh 78,435,452-byte JAR has the required ZIP, class and manifest structure. The source07 outer refusal remains unattributed. No node, worker, two-cycle, recovery or external acceptance follows; C74 stays consumed and C75 is not selected |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Separately select and admit one local synthetic campaign after a deciding checkpoint, exact local source identity, applicable checks/review and fresh runtime/source/output/custody/fee gates; apply guarded publication and due exact-head CI at public promotion | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
