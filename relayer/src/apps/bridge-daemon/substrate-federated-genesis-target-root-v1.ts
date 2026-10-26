@@ -33,6 +33,8 @@ import { beginNativeTwoCycleCallbackTimingV1, tagNativeTwoCycleCallbackTimingFai
   from '../../substrate-federated-native-two-cycle-callback-timing-v1.js';
 import { createNativeDepositFundingSubstageTaggerV1, type NativeDepositFundingSubstageV1 }
   from '../../substrate-federated-native-deposit-funding-substage-v1.js';
+import type { NativeDepositFundingStageObserverV2 }
+  from '../../substrate-federated-native-deposit-funding-stage-v2.js';
 import { createOwnedFederatedGenesisDevnetProcessSessionV1, assertOwnedFederatedGenesisDevnetTargetV1,
   type OwnedFederatedGenesisDevnetProcessSessionV1 } from '../../substrate-federated-authority-safe-devnet-process-v1.js';
 import { buildSubstrateFederatedGenesisNodeV1, type BuildSubstrateFederatedGenesisNodeV1Input } from '../../substrate-federated-genesis-node-build-v1.js';
@@ -130,20 +132,34 @@ export interface RunSubstrateFederatedGenesisTargetRootV1Input {
   readonly ergoBuild: BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input;
 }
 
-/** Static local target composition. No caller callback, signer or transport escapes. */
-export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstrateFederatedGenesisTargetRootV1Input) {
+/** The optional observer exports only a finite stage; signer and transport stay private. */
+export async function runSubstrateFederatedGenesisTargetRootV1(
+  input: RunSubstrateFederatedGenesisTargetRootV1Input,
+  onDepositFundingStage?: NativeDepositFundingStageObserverV2,
+) {
   let rootPhase: SubstrateFederatedNativeTwoCycleRootPhaseV1 = 'setup-and-custody';
   let cycleStep: NativeTwoCycleCycleStepV1 | null = null;
   let callbackTiming: ReturnType<typeof beginNativeTwoCycleCallbackTimingV1> | undefined;
   let callbackTimingTrace: Readonly<NativeTwoCycleCallbackTimingTraceV1> | null = null;
   const tagDepositFundingSubstage = createNativeDepositFundingSubstageTaggerV1();
   let depositFundingSubstage: NativeDepositFundingSubstageV1 | null = null;
+  const reportDepositFundingStage = (substage: NativeDepositFundingSubstageV1 | null) => {
+    if (rootPhase === 'cycle-1' || rootPhase === 'cycle-2') {
+      try { onDepositFundingStage?.(rootPhase, substage); }
+      catch { /* Optional observations never replace the original operation. */ }
+    }
+  };
   const markDepositFundingSubstage = (substage: NativeDepositFundingSubstageV1) => {
     depositFundingSubstage = substage;
+    if (cycleStep === 'deposit-funding') reportDepositFundingStage(substage);
   };
   const markStep = (step: NativeTwoCycleCycleStepV1) => {
-    cycleStep = step; callbackTiming?.record(step);
-    if (step !== 'deposit-funding') depositFundingSubstage = null;
+    cycleStep = step;
+    if (step !== 'deposit-funding' && depositFundingSubstage !== null) {
+      depositFundingSubstage = null;
+      reportDepositFundingStage(null);
+    }
+    callbackTiming?.record(step);
   };
   let setupAcquired = false;
   try {

@@ -169,6 +169,7 @@ import { projectNativeTwoCycleCycleStepFailureV1 }
   from '../../substrate-federated-native-two-cycle-cycle-step-v1.js';
 import { tagNativeTwoCycleCycleStepFailureV1 }
   from '../../substrate-federated-native-two-cycle-cycle-step-v1.js';
+import * as callbackTiming from '../../substrate-federated-native-two-cycle-callback-timing-v1.js';
 import { NATIVE_DEPOSIT_FUNDING_SUBSTAGES_V1,
   projectNativeDepositFundingSubstageV1,
   type NativeDepositFundingSubstageV1 }
@@ -3094,10 +3095,14 @@ describe('fresh FED target composition', () => {
     async ({ second, substage }) => {
       const trigger = new Error(`synthetic ${substage} failure`);
       const assertInjection = injectDepositFundingSubstageFailure(second, substage, trigger);
+      const stageEvents: Array<readonly ['cycle-1' | 'cycle-2',
+        NativeDepositFundingSubstageV1 | null]> = [];
 
-      const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+      const failure = await runSubstrateFederatedGenesisTargetRootV1(input,
+        (cycle, stage) => { stageEvents.push([cycle, stage]); }).catch(error => error);
 
       expect(failure).toBe(trigger);
+      expect(stageEvents.at(-1)).toEqual(['cycle-1', substage]);
       expect(projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(failure)).toEqual({
         primaryPhase: 'cycle-1', cleanupErrorCount: 0, ergoNodeStartupPhase: null,
       });
@@ -3137,10 +3142,14 @@ describe('fresh FED target composition', () => {
     'does not retain deposit-funding detail for a later packet failure (continuation=%s)', async second => {
       const trigger = new Error('synthetic later packet failure');
       (second ? mocked.continuationPacket : mocked.packet).mockRejectedValueOnce(trigger);
+      const stageEvents: Array<readonly ['cycle-1' | 'cycle-2',
+        NativeDepositFundingSubstageV1 | null]> = [];
 
-      const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+      const failure = await runSubstrateFederatedGenesisTargetRootV1(input,
+        (cycle, stage) => { stageEvents.push([cycle, stage]); }).catch(error => error);
 
       expect(failure).toBe(trigger);
+      expect(stageEvents.at(-1)).toEqual(['cycle-1', null]);
       expect(projectNativeTwoCycleCycleStepFailureV1(failure)).toEqual({
         cycle: 'cycle-1', step: 'deposit-construction',
       });
@@ -3150,6 +3159,39 @@ describe('fresh FED target composition', () => {
       expect(mocked.recovery).not.toHaveBeenCalled();
       assertDisposed();
     });
+
+  it('clears the observed funding stage before a fallible timing record at deposit construction', async () => {
+    const trigger = new Error('synthetic timing record refusal');
+    const begin = callbackTiming.beginNativeTwoCycleCallbackTimingV1;
+    vi.spyOn(callbackTiming, 'beginNativeTwoCycleCallbackTimingV1').mockImplementation(() => {
+      const actual = begin();
+      return Object.freeze({
+        record(next: Parameters<typeof actual.record>[0]) {
+          if (next === 'deposit-construction') throw trigger;
+          actual.record(next);
+        },
+        finish: () => actual.finish(),
+      });
+    });
+    const stageEvents: Array<readonly ['cycle-1' | 'cycle-2',
+      NativeDepositFundingSubstageV1 | null]> = [];
+
+    const failure = await runSubstrateFederatedGenesisTargetRootV1(input,
+      (cycle, stage) => { stageEvents.push([cycle, stage]); }).catch(error => error);
+
+    expect(failure).toBe(trigger);
+    expect(stageEvents.at(-1)).toEqual(['cycle-1', null]);
+    expect(stageEvents.some(([, stage]) => stage === 'held-funding-equality')).toBe(true);
+    expect(stageEvents.every(([cycle, stage]) => cycle === 'cycle-1'
+      && (stage === null || NATIVE_DEPOSIT_FUNDING_SUBSTAGES_V1.includes(stage))))
+      .toBe(true);
+    expect(projectNativeTwoCycleCycleStepFailureV1(failure)).toEqual({
+      cycle: 'cycle-1', step: 'deposit-construction',
+    });
+    expect(projectNativeDepositFundingSubstageV1(failure)).toBeNull();
+    expect(mocked.packet).not.toHaveBeenCalled();
+    assertDisposed();
+  });
 
   it.each([
     { name: 'primitive', thrown: 'primitive deposit Hold failure' },
