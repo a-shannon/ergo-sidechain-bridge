@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync,
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync,
   writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, parse, relative, resolve } from 'node:path';
@@ -49,7 +49,8 @@ import { runSubstrateFederatedNativeTwoCycleFromArgumentsV2,
   tryPublishNativeDepositFundingParentStageV2 }
   from './run-substrate-federated-native-two-cycle-v2.js';
 
-const FIXTURE_TMP = resolve(process.env.ERGO_BRIDGE_TEST_TMP_ROOT ?? tmpdir());
+const FIXTURE_TMP = resolve(realpathSync.native(
+  process.env.ERGO_BRIDGE_TEST_TMP_ROOT ?? tmpdir()));
 const bridgeRoot = resolve(import.meta.dirname, '..', '..', '..');
 const text = (value: unknown) => `${canonicalJson(value)}\n`;
 
