@@ -102,9 +102,7 @@ describe('native two-cycle root failure phases V2', () => {
     const oversized = tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(
       new AggregateError(children), 'node-start',
     );
-    expect(projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(oversized)).toEqual({
-      primaryPhase: 'node-start', cleanupErrorCount: 0, ergoNodeStartupPhase: null,
-    });
+    expect(projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(oversized)).toBeNull();
   });
 
   it('does not claim an early startup phase when an oversized aggregate hides later branches', () => {
@@ -115,12 +113,10 @@ describe('native two-cycle root failure phases V2', () => {
       new AggregateError([startup, ...Array.from({ length: 64 }, () => 'untrusted value')]),
       'node-start',
     );
-    expect(projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(oversized)).toEqual({
-      primaryPhase: 'node-start', cleanupErrorCount: 0, ergoNodeStartupPhase: null,
-    });
+    expect(projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(oversized)).toBeNull();
   });
 
-  it('preserves the primary value when hostile Error or aggregate inspection fails', () => {
+  it('refuses the full projection when hostile Error or aggregate inspection fails', () => {
     const revoked = Proxy.revocable(new Error('private'), {});
     revoked.revoke();
     expect(tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(
@@ -132,9 +128,7 @@ describe('native two-cycle root failure phases V2', () => {
       new AggregateError([]), 'node-start', 'ergo node primary spawn',
     );
     Object.defineProperty(aggregate, 'errors', { get() { throw new Error('private getter'); } });
-    expect(projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(aggregate)).toEqual({
-      primaryPhase: 'node-start', cleanupErrorCount: 0, ergoNodeStartupPhase: null,
-    });
+    expect(projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(aggregate)).toBeNull();
   });
 
   it('fails closed when a nested revoked Error proxy hides a conflicting startup phase', () => {
@@ -149,8 +143,6 @@ describe('native two-cycle root failure phases V2', () => {
       new AggregateError([known, revoked.proxy]), 'node-start',
     );
     revoked.revoke();
-    expect(projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(hostile)).toEqual({
-      primaryPhase: 'node-start', cleanupErrorCount: 0, ergoNodeStartupPhase: null,
-    });
+    expect(projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(hostile)).toBeNull();
   });
 });

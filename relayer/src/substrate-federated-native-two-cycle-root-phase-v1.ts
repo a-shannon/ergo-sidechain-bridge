@@ -1,3 +1,5 @@
+import { types } from 'node:util';
+
 export const SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_ROOT_PHASES_V1 = Object.freeze([
   'setup-and-custody',
   'frontier-build',
@@ -18,7 +20,7 @@ export interface SubstrateFederatedNativeTwoCycleRootFailurePhaseV1 {
 }
 
 const ROOT_FAILURE_PHASES = new WeakMap<Error, SubstrateFederatedNativeTwoCycleRootPhaseV1>();
-const MAX_PROJECTED_ERRORS = 64;
+const MAX_PROJECTED_VALUES = 64;
 const MAX_CLEANUP_ERROR_COUNT = 32;
 
 export function tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1<T>(
@@ -41,39 +43,64 @@ export function projectOwnSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(
 export function projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(
   value: unknown,
 ): Readonly<SubstrateFederatedNativeTwoCycleRootFailurePhaseV1> | null {
-  const initial = asError(value);
-  const pending: Error[] = initial === null ? [] : [initial];
+  const pending: unknown[] = [value];
   const visited = new WeakSet<Error>();
   let tagged = false;
   let conflictingPrimaryPhases = false;
   let primaryPhase: SubstrateFederatedNativeTwoCycleRootPhaseV1 | null = null;
   let cleanupErrorCount = 0;
-  let visitedErrorCount = 0;
+  let inspectedValueCount = 1; // The root and every aggregate member share one budget.
 
-  while (pending.length > 0 && visitedErrorCount < MAX_PROJECTED_ERRORS) {
-    const current = pending.shift()!;
-    if (visited.has(current)) continue;
-    visited.add(current);
-    visitedErrorCount++;
-    const phase = ROOT_FAILURE_PHASES.get(current);
-    if (phase !== undefined) {
-      tagged = true;
-      if (phase === 'cleanup') cleanupErrorCount++;
-      else if (primaryPhase === null) primaryPhase = phase;
-      else if (primaryPhase !== phase) conflictingPrimaryPhases = true;
-    }
-    if (isAggregateError(current)) {
-      let nestedErrors: unknown;
-      try { nestedErrors = current.errors; } catch { continue; }
-      try {
-        if (!Array.isArray(nestedErrors)) continue;
-        for (const nested of nestedErrors) {
-          if (visitedErrorCount + pending.length >= MAX_PROJECTED_ERRORS) break;
-          const nestedError = asError(nested);
-          if (nestedError !== null) pending.push(nestedError);
+  try {
+    while (pending.length > 0) {
+      const current = pending.shift();
+      if (current === null || (typeof current !== 'object' && typeof current !== 'function')) continue;
+      if (types.isProxy(current)) return null;
+      let prototype: object | null = current;
+      let errorPrototype = false;
+      let aggregatePrototype = false;
+      for (let depth = 0; prototype !== null; depth++) {
+        if (depth >= MAX_PROJECTED_VALUES || types.isProxy(prototype)) return null;
+        if (prototype === Error.prototype) errorPrototype = true;
+        if (prototype === AggregateError.prototype) aggregatePrototype = true;
+        prototype = Object.getPrototypeOf(prototype);
+      }
+      const errors = Object.getOwnPropertyDescriptor(current, 'errors');
+      if (!types.isNativeError(current)) {
+        if (errors !== undefined) return null;
+        continue;
+      }
+      if (!errorPrototype || (!aggregatePrototype && errors !== undefined)) return null;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      const phase = ROOT_FAILURE_PHASES.get(current);
+      if (phase !== undefined) {
+        tagged = true;
+        if (phase === 'cleanup') cleanupErrorCount++;
+        else if (primaryPhase === null) primaryPhase = phase;
+        else if (primaryPhase !== phase) conflictingPrimaryPhases = true;
+      }
+      if (aggregatePrototype) {
+        if (errors === undefined || !('value' in errors)) return null;
+        const nestedErrors: unknown = errors.value;
+        if (types.isProxy(nestedErrors) || !Array.isArray(nestedErrors)
+          || Object.getPrototypeOf(nestedErrors) !== Array.prototype) return null;
+        const length = Object.getOwnPropertyDescriptor(nestedErrors, 'length');
+        if (length === undefined || !('value' in length)) return null;
+        const nestedCount: unknown = length.value;
+        if (typeof nestedCount !== 'number' || !Number.isSafeInteger(nestedCount) || nestedCount < 0
+          || nestedCount > MAX_PROJECTED_VALUES - inspectedValueCount) return null;
+        inspectedValueCount += nestedCount;
+        for (let index = 0; index < nestedCount; index++) {
+          const nested = Object.getOwnPropertyDescriptor(nestedErrors, index);
+          if (nested === undefined || !('value' in nested)) return null;
+          pending.push(nested.value);
         }
-      } catch { continue; }
+        if (Object.getOwnPropertyDescriptor(nestedErrors, 'length')?.value !== nestedCount) return null;
+      }
     }
+  } catch {
+    return null;
   }
   if (!tagged) return null;
   return Object.freeze({
@@ -84,8 +111,4 @@ export function projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(
 
 function asError(value: unknown): Error | null {
   try { return value instanceof Error ? value : null; } catch { return null; }
-}
-
-function isAggregateError(value: Error): value is AggregateError {
-  try { return value instanceof AggregateError; } catch { return false; }
 }
