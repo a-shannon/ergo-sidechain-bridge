@@ -1,18 +1,14 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { readHistoricalConsensusSourceLockBytes } from './historical-consensus-source-lock.test-helper.js';
 import {
   assertV4ErgoSourceObservation,
   type V4BuildSbtOverlayPin,
 } from './substrate-federated-isolated-devnet-ergo-node-build-v4-source.js';
 
-const bridgeRoot = resolve(import.meta.dirname, '..', '..');
-const consensusSourceLockBytes = readFileSync(
-  resolve(bridgeRoot, 'sources', 'consensus-source-lock.json'),
-);
+const consensusSourceLockBytes = readHistoricalConsensusSourceLockBytes();
 const consensusLock = JSON.parse(consensusSourceLockBytes.toString('utf8')) as {
   ergoNode: Record<string, unknown>;
 };

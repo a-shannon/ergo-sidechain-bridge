@@ -3,11 +3,12 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { readHistoricalConsensusSourceLockBytes } from './historical-consensus-source-lock.test-helper.js';
 import { inspectV4NodeBuildLock } from './substrate-federated-isolated-devnet-ergo-node-build-v4-lock.js';
 import { derivePinnedV4BuildSbtOverlay } from './substrate-federated-isolated-devnet-ergo-node-build-v4-preflight.js';
 
 const bridgeRoot = resolve(import.meta.dirname, '..', '..');
-const consensusBytes = readFileSync(resolve(bridgeRoot, 'sources', 'consensus-source-lock.json'));
+const consensusBytes = readHistoricalConsensusSourceLockBytes();
 const jobBytes = readFileSync(resolve(import.meta.dirname, 'scripts', 'windows-job-process.ps1'));
 
 describe('V4 build preflight static pins', () => {
