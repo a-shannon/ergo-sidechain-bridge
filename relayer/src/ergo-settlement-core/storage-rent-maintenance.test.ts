@@ -107,6 +107,13 @@ describe('storage-rent surface inventory', () => {
         contractFile: 'MainChainPooledReserveValidityApplicationV6.es',
         refreshMode: 'value-transition-only',
       }),
+      expect.objectContaining({
+        surfaceId: 'main-chain-pooled-reserve-validity-application-v7',
+        contractFile: 'MainChainPooledReserveValidityApplicationV7.es',
+        profile: 'preactivation',
+        refreshMode: 'value-transition-only',
+        neutralMaintenanceEligible: false,
+      }),
     ]));
   });
 });

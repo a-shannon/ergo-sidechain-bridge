@@ -331,6 +331,13 @@ export const STORAGE_RENT_SURFACE_INVENTORY = Object.freeze([
     'value-transition-only',
     'ordinary spends change V6 reserve value through a deposit or payout transition',
   ),
+  surface(
+    'main-chain-pooled-reserve-validity-application-v7',
+    'MainChainPooledReserveValidityApplicationV7.es',
+    'preactivation',
+    'value-transition-only',
+    'ordinary spends change V7 reserve value through a deposit or payout transition',
+  ),
 ] as const);
 
 export type StorageRentAgeRisk = 'fresh' | 'watch' | 'refresh_due' | 'rent_eligible';
