@@ -12,25 +12,15 @@ export function copiedSelectionEntryExists(
   }
 }
 
+import { createNativeTwoCyclePublicFailureLatchV2,
+  publishNativeTwoCycleWorkerPublicFailureV2 }
+  from '../substrate-federated-native-two-cycle-worker-public-failure-seam-v2.js';
+import type { NativeTwoCycleFailureStageV1 }
+  from '../substrate-federated-native-two-cycle-failure-diagnostic-v1.js';
 import { readBoundedRegularFile, writeNewFile } from '../create-only-out-of-repository-artifact.js';
 import { assertNoDuplicateJsonKeys, canonicalJson } from '../ergo-settlement-core/strict-json.js';
-import {
-  createNativeTwoCycleWorkerFailureDiagnosticV1,
-  type NativeTwoCycleFailureStageV1,
-} from '../substrate-federated-native-two-cycle-failure-diagnostic-v1.js';
-import { createNativeTwoCycleWorkerRootPhaseV1 } from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v1.js';
-import { createNativeTwoCycleWorkerRootPhaseV2 } from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v2.js';
-import { createNativeTwoCycleWorkerCycleStepV1 } from '../substrate-federated-native-two-cycle-cycle-step-diagnostic-v1.js';
-import { NATIVE_DEPOSIT_FUNDING_SUBSTAGES_V1,
-  createNativeTwoCycleWorkerDepositFundingSubstageV1, projectNativeDepositFundingSubstageV1 }
-  from '../substrate-federated-native-deposit-funding-substage-v1.js';
-import { selectNativeDepositFundingWorkerStageV2,
-  type NativeDepositFundingStageObservationV2 }
-  from '../substrate-federated-native-deposit-funding-stage-v2.js';
 import { createNativeTwoCycleWorkerCallbackTimingV1, projectNativeTwoCycleCallbackTimingFailureV1 }
   from '../substrate-federated-native-two-cycle-callback-timing-v1.js';
-import { projectNativeTwoCycleCycleStepFailureV1 }
-  from '../substrate-federated-native-two-cycle-cycle-step-v1.js';
 import { createNativeTwoCycleWorkerTrackerContextV1,
   projectSubstrateFederatedTrackerV2BuildFailurePhaseV1,
   createNativeTwoCycleWorkerTrackerStatementV1,
@@ -69,9 +59,6 @@ import {
   validateWasmAvlBuildToolHashV2,
   type WasmAvlBuildToolNameV2,
 } from '../substrate-federated-native-wasm-avl-build-tool-pins-v1.js';
-import { projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV1 }
-  from '../substrate-federated-native-two-cycle-root-phase-v1.js';
-import { projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV2 } from '../substrate-federated-native-two-cycle-root-phase-v2.js';
 import {
   loadSubstrateFederatedNativeTwoCycleInvocationV1,
   projectSubstrateFederatedNativeTwoCycleResultV1,
@@ -145,7 +132,7 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArgumentsV2(
     'native two-cycle worker claim',
   );
   let stage: NativeTwoCycleFailureStageV1 = 'pre-root';
-  let lastDepositFunding: Readonly<NativeDepositFundingStageObservationV2> | null = null;
+  const depositFundingLatch = createNativeTwoCyclePublicFailureLatchV2();
   try {
     const before =
       await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(
@@ -169,15 +156,7 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArgumentsV2(
     stage = 'root-or-cleanup';
     const rootResult = await runSubstrateFederatedGenesisTargetRootV1(
       invocation.rootInput,
-      (cycle, fundingStage) => {
-        if (fundingStage === null) { lastDepositFunding = null; return; }
-        if ((cycle !== 'cycle-1' && cycle !== 'cycle-2')
-            || !NATIVE_DEPOSIT_FUNDING_SUBSTAGES_V1.includes(fundingStage)) {
-          lastDepositFunding = null;
-          return;
-        }
-        lastDepositFunding = Object.freeze({ cycle, lastEnteredStage: fundingStage });
-      },
+      depositFundingLatch.observe,
     );
     stage = 'projection';
     const result = projectSubstrateFederatedNativeTwoCycleResultV1(rootResult);
@@ -285,119 +264,15 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArgumentsV2(
       'native two-cycle worker transport',
     );
   } catch (primaryFailure) {
-    let workerFailureText: string | undefined;
-    let workerRootPhaseV2Text: string | undefined;
-    let workerCycleStepText: string | undefined;
-    let workerOwnerStageText: string | undefined;
-    let workerOwnerStageV2Text: string | undefined;
-    try {
-      const diagnostic = createNativeTwoCycleWorkerFailureDiagnosticV1({
+    const { workerFailureText, workerRootPhaseV2Text, workerCycleStepText } =
+      publishNativeTwoCycleWorkerPublicFailureV2(invocation.attemptPath, {
         configSha256Hex: invocation.configSha256Hex,
         expectedBridgeCommit: invocation.config.expectedBridgeCommit,
         pathIdentityDigestHex: invocation.pathIdentityDigestHex,
-      }, stage, primaryFailure);
-      writeNewFile(
-        join(invocation.attemptPath, 'worker-failure.json'),
-        Buffer.from(`${canonicalJson(diagnostic)}\n`, 'utf8'),
-        'native two-cycle worker failure diagnostic',
-      );
-      workerFailureText = `${canonicalJson(diagnostic)}\n`;
-    } catch {
-      // Optional diagnostics never replace the failure or release the worker claim.
-    }
+      }, stage, primaryFailure, depositFundingLatch.selected());
+    let workerOwnerStageText: string | undefined;
+    let workerOwnerStageV2Text: string | undefined;
     if (stage === 'root-or-cleanup') {
-      try {
-        const projection = projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(
-          primaryFailure,
-        );
-        if (projection !== null) {
-          const companion = createNativeTwoCycleWorkerRootPhaseV1({
-            configSha256Hex: invocation.configSha256Hex,
-            expectedBridgeCommit: invocation.config.expectedBridgeCommit,
-            pathIdentityDigestHex: invocation.pathIdentityDigestHex,
-          }, projection);
-          writeNewFile(
-            join(invocation.attemptPath, 'worker-root-phase.json'),
-            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
-            'native two-cycle worker root phase companion',
-          );
-        }
-      } catch {
-        // The optional root phase cannot change the existing diagnostic or failure.
-      }
-      try {
-        const projection = projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(
-          primaryFailure,
-        );
-        if (projection !== null) {
-          const companion = createNativeTwoCycleWorkerRootPhaseV2({
-            configSha256Hex: invocation.configSha256Hex,
-            expectedBridgeCommit: invocation.config.expectedBridgeCommit,
-            pathIdentityDigestHex: invocation.pathIdentityDigestHex,
-          }, projection);
-          writeNewFile(
-            join(invocation.attemptPath, 'worker-root-phase-v2.json'),
-            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
-            'native two-cycle worker root phase V2 companion',
-          );
-          workerRootPhaseV2Text = `${canonicalJson(companion)}\n`;
-        }
-      } catch {
-        // The optional V2 phase detail cannot change the existing failure or V1 evidence.
-      }
-      try {
-        const projection = projectNativeTwoCycleCycleStepFailureV1(primaryFailure);
-        if (projection !== null && workerFailureText !== undefined && workerRootPhaseV2Text !== undefined) {
-          const companion = createNativeTwoCycleWorkerCycleStepV1({
-            configSha256Hex: invocation.configSha256Hex,
-            expectedBridgeCommit: invocation.config.expectedBridgeCommit,
-            pathIdentityDigestHex: invocation.pathIdentityDigestHex,
-          }, workerFailureText, workerRootPhaseV2Text, projection);
-          writeNewFile(join(invocation.attemptPath, 'worker-cycle-step.json'),
-            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
-            'native two-cycle worker cycle step companion');
-          workerCycleStepText = `${canonicalJson(companion)}\n`;
-        }
-      } catch {
-        // Optional step capture cannot replace failure or release the consumed claim.
-      }
-      try {
-        const substage = projectNativeDepositFundingSubstageV1(primaryFailure);
-        if (substage !== null && workerFailureText !== undefined
-          && workerRootPhaseV2Text !== undefined && workerCycleStepText !== undefined) {
-          const companion = createNativeTwoCycleWorkerDepositFundingSubstageV1({
-            configSha256Hex: invocation.configSha256Hex,
-            expectedBridgeCommit: invocation.config.expectedBridgeCommit,
-            pathIdentityDigestHex: invocation.pathIdentityDigestHex,
-          }, { workerFailureText, workerRootPhaseV2Text, workerCycleStepText }, substage);
-          writeNewFile(join(invocation.attemptPath, 'worker-deposit-funding-substage.json'),
-            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
-            'native two-cycle worker deposit funding substage companion');
-        }
-      } catch {
-        // Optional substage detail cannot replace failure or older receipts.
-      }
-      try {
-        // The root callback mutates this latch across an await; capture its runtime value.
-        const selectedDepositFunding = lastDepositFunding as
-          Readonly<NativeDepositFundingStageObservationV2> | null;
-        if (workerFailureText !== undefined && workerRootPhaseV2Text !== undefined
-            && workerCycleStepText !== undefined) {
-          const companion = selectNativeDepositFundingWorkerStageV2(
-            primaryFailure, stage, selectedDepositFunding, {
-              configSha256Hex: invocation.configSha256Hex,
-              expectedBridgeCommit: invocation.config.expectedBridgeCommit,
-              pathIdentityDigestHex: invocation.pathIdentityDigestHex,
-            }, { workerFailureText, workerRootPhaseV2Text, workerCycleStepText });
-          if (companion !== null) {
-            writeNewFile(join(invocation.attemptPath, 'worker-deposit-funding-stage-v2.json'),
-              Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
-              'native two-cycle worker deposit funding stage V2 companion');
-          }
-        }
-      } catch {
-        // Optional observation cannot replace the original failure or V1 receipts.
-      }
       try {
         const stage = projectSubstrateFederatedNativeSourceLockFailureStageV1(primaryFailure);
         if (stage !== null && workerFailureText !== undefined

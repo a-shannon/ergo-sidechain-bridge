@@ -10,6 +10,8 @@ const v1 = readFileSync(new URL('./run-substrate-federated-native-two-cycle-work
   import.meta.url), 'utf8');
 const v2 = readFileSync(new URL('./run-substrate-federated-native-two-cycle-worker-v2.ts',
   import.meta.url), 'utf8');
+const seam = readFileSync(new URL('../substrate-federated-native-two-cycle-worker-public-failure-seam-v2.ts',
+  import.meta.url), 'utf8');
 
 function callsNamed(source: ts.SourceFile, name: string): readonly ts.CallExpression[] {
   const calls: ts.CallExpression[] = [];
@@ -29,23 +31,30 @@ describe('versioned V2 worker source boundary', () => {
     expect(v1).not.toContain('worker-deposit-funding-stage-v2.json');
     expect(v2).toContain('runSubstrateFederatedNativeTwoCycleWorkerFromArgumentsV2');
     const source = ts.createSourceFile('worker-v2.ts', v2, ts.ScriptTarget.ES2022, true);
+    const shared = ts.createSourceFile('worker-public-failure-seam-v2.ts', seam,
+      ts.ScriptTarget.ES2022, true);
     const root = callsNamed(source, 'runSubstrateFederatedGenesisTargetRootV1');
     expect(root).toHaveLength(1);
     expect(root[0]!.arguments).toHaveLength(2);
-    expect(root[0]!.arguments[1]!.getText(source)).toContain('lastDepositFunding = null');
-    const writes = callsNamed(source, 'writeNewFile');
+    expect(root[0]!.arguments[1]!.getText(source)).toBe('depositFundingLatch.observe');
+    expect(callsNamed(source, 'createNativeTwoCyclePublicFailureLatchV2')).toHaveLength(1);
+    const publisher = callsNamed(source, 'publishNativeTwoCycleWorkerPublicFailureV2');
+    expect(publisher).toHaveLength(1);
+    expect(publisher[0]!.getStart(source)).toBeGreaterThan(root[0]!.getStart(source));
+    expect(seam).toContain('lastDepositFunding = null');
+    const writes = callsNamed(shared, 'writeNewFile');
     const position = (file: string) => {
-      const selected = writes.filter(call => call.arguments[0]?.getText(source)
+      const selected = writes.filter(call => call.arguments[0]?.getText(shared)
         .includes(`'${file}'`));
       expect(selected).toHaveLength(1);
-      return selected[0]!.getStart(source);
+      return selected[0]!.getStart(shared);
     };
     expect(position('worker-failure.json')).toBeLessThan(position('worker-cycle-step.json'));
     expect(position('worker-cycle-step.json'))
       .toBeLessThan(position('worker-deposit-funding-stage-v2.json'));
-    expect(v2).toContain('selectNativeDepositFundingWorkerStageV2(');
-    expect(v2).not.toContain('types.isProxy(primaryFailure)');
-    expect((v2.match(/'worker-deposit-funding-stage-v2\.json'/gu) ?? [])).toHaveLength(3);
+    expect(seam).toContain('selectNativeDepositFundingWorkerStageV2(');
+    expect(v2 + seam).not.toContain('types.isProxy(primaryFailure)');
+    expect((v2 + seam).match(/'worker-deposit-funding-stage-v2\.json'/gu)).toHaveLength(3);
     const firstAbsence = v2.indexOf("if (['result.json', 'failure.json']");
     const preentryGuard = v2.slice(firstAbsence, root[0]!.getStart(source));
     const successAbsence = v2.indexOf(
@@ -55,7 +64,10 @@ describe('versioned V2 worker source boundary', () => {
     expect(preentryGuard).toContain("'worker-deposit-funding-stage-v2.json'");
     expect(firstAbsence).toBeLessThan(root[0]!.getStart(source));
     expect(successAbsence).toBeGreaterThan(root[0]!.getStart(source));
-    expect(successAbsence).toBeLessThan(position('worker-result.json'));
+    const resultWrites = callsNamed(source, 'writeNewFile').filter(call =>
+      call.arguments[0]?.getText(source).includes("'worker-result.json'"));
+    expect(resultWrites).toHaveLength(1);
+    expect(successAbsence).toBeLessThan(resultWrites[0]!.getStart(source));
   });
 
   it('treats an occupied dangling link as present and access errors as indeterminate', () => {
