@@ -216,6 +216,8 @@ const FEDERATED_V3_OWNED_RESERVATION_ROOT_TEST =
   'apps/bridge-daemon/substrate-federated-v3-owned-genesis-reservation-root.test.ts';
 const FEDERATED_NATIVE_TWO_CYCLE_WORKER =
   'scripts/run-substrate-federated-native-two-cycle-worker-v1.ts';
+const FEDERATED_NATIVE_TWO_CYCLE_WORKER_V2 =
+  'scripts/run-substrate-federated-native-two-cycle-worker-v2.ts';
 const FEDERATED_GENESIS_OPERATOR = 'adapters/federated-genesis-operator-v1.ts';
 const FEDERATED_NATIVE_RESERVATION_SIGNING = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
 const FEDERATED_GENESIS_TARGET_OBSERVATION = 'adapters/federated-genesis-target-observation-v1.ts';
@@ -377,6 +379,8 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
   ['substrate-federated-native-deposit-funding-substage-v1.ts', new Set([
     'createNativeDepositFundingSubstageTaggerV1', 'NativeDepositFundingSubstageV1',
   ])],
+  // Only the erased observer type is admitted below; no runtime helper binding.
+  ['substrate-federated-native-deposit-funding-stage-v2.ts', new Set<string>()],
   ['substrate-federated-authority-safe-devnet-process-v1.ts', new Set([
     'createOwnedFederatedGenesisDevnetProcessSessionV1', 'assertOwnedFederatedGenesisDevnetTargetV1',
     'OwnedFederatedGenesisDevnetProcessSessionV1',
@@ -2196,17 +2200,20 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
   ['substrate-federated-native-two-cycle-copied-ergo-selection-v1.ts', new Map([
     ['createNativeTwoCycleWorkerCopiedErgoSelectionV1', new Set([
       'scripts/run-substrate-federated-native-two-cycle-worker-v1.ts',
+      FEDERATED_NATIVE_TWO_CYCLE_WORKER_V2,
       'substrate-federated-native-two-cycle-copied-ergo-selection-v1.test.ts',
       'scripts/run-substrate-federated-native-two-cycle-v1.test.ts',
       'substrate-federated-copied-non-mining-ergo-node-process-v1.test.ts',
     ])],
     ['parseNativeTwoCycleWorkerCopiedErgoSelectionV1', new Set([
       'scripts/run-substrate-federated-native-two-cycle-v1.ts',
+      'scripts/run-substrate-federated-native-two-cycle-v2.ts',
       'substrate-federated-native-two-cycle-copied-ergo-selection-v1.test.ts',
       'scripts/run-substrate-federated-native-two-cycle-v1.test.ts',
     ])],
     ['createNativeTwoCycleParentCopiedErgoSelectionV1', new Set([
       'scripts/run-substrate-federated-native-two-cycle-v1.ts',
+      'scripts/run-substrate-federated-native-two-cycle-v2.ts',
       'substrate-federated-native-two-cycle-copied-ergo-selection-v1.test.ts',
       'scripts/run-substrate-federated-native-two-cycle-v1.test.ts',
       'substrate-federated-copied-non-mining-ergo-node-process-v1.test.ts',
@@ -2218,6 +2225,8 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
     ['readNativeTwoCycleCopiedErgoCaptureManifestV1', new Set([
       'scripts/run-substrate-federated-native-two-cycle-worker-v1.ts',
       'scripts/run-substrate-federated-native-two-cycle-v1.ts',
+      FEDERATED_NATIVE_TWO_CYCLE_WORKER_V2,
+      'scripts/run-substrate-federated-native-two-cycle-v2.ts',
       'substrate-federated-native-two-cycle-copied-ergo-selection-v1.test.ts',
     ])],
     ['prepareNativeTwoCycleCopiedErgoOwnerInputV1', new Set([
@@ -2252,7 +2261,9 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
     ])],
   ])],
   [FEDERATED_GENESIS_TARGET_ROOT, new Map([
-    ['runSubstrateFederatedGenesisTargetRootV1', new Set([FEDERATED_NATIVE_TWO_CYCLE_WORKER])],
+    ['runSubstrateFederatedGenesisTargetRootV1', new Set([
+      FEDERATED_NATIVE_TWO_CYCLE_WORKER, FEDERATED_NATIVE_TWO_CYCLE_WORKER_V2,
+    ])],
   ])],
   [FEDERATED_V3_TARGET_ROOT, new Map([
     ['executeSubstrateFederatedV3FrontierReservationTarget', new Set([
@@ -2780,7 +2791,9 @@ const EXCLUSIVE_RUNTIME_MODULE_IMPORT_OWNERS: ReadonlyMap<
   string,
   ReadonlySet<string>
 > = new Map([
-  [FEDERATED_GENESIS_TARGET_ROOT, new Set([FEDERATED_NATIVE_TWO_CYCLE_WORKER])],
+  [FEDERATED_GENESIS_TARGET_ROOT, new Set([
+    FEDERATED_NATIVE_TWO_CYCLE_WORKER, FEDERATED_NATIVE_TWO_CYCLE_WORKER_V2,
+  ])],
   [FEDERATED_V3_TARGET_ROOT, new Set([
     FEDERATED_V3_TARGET_ROOT_TEST, FEDERATED_V3_OWNED_RESERVATION_ROOT,
   ])],
@@ -2789,6 +2802,7 @@ const EXCLUSIVE_RUNTIME_MODULE_IMPORT_OWNERS: ReadonlyMap<
   ])],
   [FEDERATED_V3_OWNED_RESERVATION_ROOT, new Set([FEDERATED_V3_OWNED_RESERVATION_ROOT_TEST])],
   [FEDERATED_NATIVE_TWO_CYCLE_WORKER, new Set<string>()],
+  [FEDERATED_NATIVE_TWO_CYCLE_WORKER_V2, new Set<string>()],
   [FEDERATED_GENESIS_OPERATOR, new Set([
     FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_NATIVE_RESERVATION_SIGNING, FEDERATED_V3_TARGET_ROOT,
     FEDERATED_V3_OWNED_RESERVATION_ROOT,
@@ -3116,7 +3130,7 @@ function inspectExclusiveRuntimeAuthorityImport(
     && imported.bindings[0]!.imported === 'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments'
     && imported.bindings[0]!.local === imported.bindings[0]!.imported) return [];
   // The native two-cycle worker verifies generated WASM bytes before loading its exclusive root.
-  if (file === 'scripts/run-substrate-federated-native-two-cycle-worker-v1.ts'
+  if ((file === FEDERATED_NATIVE_TWO_CYCLE_WORKER || file === FEDERATED_NATIVE_TWO_CYCLE_WORKER_V2)
     && imported.value === '../apps/bridge-daemon/substrate-federated-genesis-target-root-v1.js'
     && imported.form === 'dynamic-import'
     && imported.bindings.length === 1
@@ -3161,9 +3175,16 @@ function inspectRestrictedImportBindings(
   file: string,
   imported: CollectedModuleSpecifier,
   allowedBindings: ReadonlySet<string>,
+  resolvedTarget?: string,
 ): LayerImportViolation[] {
 
-  if (imported.form !== 'named-import') {
+  const nativeFundingStageImport = file === FEDERATED_GENESIS_TARGET_ROOT
+    && (resolvedTarget === 'substrate-federated-native-deposit-funding-stage-v2.ts'
+      || imported.value === '../../substrate-federated-native-deposit-funding-stage-v2.js');
+  if (imported.form !== 'named-import'
+    || (nativeFundingStageImport
+      && (imported.value !== '../../substrate-federated-native-deposit-funding-stage-v2.js'
+        || imported.bindings.length !== 1))) {
     return [{
       file,
       line: imported.line,
@@ -3179,7 +3200,11 @@ function inspectRestrictedImportBindings(
       && imported.value === '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js'
       && (binding.imported === 'SubstrateFederatedIsolatedDevnetConfirmationProgressV1'
         || binding.imported === 'SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1');
-    if (!allowedBindings.has(binding.imported) && !erasedNativeConfirmationType) {
+    const erasedNativeFundingStageObserver = file === FEDERATED_GENESIS_TARGET_ROOT && imported.typeOnly
+      && imported.value === '../../substrate-federated-native-deposit-funding-stage-v2.js'
+      && binding.imported === 'NativeDepositFundingStageObserverV2';
+    if (!allowedBindings.has(binding.imported) && !erasedNativeConfirmationType
+      && !erasedNativeFundingStageObserver) {
       violations.push({
         file,
         line: imported.line,
@@ -3289,6 +3314,11 @@ const FIXED_CAMPAIGN_SCRIPT_EXPORTS = new Map([
     new Set(['runSubstrateFederatedNativeTwoCycleWorkerFromArguments'])],
   ['scripts/run-substrate-federated-native-two-cycle-v1.ts',
     new Set(['runSubstrateFederatedNativeTwoCycleFromArguments'])],
+  [FEDERATED_NATIVE_TWO_CYCLE_WORKER_V2,
+    new Set(['copiedSelectionEntryExists', 'runSubstrateFederatedNativeTwoCycleWorkerFromArgumentsV2'])],
+  ['scripts/run-substrate-federated-native-two-cycle-v2.ts',
+    new Set(['copiedSelectionEntryExists', 'tryPublishNativeDepositFundingParentStageV2',
+      'runSubstrateFederatedNativeTwoCycleFromArgumentsV2'])],
   ['scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts',
     new Set(['runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments',
       'formatSubstrateFederatedIsolatedDevnetTrackerV2CampaignFailure'])],
@@ -3970,6 +4000,7 @@ export function inspectLayerImports(
               file,
               imported,
               allowedBindings,
+              resolved,
             ));
           }
           continue;

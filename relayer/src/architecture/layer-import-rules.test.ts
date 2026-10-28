@@ -40,6 +40,17 @@ const FEDERATED_V3_OWNED_RESERVATION_ROOT_TEST =
   'apps/bridge-daemon/substrate-federated-v3-owned-genesis-reservation-root.test.ts';
 const FEDERATED_GENESIS_OPERATOR = 'adapters/federated-genesis-operator-v1.ts';
 const FEDERATED_GENESIS_OPERATOR_SPECIFIER = '../../adapters/federated-genesis-operator-v1.js';
+const NATIVE_TWO_CYCLE_PARENT_V2 = 'scripts/run-substrate-federated-native-two-cycle-v2.ts';
+const NATIVE_TWO_CYCLE_WORKER_V2 = 'scripts/run-substrate-federated-native-two-cycle-worker-v2.ts';
+const NATIVE_COPIED_SELECTION_MODULE = 'substrate-federated-native-two-cycle-copied-ergo-selection-v1.ts';
+const NATIVE_COPIED_SELECTION_SPECIFIER = '../substrate-federated-native-two-cycle-copied-ergo-selection-v1.js';
+const NATIVE_V2_COPIED_SELECTION_IMPORTS = [
+  ['createNativeTwoCycleParentCopiedErgoSelectionV1', NATIVE_TWO_CYCLE_PARENT_V2],
+  ['parseNativeTwoCycleWorkerCopiedErgoSelectionV1', NATIVE_TWO_CYCLE_PARENT_V2],
+  ['readNativeTwoCycleCopiedErgoCaptureManifestV1', NATIVE_TWO_CYCLE_PARENT_V2],
+  ['createNativeTwoCycleWorkerCopiedErgoSelectionV1', NATIVE_TWO_CYCLE_WORKER_V2],
+  ['readNativeTwoCycleCopiedErgoCaptureManifestV1', NATIVE_TWO_CYCLE_WORKER_V2],
+] as const;
 
 function staticAppFixture(file: string, source: string): Record<string, string> {
   const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.ES2022, true);
@@ -191,6 +202,227 @@ describe('layer import rules', () => {
       expect(inspect(staticAppFixture(caller, `import { ${binding} } from '${specifier}'; ${binding}([]);`))
         .map(item => item.message)).toContain(`exclusive runtime module import has the wrong owner: ${specifier}`);
     }
+  });
+
+  describe.each(NATIVE_V2_COPIED_SELECTION_IMPORTS)(
+    'V2 copied-selection owner for %s in %s', (binding, owner) => {
+      const module = NATIVE_COPIED_SELECTION_MODULE;
+      const specifier = NATIVE_COPIED_SELECTION_SPECIFIER;
+      it('admits the exact owner and direct call', () => {
+        expect(inspect({ [module]: 'export {};',
+          [owner]: `import { ${binding} } from '${specifier}'; ${binding}();`,
+        })).toEqual([]);
+      });
+      it('rejects a foreign owner', () => {
+        expect(inspect({ [module]: 'export {};',
+          'scripts/foreign.ts': `import { ${binding} } from '${specifier}'; ${binding}();`,
+        }).map(item => item.message)).toContain(
+          `exclusive authority import has the wrong owner: ${specifier}#${binding}`);
+      });
+      it('rejects an aliased binding', () => {
+        expect(inspect({ [module]: 'export {};',
+          [owner]: `import { ${binding} as selected } from '${specifier}'; selected();`,
+        }).map(item => item.message)).toContain(
+          `exclusive authority import must not be aliased: ${specifier}#${binding}`);
+      });
+      it.each([
+        ['namespace', `import * as selection from '${specifier}';`],
+        ['dynamic', `const { ${binding} } = await import('${specifier}');`],
+        ['require', `const { ${binding} } = require('${specifier}');`],
+        ['re-export', `export { ${binding} } from '${specifier}';`],
+      ])('rejects %s access', (_fault, source) => {
+        expect(inspect({ [module]: 'export {};', [owner]: source }).map(item => item.message))
+          .toContain(`exclusive authority module must use named runtime imports: ${specifier}`);
+      });
+      it.each([
+        ['assignment', `const escaped = ${binding};`],
+        ['argument', `capture(${binding});`],
+        ['return', `function expose() { return ${binding}; }`],
+        ['local re-export', `export { ${binding} };`],
+      ])('rejects a binding escape by %s', (_fault, suffix) => {
+        expect(inspect({ [module]: 'export {};',
+          [owner]: `import { ${binding} } from '${specifier}'; ${suffix}`,
+        }).map(item => item.message)).toContain(
+          `fixed campaign capability must only be called directly: ${binding}`);
+      });
+    },
+  );
+
+  it.each([
+    ['createNativeTwoCycleWorkerCopiedErgoSelectionV1', NATIVE_TWO_CYCLE_PARENT_V2],
+    ['createNativeTwoCycleParentCopiedErgoSelectionV1', NATIVE_TWO_CYCLE_WORKER_V2],
+    ['parseNativeTwoCycleWorkerCopiedErgoSelectionV1', NATIVE_TWO_CYCLE_WORKER_V2],
+    ['parseNativeTwoCycleParentCopiedErgoSelectionV1', NATIVE_TWO_CYCLE_PARENT_V2],
+    ['parseNativeTwoCycleParentCopiedErgoSelectionV1', NATIVE_TWO_CYCLE_WORKER_V2],
+    ['prepareNativeTwoCycleCopiedErgoOwnerInputV1', NATIVE_TWO_CYCLE_PARENT_V2],
+    ['prepareNativeTwoCycleCopiedErgoOwnerInputV1', NATIVE_TWO_CYCLE_WORKER_V2],
+  ])('rejects the unowned copied-selection role %s in %s', (binding, owner) => {
+    const specifier = NATIVE_COPIED_SELECTION_SPECIFIER;
+    expect(inspect({ [NATIVE_COPIED_SELECTION_MODULE]: 'export {};',
+      [owner]: `import { ${binding} } from '${specifier}'; ${binding}();`,
+    }).map(item => item.message)).toContain(
+      `exclusive authority import has the wrong owner: ${specifier}#${binding}`);
+  });
+
+  describe('V2 contained native root', () => {
+    const worker = NATIVE_TWO_CYCLE_WORKER_V2;
+    const specifier = '../apps/bridge-daemon/substrate-federated-genesis-target-root-v1.js';
+    const binding = 'runSubstrateFederatedGenesisTargetRootV1';
+    it.each([
+      ['static', `import { ${binding} } from '${specifier}';`],
+      ['delayed', `const { ${binding} } = await import('${specifier}');`],
+    ])('admits the exact %s binding and direct call', (_form, declaration) => {
+      expect(inspect({ [FEDERATED_GENESIS_TARGET_ROOT]: 'export {};',
+        [worker]: `${declaration} await ${binding}({});`,
+      })).toEqual([]);
+    });
+    it.each([
+      NATIVE_TWO_CYCLE_PARENT_V2, 'scripts/foreign.ts', 'adapters/foreign.ts', 'foreign.ts',
+    ])('rejects a foreign root owner %s', owner => {
+      const relative = `./${path.posix.relative(path.posix.dirname(owner), FEDERATED_GENESIS_TARGET_ROOT)
+        .replace(/\.ts$/, '.js')}`;
+      expect(inspect(staticAppFixture(owner, `import { ${binding} } from '${relative}';`))
+        .map(item => item.message)).toContain(
+        `exclusive authority import has the wrong owner: ${relative}#${binding}`);
+    });
+    it('rejects a static alias', () => {
+      expect(inspect({ [FEDERATED_GENESIS_TARGET_ROOT]: 'export {};',
+        [worker]: `import { ${binding} as root } from '${specifier}'; root({});`,
+      }).map(item => item.message)).toContain(
+        `exclusive authority import must not be aliased: ${specifier}#${binding}`);
+    });
+    it.each([
+      ['namespace', `import * as root from '${specifier}';`],
+      ['re-export', `export { ${binding} } from '${specifier}';`],
+      ['require', `const { ${binding} } = require('${specifier}');`],
+      ['dynamic namespace', `const root = await import('${specifier}');`],
+      ['dynamic alias', `const { ${binding}: root } = await import('${specifier}');`],
+      ['dynamic extra', `const { ${binding}, extra } = await import('${specifier}');`],
+      ['dynamic wrong binding', `const { extra } = await import('${specifier}');`],
+      ['dynamic alternate path', `const { ${binding} } = await import('../apps/bridge-daemon/./substrate-federated-genesis-target-root-v1.js');`],
+    ])('rejects %s root access', (_fault, source) => {
+      const importedSpecifier = source.includes('/./')
+        ? '../apps/bridge-daemon/./substrate-federated-genesis-target-root-v1.js' : specifier;
+      expect(inspect({ [FEDERATED_GENESIS_TARGET_ROOT]: 'export {};', [worker]: source })
+        .map(item => item.message)).toContain(
+        `exclusive authority module must use named runtime imports: ${importedSpecifier}`);
+    });
+    describe.each([
+      ['static', `import { ${binding} } from '${specifier}';`],
+      ['delayed', `const { ${binding} } = await import('${specifier}');`],
+    ])('%s root binding', (_form, declaration) => {
+      it.each([
+        ['assignment', `const escaped = ${binding};`],
+        ['argument', `capture(${binding});`],
+        ['return', `function expose() { return ${binding}; }`],
+        ['re-export', `export { ${binding} };`],
+      ])('rejects escape by %s', (_fault, suffix) => {
+        expect(inspect({ [FEDERATED_GENESIS_TARGET_ROOT]: 'export {};',
+          [worker]: `${declaration} ${suffix}`,
+        }).map(item => item.message)).toContain(
+          `fixed campaign capability must only be called directly: ${binding}`);
+      });
+    });
+  });
+
+  describe('V2 native worker module import boundary', () => {
+    const binding = 'runSubstrateFederatedNativeTwoCycleWorkerFromArgumentsV2';
+    describe.each([NATIVE_TWO_CYCLE_PARENT_V2, 'scripts/foreign.ts', 'apps/bridge-daemon/foreign.ts'])(
+      'caller %s', caller => {
+        const specifier = `./${path.posix.relative(path.posix.dirname(caller), NATIVE_TWO_CYCLE_WORKER_V2)
+          .replace(/\.ts$/, '.js')}`;
+        it.each([
+          ['named', `import { ${binding} } from '${specifier}';`],
+          ['namespace', `import * as worker from '${specifier}';`],
+          ['dynamic', `const { ${binding} } = await import('${specifier}');`],
+          ['require', `const worker = require('${specifier}');`],
+          ['re-export', `export { ${binding} } from '${specifier}';`],
+        ])('rejects %s runtime import', (_form, source) => {
+          expect(inspect({ [NATIVE_TWO_CYCLE_WORKER_V2]: 'export {};', [caller]: source })
+            .map(item => item.message)).toContain(
+            `exclusive runtime module import has the wrong owner: ${specifier}`);
+        });
+      },
+    );
+  });
+
+  it.each([
+    [NATIVE_TWO_CYCLE_PARENT_V2, ['copiedSelectionEntryExists',
+      'tryPublishNativeDepositFundingParentStageV2', 'runSubstrateFederatedNativeTwoCycleFromArgumentsV2']],
+    [NATIVE_TWO_CYCLE_WORKER_V2, ['copiedSelectionEntryExists',
+      'runSubstrateFederatedNativeTwoCycleWorkerFromArgumentsV2']],
+  ] as const)('limits V2 native invocation exports in %s', (file, bindings) => {
+    expect(inspect({ [file]: bindings.map(binding => `export function ${binding}() {}`).join('\n') }))
+      .toEqual([]);
+    expect(inspect({ [file]: 'export function expose() {}' }).map(item => item.message))
+      .toContain('reviewed app root export is not allowlisted: expose');
+  });
+
+  it.each([NATIVE_TWO_CYCLE_PARENT_V2, NATIVE_TWO_CYCLE_WORKER_V2])(
+    'accepts actual V2 native script source without executing it: %s', file => {
+      const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+      const files = staticAppFixture(file, source);
+      files[FEDERATED_GENESIS_TARGET_ROOT] = 'export {};';
+      expect(inspect(files)).toEqual([]);
+    },
+  );
+
+  describe('root V2 deposit funding observer import', () => {
+    const module = 'substrate-federated-native-deposit-funding-stage-v2.ts';
+    const specifier = '../../substrate-federated-native-deposit-funding-stage-v2.js';
+    const binding = 'NativeDepositFundingStageObserverV2';
+    it.each([
+      `import type { ${binding} } from '${specifier}';`,
+      `import { type ${binding} } from '${specifier}';`,
+    ])('admits only the erased named observer: %s', source => {
+      expect(inspect({ [module]: 'export {};', [FEDERATED_GENESIS_TARGET_ROOT]: source })).toEqual([]);
+    });
+    it('rejects an erased observer alias', () => {
+      expect(inspect({ [module]: 'export {};',
+        [FEDERATED_GENESIS_TARGET_ROOT]: `import type { ${binding} as Observer } from '${specifier}';`,
+      }).map(item => item.message)).toContain(
+        `restricted capability import binding must not be aliased: ${specifier}#${binding}`);
+    });
+    it.each([
+      binding, 'NATIVE_DEPOSIT_FUNDING_STAGE_V2_SCHEMA', 'createNativeDepositFundingStageV2',
+      'encodeNativeDepositFundingStageV2', 'parseNativeDepositFundingStageV2',
+      'createNativeDepositFundingWorkerStageV2', 'parseNativeDepositFundingWorkerStageV2',
+      'selectNativeDepositFundingWorkerStageV2', 'createNativeDepositFundingParentStageV2',
+      'parseNativeDepositFundingParentStageV2',
+    ])('rejects runtime helper binding %s', imported => {
+      expect(inspect({ [module]: 'export {};',
+        [FEDERATED_GENESIS_TARGET_ROOT]: `import { ${imported} } from '${specifier}';`,
+      }).map(item => item.message)).toContain(
+        `restricted capability import binding is not allowlisted: ${specifier}#${imported}`);
+    });
+    it.each([
+      ['empty runtime import', `import {} from '${specifier}';`],
+      ['empty erased import', `import type {} from '${specifier}';`],
+      ['extra erased binding', `import type { ${binding}, NativeDepositFundingStageV2 } from '${specifier}';`],
+      ['duplicate erased binding', `import type { ${binding}, ${binding} } from '${specifier}';`],
+      ['type namespace', `import type * as stage from '${specifier}';`],
+      ['type re-export', `export type { ${binding} } from '${specifier}';`],
+      ['namespace', `import * as stage from '${specifier}';`],
+      ['dynamic', `const stage = await import('${specifier}');`],
+      ['require', `const stage = require('${specifier}');`],
+      ['runtime re-export', `export { createNativeDepositFundingStageV2 } from '${specifier}';`],
+    ])('rejects %s helper access', (_fault, source) => {
+      expect(inspect({ [module]: 'export {};', [FEDERATED_GENESIS_TARGET_ROOT]: source })
+        .map(item => item.message)).toContain(
+        `restricted capability import must use reviewed named bindings: ${specifier}`);
+    });
+    it.each([
+      ['empty runtime import', 'import {}'],
+      ['empty erased import', 'import type {}'],
+      ['erased observer import', `import type { ${binding} }`],
+      ['runtime observer import', `import { ${binding} }`],
+    ])('rejects an alternate helper path with %s', (_fault, declaration) => {
+      const alternate = '../.././substrate-federated-native-deposit-funding-stage-v2.js';
+      expect(inspect({ [module]: 'export {};',
+        [FEDERATED_GENESIS_TARGET_ROOT]: `${declaration} from '${alternate}';`,
+      }).map(item => item.message)).toContain(
+        `restricted capability import must use reviewed named bindings: ${alternate}`);
+    });
   });
 
   it('reserves source-locked WASM build execution to its builder and direct tests', () => {
