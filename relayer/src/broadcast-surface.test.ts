@@ -510,7 +510,12 @@ describe('broadcast surface isolation', () => {
     expect(filesImporting(
       sources,
       'discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1',
-    )).toEqual(['apps/bridge-daemon/substrate-federated-genesis-target-root-v1.ts', executionRoot, managedSetupV2]);
+    )).toEqual([
+      'apps/bridge-daemon/substrate-federated-genesis-target-root-v1.ts',
+      executionRoot,
+      managedSetupV2,
+      'apps/bridge-daemon/substrate-federated-v3-owned-genesis-reservation-root.ts',
+    ]);
     expect(filesImporting(
       sources,
       'runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1',
