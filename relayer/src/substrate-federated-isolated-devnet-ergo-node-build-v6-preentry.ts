@@ -24,7 +24,7 @@ import {
 const MAX_OUTPUT_FILES = 50_000;
 const MAX_OUTPUT_DIRECTORIES = 4_096;
 const MAX_OUTPUT_BYTES = 536_870_912;
-const MAX_MEMBERSHIP_BYTES = 4_194_304;
+const MAX_MEMBERSHIP_BYTES = 16_777_216;
 
 export interface V6BuildPreentryInput extends V6NodeBuildPreflightInput,
   Omit<V6DependencyCaptureInput, 'bridgeRoot' | 'lockSelection'> {

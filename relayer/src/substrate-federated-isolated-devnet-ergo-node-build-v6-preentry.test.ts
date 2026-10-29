@@ -57,6 +57,16 @@ describe('V6 owned build preentry is source-only and selected explicitly', () =>
     expect(selected.maxMembershipBytes).toBe(4_194_304);
   });
 
+  it('accepts the measured membership and the existing absolute ceiling only when selected', () => {
+    for (const selectedBytes of [9_746_951, 16_777_216]) {
+      const selected = selectV6BuildPreentryInputNonAuthorizing({
+        ...candidate(), maxMembershipBytes: selectedBytes,
+      });
+      expect(selected.maxMembershipBytes).toBe(selectedBytes);
+      expect(selected.caps.total).toEqual(cap);
+    }
+  });
+
   it('refuses a legacy literal or historical sibling receipt before file reads', async () => {
     const input = candidate();
     await expect(inspectV6BuildPreentry({
@@ -86,8 +96,17 @@ describe('V6 owned build preentry is source-only and selected explicitly', () =>
         ...input, caps: { ...caps, total: changed },
       })).toThrow(/approved V6 output cap differs/u);
     }
+  });
+
+  it.each([
+    ['zero', 0],
+    ['negative', -1],
+    ['fractional', 1.5],
+    ['unsafe integer', Number.MAX_SAFE_INTEGER + 1],
+    ['above ceiling', 16_777_217],
+  ] as const)('refuses %s membership cap before file reads', (_label, selectedBytes) => {
     expect(() => selectV6BuildPreentryInputNonAuthorizing({
-      ...input, maxMembershipBytes: 4_194_305,
+      ...candidate(), maxMembershipBytes: selectedBytes,
     })).toThrow(/explicit V6 membership cap differs/u);
   });
 
