@@ -29,6 +29,10 @@ export interface V4PhysicalPlan {
   readonly directories: ReadonlySet<string>;
   readonly children: ReadonlyMap<string, ReadonlySet<string>>;
 }
+export interface V4PhysicalPlanSnapshot {
+  readonly canonical: string;
+  readonly sha256Hex: string;
+}
 export interface V4PhysicalObservation {
   readonly physicalSourceDigestHex: string;
   readonly physicalSourceFileCount: number;
@@ -132,6 +136,75 @@ export function buildV4PhysicalPlan(
   for (const directory of directories) childrenAt(children, directory);
   if (children.get('')!.has('.git')) fail('Git metadata conflicts with source tree');
   return { files, directories, children };
+}
+
+// A readonly Map/Set type does not prevent mutation across the builder's awaits.
+// Keep an independent string copy of the entire allowlist, including child sets.
+export function snapshotV4PhysicalPlan(plan: Readonly<V4PhysicalPlan>): V4PhysicalPlanSnapshot {
+  if (!(plan.files instanceof Map) || !(plan.directories instanceof Set)
+      || !(plan.children instanceof Map) || plan.files.size !== 737) {
+    fail('physical plan collections or file count differ');
+  }
+  const files = [...plan.files].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+  const derivedDirectories = new Set<string>(['']);
+  const folded = new Map<string, string>();
+  const unique = (path: string): void => {
+    const prior = folded.get(path.toLowerCase());
+    if (prior !== undefined && prior !== path) fail('case-colliding physical plan path');
+    folded.set(path.toLowerCase(), path);
+  };
+  for (const [path, blob] of files) {
+    if (typeof path !== 'string' || !pathSafe(path) || path.toLowerCase() === '.git'
+        || path.toLowerCase().startsWith('.git/')
+        || typeof blob !== 'string' || !/^[0-9a-f]{40}$/u.test(blob)) {
+      fail('physical plan file differs');
+    }
+    unique(path);
+    const parts = path.split('/');
+    for (let i = 1; i < parts.length; i++) {
+      const directory = parts.slice(0, i).join('/');
+      if (plan.files.has(directory)) fail('physical plan file/directory prefix conflict');
+      unique(directory);
+      derivedDirectories.add(directory);
+    }
+  }
+  const directories = [...derivedDirectories].sort();
+  if (plan.directories.size !== directories.length
+      || directories.some(path => !plan.directories.has(path))) {
+    fail('physical plan directory membership differs');
+  }
+  const expectedChildren = new Map<string, Set<string>>(
+    directories.map(path => [path, new Set<string>()]));
+  for (const path of [...files.map(([name]) => name), ...directories.filter(Boolean)]) {
+    const separator = path.lastIndexOf('/');
+    const parent = separator < 0 ? '' : path.slice(0, separator);
+    expectedChildren.get(parent)!.add(path.slice(separator + 1));
+  }
+  if (plan.children.size !== expectedChildren.size) fail('physical plan child map differs');
+  const children = directories.map(directory => {
+    const actual = plan.children.get(directory);
+    const expected = expectedChildren.get(directory)!;
+    if (!(actual instanceof Set) || actual.size !== expected.size
+        || [...expected].some(name => !actual.has(name))) {
+      fail('physical plan children differ');
+    }
+    return [directory, [...expected].sort()] as const;
+  });
+  const canonical = JSON.stringify({ files, directories, children }) + '\n';
+  return Object.freeze({ canonical,
+    sha256Hex: createHash('sha256').update(canonical, 'utf8').digest('hex') });
+}
+
+export function assertSameV4PhysicalPlanSnapshot(
+  baseline: Readonly<V4PhysicalPlanSnapshot>, plan: Readonly<V4PhysicalPlan>,
+): void {
+  if (typeof baseline.canonical !== 'string' || typeof baseline.sha256Hex !== 'string'
+      || createHash('sha256').update(baseline.canonical, 'utf8').digest('hex')
+        !== baseline.sha256Hex) fail('physical plan snapshot differs');
+  const current = snapshotV4PhysicalPlan(plan);
+  if (current.canonical !== baseline.canonical || current.sha256Hex !== baseline.sha256Hex) {
+    fail('physical plan changed after snapshot');
+  }
 }
 
 function actualPath(root: string, relative: string): string {
@@ -406,17 +479,22 @@ export async function inspectV4PhysicalSource(
   baseline: Readonly<V4PhysicalMetadata>,
   betweenPasses: () => Promise<void>,
 ): Promise<V4PhysicalObservation> {
+  const planSnapshot = snapshotV4PhysicalPlan(plan);
   const before = await captureV4PhysicalMetadata(root);
+  assertSameV4PhysicalPlanSnapshot(planSnapshot, plan);
   assertSameV4PhysicalMetadata(baseline, before);
   const first = scanV4PhysicalSourcePass(root, plan);
   if (before.sourceMembership !== first.membership) fail('first reparse membership differs');
   const middle = await captureV4PhysicalMetadata(root);
+  assertSameV4PhysicalPlanSnapshot(planSnapshot, plan);
   assertSameV4PhysicalMetadata(baseline, middle);
   if (middle.sourceMembership !== first.membership) fail('middle reparse membership differs');
   await betweenPasses();
+  assertSameV4PhysicalPlanSnapshot(planSnapshot, plan);
   const second = scanV4PhysicalSourcePass(root, plan);
   if (middle.sourceMembership !== second.membership) fail('second reparse membership differs');
   const after = await captureV4PhysicalMetadata(root);
+  assertSameV4PhysicalPlanSnapshot(planSnapshot, plan);
   assertSameV4PhysicalMetadata(baseline, after);
   if (after.sourceMembership !== second.membership) fail('final reparse membership differs');
   compareV4PhysicalPasses(first, second);

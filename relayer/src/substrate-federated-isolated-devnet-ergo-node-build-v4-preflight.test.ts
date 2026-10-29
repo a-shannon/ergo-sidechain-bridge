@@ -5,13 +5,51 @@ import { describe, expect, it } from 'vitest';
 
 import { readHistoricalConsensusSourceLockBytes } from './historical-consensus-source-lock.test-helper.js';
 import { inspectV4NodeBuildLock } from './substrate-federated-isolated-devnet-ergo-node-build-v4-lock.js';
-import { derivePinnedV4BuildSbtOverlay } from './substrate-federated-isolated-devnet-ergo-node-build-v4-preflight.js';
+import { derivePinnedV4BuildSbtOverlay, inspectV4NodeBuildGitAfterTarget,
+  inspectV4NodeBuildPreflight, inspectV4NodeBuildPreflightWithPlan,
+  inspectV6NodeBuildGitAfterTarget, inspectV6NodeBuildPreflightWithPlan,
+  type V4NodeBuildPreflightInput,
+  type V6NodeBuildPreflightInput } from
+  './substrate-federated-isolated-devnet-ergo-node-build-v4-preflight.js';
+import { inspectSelectedV6OrLegacyBuildLock } from
+  './substrate-federated-isolated-devnet-ergo-node-build-v6-lock-selection.js';
 
 const bridgeRoot = resolve(import.meta.dirname, '..', '..');
 const consensusBytes = readHistoricalConsensusSourceLockBytes();
+const currentConsensusBytes = readFileSync(resolve(bridgeRoot,
+  'sources', 'consensus-source-lock.json'));
 const jobBytes = readFileSync(resolve(import.meta.dirname, 'scripts', 'windows-job-process.ps1'));
 
 describe('V4 build preflight static pins', () => {
+  it('refuses runtime V6 injection through every legacy entry before file reads', async () => {
+    const forged = { lockSelection: 'v6-current' } as unknown as V4NodeBuildPreflightInput;
+    await expect(inspectV4NodeBuildPreflight(forged))
+      .rejects.toThrow(/V4\/V5 preflight explicit lock selection/u);
+    await expect(inspectV4NodeBuildPreflightWithPlan(forged))
+      .rejects.toThrow(/V4\/V5 preflight explicit lock selection/u);
+    await expect(inspectV4NodeBuildGitAfterTarget(forged))
+      .rejects.toThrow(/V4\/V5 preflight explicit lock selection/u);
+    const mislabeled = { lockSelection: 'v4' } as unknown as V6NodeBuildPreflightInput;
+    await expect(inspectV6NodeBuildPreflightWithPlan(mislabeled))
+      .rejects.toThrow(/V6 preflight requires explicit current/u);
+    await expect(inspectV6NodeBuildGitAfterTarget(mislabeled))
+      .rejects.toThrow(/V6 post-target Git check requires current/u);
+  });
+
+  it('pairs only the explicit V6 lock with the current consensus before checkout', () => {
+    const selected = inspectSelectedV6OrLegacyBuildLock(bridgeRoot, 'v6-current');
+    expect(derivePinnedV4BuildSbtOverlay(selected.lock, currentConsensusBytes,
+      jobBytes)).toMatchObject({
+      bytes: 20_585,
+      patchedBlob: '23f9dbe303639b4e42cb85b9c4ef220b0a8aff78',
+    });
+    expect(() => derivePinnedV4BuildSbtOverlay(selected.lock, consensusBytes,
+      jobBytes)).toThrow(/does not match the pinned build lock/u);
+    const historical = inspectV4NodeBuildLock(bridgeRoot);
+    expect(() => derivePinnedV4BuildSbtOverlay(historical.lock,
+      currentConsensusBytes, jobBytes)).toThrow(/does not match the pinned build lock/u);
+  });
+
   it('derives the sole build.sbt overlay from the pinned V4 lock and exact support bytes', () => {
     const pinned = inspectV4NodeBuildLock(bridgeRoot);
     expect(derivePinnedV4BuildSbtOverlay(pinned.lock, consensusBytes, jobBytes)).toEqual({

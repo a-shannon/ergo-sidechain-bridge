@@ -9,12 +9,15 @@ import type { CheckoutObservation } from './consensus-source-baseline.js';
 import {
   assertV4ErgoSourceObservation,
   type V4BuildSbtOverlayPin,
+  type V4ErgoSourceSelection,
 } from './substrate-federated-isolated-devnet-ergo-node-build-v4-source.js';
 import {
   captureV4PhysicalMetadata,
   buildV4PhysicalPlan,
   inspectV4PhysicalSource,
   withPinnedV4BoundedChildTools,
+  type V4PhysicalPlan,
+  type V4PhysicalObservation,
 } from './substrate-federated-isolated-devnet-ergo-node-build-v4-physical.js';
 
 const EXPECTED_HEAD = '2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1';
@@ -22,7 +25,11 @@ const EXPECTED_TREE = '9f8d571534b21eec660ff21177adf725e50ddf02';
 const EXPECTED_BUILD_BASE = '2fb3ba62fb92ff45e45a3639c2dace53f31ed86d';
 const EXPECTED_BUILD_PATCH = '7e35f6295070996d5ae0f6fc22f10737e26ee4cd';
 const EXPECTED_BUILD_SHA256 = 'd67f4695b35a6ea0e1a3a9db8bcb7caa873551644cdc81c4ea72ec7a482d4935';
+const SOURCE59_BUILD_PATCH = '23f9dbe303639b4e42cb85b9c4ef220b0a8aff78';
+const SOURCE59_BUILD_SHA256 =
+  'a0e138c7f4379b1c42e004d4e776a81e24f4b7757d09ceeb7488bc3951a4db03';
 const EXPECTED_CONSENSUS_SHA256 = '82e96dca999244f145a67381e0037770dfd93ad61ecb29d3063a6e5ea426a8b6';
+const V6_CONSENSUS_SHA256 = '443fc2029710f85eb487fa5566e5395160ab946d65abce73380e046fd311cb32';
 const EXPECTED_GIT_SHA256 = '81ef35ae005ca9318018d18e3327578ce939fb99feaad6b2d7c8ab15f3de8db5';
 const MAX_GIT_OUTPUT_BYTES = 1_048_576;
 const MAX_RAW_FILE_BYTES = 33_554_432;
@@ -54,6 +61,7 @@ export interface V4RawCheckoutInput {
   readonly gitExecutablePath: string;
   readonly consensusSourceLockBytes: Buffer;
   readonly overlay: Readonly<V4BuildSbtOverlayPin>;
+  readonly lockSelection?: V4ErgoSourceSelection;
 }
 
 export interface V4RawCheckoutObservation {
@@ -67,6 +75,19 @@ export interface V4RawCheckoutObservation {
   readonly physicalSourceFileCount: number;
   readonly physicalSourceDirectoryCount: number;
   readonly physicalSourceTotalBytes: number;
+}
+
+export interface V4RawCheckoutWithPlan {
+  readonly observation: Readonly<V4RawCheckoutObservation>;
+  readonly physicalPlan: Readonly<V4PhysicalPlan>;
+}
+
+export interface V4PostTargetGitObservation {
+  readonly head: typeof EXPECTED_HEAD;
+  readonly tree: typeof EXPECTED_TREE;
+  readonly indexSha256Hex: string;
+  readonly status: string;
+  readonly sourceIdentityDigestHex: string;
 }
 
 function fail(message: string): never { throw new Error('V4 raw checkout: ' + message); }
@@ -240,16 +261,33 @@ export function parseV4GitSnapshot(
   return { headBuildSbtBlob: build[0].objectId, status: expected.join('\n'), headTreeEntries: byPath };
 }
 
-function declaredFiles(consensusBytes: Buffer, overlay: Readonly<V4BuildSbtOverlayPin>): DeclaredFile[] {
-  if (sha256(consensusBytes) !== EXPECTED_CONSENSUS_SHA256) fail('consensus source lock bytes differ');
+// This pure guard grants no checkout or build authority by itself.
+export function assertSelectedV4BuildSbtOverlay(
+  overlay: Readonly<V4BuildSbtOverlayPin>,
+  lockSelection: V4ErgoSourceSelection = 'v4',
+): void {
+  const selected = lockSelection === 'v4'
+    ? { blob: EXPECTED_BUILD_PATCH, bytes: 13660, sha: EXPECTED_BUILD_SHA256 }
+    : lockSelection === 'v5-source59' || lockSelection === 'v6-current'
+      ? { blob: SOURCE59_BUILD_PATCH, bytes: 20585, sha: SOURCE59_BUILD_SHA256 }
+      : fail('unknown explicit overlay lock selection');
+  if (overlay.path !== 'build.sbt' || overlay.status !== 'modified'
+      || overlay.baseBlob !== EXPECTED_BUILD_BASE
+      || overlay.patchedBlob !== selected.blob
+      || overlay.bytes !== selected.bytes || overlay.sha256Hex !== selected.sha) {
+    fail('overlay differs from explicitly selected pinned bytes');
+  }
+}
+
+function declaredFiles(consensusBytes: Buffer, overlay: Readonly<V4BuildSbtOverlayPin>,
+  lockSelection: V4ErgoSourceSelection | undefined): DeclaredFile[] {
+  const selectedSha = lockSelection === 'v6-current'
+    ? V6_CONSENSUS_SHA256 : EXPECTED_CONSENSUS_SHA256;
+  if (sha256(consensusBytes) !== selectedSha) fail('consensus source lock bytes differ');
   const parsed = JSON.parse(text(consensusBytes)) as { ergoNode?: { files?: unknown } };
   const files = parsed.ergoNode?.files;
   if (!Array.isArray(files) || files.length !== 8) fail('consensus declaration count differs');
-  if (overlay.path !== 'build.sbt' || overlay.status !== 'modified'
-      || overlay.baseBlob !== EXPECTED_BUILD_BASE || overlay.patchedBlob !== EXPECTED_BUILD_PATCH
-      || overlay.bytes !== 13660 || overlay.sha256Hex !== EXPECTED_BUILD_SHA256) {
-    fail('V4 overlay differs from pinned bytes');
-  }
+  assertSelectedV4BuildSbtOverlay(overlay, lockSelection);
   const declarations = files.map(value => {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) fail('invalid consensus declaration');
     const file = value as Record<string, unknown>;
@@ -371,14 +409,25 @@ function absent(path: string): void {
   fail('unsupported Git indirection or alternates exists');
 }
 
-export async function inspectV4RawErgoCheckout(input: Readonly<V4RawCheckoutInput>): Promise<V4RawCheckoutObservation> {
+async function inspectV4RawErgoCheckoutDetailed(
+  input: Readonly<V4RawCheckoutInput>, mode: 'raw',
+): Promise<V4RawCheckoutWithPlan>;
+async function inspectV4RawErgoCheckoutDetailed(
+  input: Readonly<V4RawCheckoutInput>, mode: 'post-target',
+): Promise<V4PostTargetGitObservation>;
+async function inspectV4RawErgoCheckoutDetailed(
+  input: Readonly<V4RawCheckoutInput>, mode: 'raw' | 'post-target',
+): Promise<V4RawCheckoutWithPlan | V4PostTargetGitObservation> {
   if (process.platform !== 'win32' || !isAbsolute(input.sourcePath) || !isAbsolute(input.gitExecutablePath)) {
     fail('Windows absolute source and Git paths are required');
   }
   const source = resolve(input.sourcePath);
   const git = resolve(input.gitExecutablePath);
   const assertGitHome = prepareV4GitHome(source, input.gitHomePath);
-  const physicalBaseline = await captureV4PhysicalMetadata(source);
+  // The exact raw-source inventory rejects a generated target. The post-target
+  // branch retains the same Git and declared-source closure; its caller owns
+  // the separate physical capture of the generated product.
+  const physicalBaseline = mode === 'raw' ? await captureV4PhysicalMetadata(source) : undefined;
   directParents(source);
   const sourceBefore = lstatSync(source, { bigint: true });
   if (!sourceBefore.isDirectory() || sourceBefore.isSymbolicLink()) fail('source is linked or not a directory');
@@ -399,7 +448,8 @@ export async function inspectV4RawErgoCheckout(input: Readonly<V4RawCheckoutInpu
   if (sha256(gitBefore.bytes) !== EXPECTED_GIT_SHA256) fail('Git executable pin differs');
   const indexBefore = directFile(resolve(gitDir, 'index'), MAX_INDEX_BYTES);
   const configBefore = directFile(resolve(gitDir, 'config'), 65536);
-  const declarations = declaredFiles(input.consensusSourceLockBytes, input.overlay);
+  const declarations = declaredFiles(input.consensusSourceLockBytes,
+    input.overlay, input.lockSelection);
   const env = gitEnvironment(git, resolve(input.gitHomePath));
   const prefix = ['-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false',
     '-c', 'core.autocrlf=false', '--no-optional-locks', '-C', source];
@@ -436,8 +486,8 @@ export async function inspectV4RawErgoCheckout(input: Readonly<V4RawCheckoutInpu
     blobs[file.path] = file.patchedBlob;
     raw.set(file.path, observed);
   }
-  const physical = await inspectV4PhysicalSource(source,
-    buildV4PhysicalPlan(parsed.headTreeEntries, declarations), physicalBaseline, async () => {
+  const physicalPlan = buildV4PhysicalPlan(parsed.headTreeEntries, declarations);
+  const assertFinalGit = async (): Promise<void> => {
       if (oneHexLine(await query(['rev-parse', '--verify', 'HEAD'], 'final HEAD')) !== EXPECTED_HEAD
           || oneHexLine(await query(['rev-parse', '--verify', 'HEAD^{tree}'], 'final tree')) !== EXPECTED_TREE) {
         fail('HEAD or tree changed during observation');
@@ -474,17 +524,50 @@ export async function inspectV4RawErgoCheckout(input: Readonly<V4RawCheckoutInpu
           fail('raw file changed during observation: ' + file.path);
         }
       }
-    });
+  };
+  let physical: V4PhysicalObservation | undefined;
+  if (mode === 'raw') {
+    if (!physicalBaseline) fail('raw physical baseline is absent');
+    physical = await inspectV4PhysicalSource(source, physicalPlan, physicalBaseline, assertFinalGit);
+  } else {
+    await assertFinalGit();
+  }
   const checkout: CheckoutObservation = { head: EXPECTED_HEAD, status: parsed.status, blobs };
   const buildSbtBytes = raw.get('build.sbt')!.bytes;
   const checked = assertV4ErgoSourceObservation({ consensusSourceLockBytes: input.consensusSourceLockBytes,
-    overlay: input.overlay, checkout, buildSbtBytes, headBuildSbtBlob: parsed.headBuildSbtBlob });
+    overlay: input.overlay, checkout, buildSbtBytes, headBuildSbtBlob: parsed.headBuildSbtBlob,
+    lockSelection: input.lockSelection });
   assertGitHome();
-  return Object.freeze({ checkout: Object.freeze(checkout), headTree: EXPECTED_TREE,
+  if (mode === 'post-target') {
+    return Object.freeze({ head: EXPECTED_HEAD, tree: EXPECTED_TREE,
+      indexSha256Hex: sha256(indexBefore.bytes), status: parsed.status,
+      sourceIdentityDigestHex: checked.sourceIdentityDigestHex });
+  }
+  if (!physical) fail('raw physical observation is absent');
+  const observation: V4RawCheckoutObservation = Object.freeze({ checkout: Object.freeze(checkout), headTree: EXPECTED_TREE,
     headBuildSbtBlob: EXPECTED_BUILD_BASE, buildSbtBytes: Buffer.from(buildSbtBytes),
     indexSha256Hex: sha256(indexBefore.bytes), sourceIdentityDigestHex: checked.sourceIdentityDigestHex,
     physicalSourceDigestHex: physical.physicalSourceDigestHex,
     physicalSourceFileCount: physical.physicalSourceFileCount,
     physicalSourceDirectoryCount: physical.physicalSourceDirectoryCount,
     physicalSourceTotalBytes: physical.physicalSourceTotalBytes });
+  return Object.freeze({ observation, physicalPlan });
+}
+
+export async function inspectV4RawErgoCheckout(
+  input: Readonly<V4RawCheckoutInput>,
+): Promise<V4RawCheckoutObservation> {
+  return (await inspectV4RawErgoCheckoutDetailed(input, 'raw')).observation;
+}
+
+export async function inspectV4RawErgoCheckoutWithPlan(
+  input: Readonly<V4RawCheckoutInput>,
+): Promise<V4RawCheckoutWithPlan> {
+  return inspectV4RawErgoCheckoutDetailed(input, 'raw');
+}
+
+export async function inspectV4GitCheckoutAfterTarget(
+  input: Readonly<V4RawCheckoutInput>,
+): Promise<V4PostTargetGitObservation> {
+  return inspectV4RawErgoCheckoutDetailed(input, 'post-target');
 }

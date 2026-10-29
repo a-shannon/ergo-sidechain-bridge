@@ -15,7 +15,10 @@ export interface V4BuildSbtOverlayPin {
   readonly sha256Hex: string;
 }
 
+export type V4ErgoSourceSelection = 'v4' | 'v5-source59' | 'v6-current';
+
 export interface V4ErgoSourceObservationInput {
+  readonly lockSelection?: V4ErgoSourceSelection;
   readonly consensusSourceLockBytes: Buffer;
   readonly overlay: Readonly<V4BuildSbtOverlayPin>;
   readonly checkout: Readonly<CheckoutObservation>;
@@ -27,6 +30,10 @@ const SOURCE_IDENTITY_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_BUILD_V4_SOURCE';
 const CONSENSUS_SOURCE_LOCK_SHA256_HEX =
   '82e96dca999244f145a67381e0037770dfd93ad61ecb29d3063a6e5ea426a8b6';
+const V6_CONSENSUS_SOURCE_LOCK_SHA256_HEX =
+  '443fc2029710f85eb487fa5566e5395160ab946d65abce73380e046fd311cb32';
+const V6_SOURCE_IDENTITY_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_BUILD_V6_SOURCE';
 const BUILD_SBT_BASE_BLOB = '2fb3ba62fb92ff45e45a3639c2dace53f31ed86d';
 
 function fail(reason: string): never {
@@ -40,10 +47,17 @@ function fixedHex(value: unknown, bytes: number): value is string {
 export function assertV4ErgoSourceObservation(
   input: Readonly<V4ErgoSourceObservationInput>,
 ): Readonly<{ sourceIdentityDigestHex: string; expectedStatus: string }> {
+  const selection = input.lockSelection ?? 'v4';
+  if (selection !== 'v4' && selection !== 'v5-source59'
+      && selection !== 'v6-current') fail('unknown explicit source lock selection');
+  const consensusSha256 = selection === 'v6-current'
+    ? V6_CONSENSUS_SOURCE_LOCK_SHA256_HEX : CONSENSUS_SOURCE_LOCK_SHA256_HEX;
   if (!Buffer.isBuffer(input.consensusSourceLockBytes)
       || createHash('sha256').update(input.consensusSourceLockBytes).digest('hex')
-        !== CONSENSUS_SOURCE_LOCK_SHA256_HEX) {
-    fail('original consensus source lock bytes differ');
+        !== consensusSha256) {
+    fail(selection === 'v6-current'
+      ? 'V6 current consensus source lock bytes differ'
+      : 'original consensus source lock bytes differ');
   }
   const consensusLock = JSON.parse(
     new TextDecoder('utf-8', { fatal: true }).decode(input.consensusSourceLockBytes),
@@ -109,6 +123,6 @@ export function assertV4ErgoSourceObservation(
       status: input.checkout.status,
       blobs: input.checkout.blobs,
       buildSbtRawSha256Hex: rawSha256,
-    }, SOURCE_IDENTITY_DOMAIN),
+    }, selection === 'v6-current' ? V6_SOURCE_IDENTITY_DOMAIN : SOURCE_IDENTITY_DOMAIN),
   });
 }

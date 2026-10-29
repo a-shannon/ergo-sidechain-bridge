@@ -3,13 +3,19 @@ import { lstatSync, readFileSync, type BigIntStats } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 import {
-  inspectV4RawErgoCheckout,
+  inspectV4GitCheckoutAfterTarget,
+  inspectV4RawErgoCheckoutWithPlan,
+  type V4PostTargetGitObservation,
   type V4RawCheckoutObservation,
 } from './substrate-federated-isolated-devnet-ergo-node-build-v4-checkout.js';
+import type { V4PhysicalPlan } from './substrate-federated-isolated-devnet-ergo-node-build-v4-physical.js';
 import {
-  inspectV4NodeBuildLock,
-  type V4NodeBuildLock,
-} from './substrate-federated-isolated-devnet-ergo-node-build-v4-lock.js';
+  type V4OrV5BuildLockSelection,
+} from './substrate-federated-isolated-devnet-ergo-node-build-v5-source59-lock.js';
+import {
+  inspectSelectedV6OrLegacyBuildLock,
+  type V6OrLegacyBuildLock,
+} from './substrate-federated-isolated-devnet-ergo-node-build-v6-lock-selection.js';
 import type {
   V4BuildSbtOverlayPin,
 } from './substrate-federated-isolated-devnet-ergo-node-build-v4-source.js';
@@ -23,6 +29,12 @@ export interface V4NodeBuildPreflightInput {
   readonly sourcePath: string;
   readonly gitHomePath: string;
   readonly gitExecutablePath: string;
+  readonly lockSelection?: V4OrV5BuildLockSelection;
+}
+
+export interface V6NodeBuildPreflightInput extends
+  Omit<V4NodeBuildPreflightInput, 'lockSelection'> {
+  readonly lockSelection: 'v6-current';
 }
 
 export interface V4NodeBuildPreflightObservation {
@@ -41,6 +53,11 @@ export interface V4NodeBuildPreflightObservation {
   readonly headBuildSbtBlob: string;
   readonly workingBuildSbtBlob: string;
   readonly workingBuildSbtSha256Hex: string;
+}
+
+export interface V4NodeBuildPreflightWithPlan {
+  readonly observation: Readonly<V4NodeBuildPreflightObservation>;
+  readonly physicalPlan: Readonly<V4PhysicalPlan>;
 }
 
 interface PinnedFile {
@@ -106,7 +123,7 @@ function assertConsensusEncoding(bytes: Buffer): void {
 
 // This pure byte check does not observe a checkout and is not a preflight result.
 export function derivePinnedV4BuildSbtOverlay(
-  lock: Readonly<V4NodeBuildLock>,
+  lock: Readonly<V6OrLegacyBuildLock>,
   consensusSourceLockBytes: Buffer,
   windowsJobScriptBytes: Buffer,
 ): Readonly<V4BuildSbtOverlayPin> {
@@ -126,7 +143,7 @@ export function derivePinnedV4BuildSbtOverlay(
 }
 
 function summarizeCheckout(
-  lock: Readonly<V4NodeBuildLock>,
+  lock: Readonly<V6OrLegacyBuildLock>,
   lockSha256Hex: string,
   raw: Readonly<V4RawCheckoutObservation>,
 ): V4NodeBuildPreflightObservation {
@@ -164,10 +181,10 @@ function summarizeCheckout(
   });
 }
 
-export async function inspectV4NodeBuildPreflight(
-  input: Readonly<V4NodeBuildPreflightInput>,
-): Promise<V4NodeBuildPreflightObservation> {
-  const pinned = inspectV4NodeBuildLock(input.bridgeRoot);
+async function inspectV4NodeBuildPreflightDetailed(
+  input: Readonly<V4NodeBuildPreflightInput | V6NodeBuildPreflightInput>,
+): Promise<V4NodeBuildPreflightWithPlan> {
+  const pinned = inspectSelectedV6OrLegacyBuildLock(input.bridgeRoot, input.lockSelection);
   const consensusPath = resolve(input.bridgeRoot, CONSENSUS_LOCK_RELATIVE_PATH);
   const jobScriptPath = resolve(import.meta.dirname, JOB_SCRIPT_RELATIVE_PATH);
   const consensusBefore = readPinnedDirectFile(consensusPath, pinned.lock.consensusSourceLockSha256);
@@ -175,12 +192,13 @@ export async function inspectV4NodeBuildPreflight(
   const overlay = derivePinnedV4BuildSbtOverlay(
     pinned.lock, consensusBefore.bytes, jobBefore.bytes,
   );
-  const raw = await inspectV4RawErgoCheckout({
+  const raw = await inspectV4RawErgoCheckoutWithPlan({
     sourcePath: input.sourcePath,
     gitHomePath: input.gitHomePath,
     gitExecutablePath: input.gitExecutablePath,
     consensusSourceLockBytes: consensusBefore.bytes,
     overlay,
+    lockSelection: input.lockSelection,
   });
   assertSamePinnedFile(
     consensusBefore, readPinnedDirectFile(consensusPath, pinned.lock.consensusSourceLockSha256),
@@ -188,8 +206,92 @@ export async function inspectV4NodeBuildPreflight(
   assertSamePinnedFile(
     jobBefore, readPinnedDirectFile(jobScriptPath, pinned.lock.windowsJobProcessRunnerSha256),
   );
-  if (inspectV4NodeBuildLock(input.bridgeRoot).sha256Hex !== pinned.sha256Hex) {
+  if (inspectSelectedV6OrLegacyBuildLock(input.bridgeRoot,
+    input.lockSelection).sha256Hex !== pinned.sha256Hex) {
     throw new Error('V4 build lock changed during checkout observation');
   }
-  return summarizeCheckout(pinned.lock, pinned.sha256Hex, raw);
+  return Object.freeze({
+    observation: summarizeCheckout(pinned.lock, pinned.sha256Hex, raw.observation),
+    physicalPlan: raw.physicalPlan,
+  });
+}
+
+function assertLegacySelection(selection: unknown): void {
+  if (selection !== undefined && selection !== 'v4' && selection !== 'v5-source59') {
+    throw new Error('V4/V5 preflight explicit lock selection differs');
+  }
+}
+
+export async function inspectV4NodeBuildPreflight(
+  input: Readonly<V4NodeBuildPreflightInput>,
+): Promise<V4NodeBuildPreflightObservation> {
+  assertLegacySelection(input.lockSelection);
+  return (await inspectV4NodeBuildPreflightDetailed(input)).observation;
+}
+
+export async function inspectV4NodeBuildPreflightWithPlan(
+  input: Readonly<V4NodeBuildPreflightInput>,
+): Promise<V4NodeBuildPreflightWithPlan> {
+  assertLegacySelection(input.lockSelection);
+  return inspectV4NodeBuildPreflightDetailed(input);
+}
+
+/** Explicit current-lock branch; the V4/V5 exported callers remain unchanged. */
+export async function inspectV6NodeBuildPreflightWithPlan(
+  input: Readonly<V6NodeBuildPreflightInput>,
+): Promise<V4NodeBuildPreflightWithPlan> {
+  if (input.lockSelection !== 'v6-current') {
+    throw new Error('V6 preflight requires explicit current lock selection');
+  }
+  return inspectV4NodeBuildPreflightDetailed(input);
+}
+
+// The post-target Git observation shares the pinned lock and support brackets
+// with preflight, but leaves generated-output capture to its caller.
+async function inspectSelectedNodeBuildGitAfterTarget(
+  input: Readonly<V4NodeBuildPreflightInput | V6NodeBuildPreflightInput>,
+): Promise<V4PostTargetGitObservation> {
+  const pinned = inspectSelectedV6OrLegacyBuildLock(input.bridgeRoot, input.lockSelection);
+  const consensusPath = resolve(input.bridgeRoot, CONSENSUS_LOCK_RELATIVE_PATH);
+  const jobScriptPath = resolve(import.meta.dirname, JOB_SCRIPT_RELATIVE_PATH);
+  const consensusBefore = readPinnedDirectFile(consensusPath, pinned.lock.consensusSourceLockSha256);
+  const jobBefore = readPinnedDirectFile(jobScriptPath, pinned.lock.windowsJobProcessRunnerSha256);
+  const overlay = derivePinnedV4BuildSbtOverlay(
+    pinned.lock, consensusBefore.bytes, jobBefore.bytes,
+  );
+  const git = await inspectV4GitCheckoutAfterTarget({
+    sourcePath: input.sourcePath,
+    gitHomePath: input.gitHomePath,
+    gitExecutablePath: input.gitExecutablePath,
+    consensusSourceLockBytes: consensusBefore.bytes,
+    overlay,
+    lockSelection: input.lockSelection,
+  });
+  assertSamePinnedFile(
+    consensusBefore, readPinnedDirectFile(consensusPath, pinned.lock.consensusSourceLockSha256),
+  );
+  assertSamePinnedFile(
+    jobBefore, readPinnedDirectFile(jobScriptPath, pinned.lock.windowsJobProcessRunnerSha256),
+  );
+  if (inspectSelectedV6OrLegacyBuildLock(input.bridgeRoot,
+    input.lockSelection).sha256Hex !== pinned.sha256Hex) {
+    throw new Error('V4 build lock changed during post-target Git observation');
+  }
+  return git;
+}
+
+export async function inspectV4NodeBuildGitAfterTarget(
+  input: Readonly<V4NodeBuildPreflightInput>,
+): Promise<V4PostTargetGitObservation> {
+  assertLegacySelection(input.lockSelection);
+  return inspectSelectedNodeBuildGitAfterTarget(input);
+}
+
+export async function inspectV6NodeBuildGitAfterTarget(
+  input: Readonly<V6NodeBuildPreflightInput>,
+): Promise<V4PostTargetGitObservation> {
+  if (input.lockSelection !== 'v6-current') {
+    throw new Error('V6 post-target Git check requires current lock selection');
+  }
+  return inspectSelectedNodeBuildGitAfterTarget(input);
 }

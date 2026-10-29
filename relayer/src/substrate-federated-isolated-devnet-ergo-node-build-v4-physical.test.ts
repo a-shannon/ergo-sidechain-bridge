@@ -8,10 +8,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   assertSameV4PhysicalMetadata,
+  assertSameV4PhysicalPlanSnapshot,
   buildV4PhysicalPlan,
   captureV4PhysicalMetadata,
   inspectV4PhysicalSource,
   scanV4PhysicalSourcePass,
+  snapshotV4PhysicalPlan,
   type V4PhysicalDeclaration,
   type V4PhysicalTreeEntry,
 } from './substrate-federated-isolated-devnet-ergo-node-build-v4-physical.js';
@@ -67,6 +69,59 @@ function fixture(): {
 }
 
 describe('V4 physical source census', () => {
+  it('seals the complete plan independently of Map and Set iteration order', () => {
+    const { head, declarations } = fixture();
+    const plan = buildV4PhysicalPlan(head, declarations);
+    const snapshot = snapshotV4PhysicalPlan(plan);
+    const reordered = {
+      files: new Map([...plan.files].reverse()),
+      directories: new Set([...plan.directories].reverse()),
+      children: new Map([...plan.children].reverse().map(([path, names]) =>
+        [path, new Set([...names].reverse())] as const)),
+    };
+    expect(snapshotV4PhysicalPlan(reordered)).toEqual(snapshot);
+    expect(Object.isFrozen(snapshot)).toBe(true);
+    assertSameV4PhysicalPlanSnapshot(snapshot, plan);
+  });
+
+  it('rejects a changed file blob after the snapshot', () => {
+    const { head, declarations } = fixture();
+    const plan = buildV4PhysicalPlan(head, declarations);
+    const snapshot = snapshotV4PhysicalPlan(plan);
+    (plan.files as Map<string, string>).set('tree/file0000', '0'.repeat(40));
+    expect(() => assertSameV4PhysicalPlanSnapshot(snapshot, plan)).toThrow(/plan changed/u);
+  });
+
+  it('rejects an added empty directory after the snapshot', () => {
+    const { head, declarations } = fixture();
+    const plan = buildV4PhysicalPlan(head, declarations);
+    const snapshot = snapshotV4PhysicalPlan(plan);
+    (plan.directories as Set<string>).add('tree/empty');
+    expect(() => assertSameV4PhysicalPlanSnapshot(snapshot, plan)).toThrow(/directory membership/u);
+  });
+
+  it('rejects a changed child set after the snapshot', () => {
+    const { head, declarations } = fixture();
+    const plan = buildV4PhysicalPlan(head, declarations);
+    const snapshot = snapshotV4PhysicalPlan(plan);
+    (plan.children.get('tree') as Set<string>).delete('file0000');
+    expect(() => assertSameV4PhysicalPlanSnapshot(snapshot, plan)).toThrow(/children differ/u);
+  });
+
+  it('rejects a coherent-looking replacement path after the snapshot', () => {
+    const { head, declarations } = fixture();
+    const plan = buildV4PhysicalPlan(head, declarations);
+    const snapshot = snapshotV4PhysicalPlan(plan);
+    const files = plan.files as Map<string, string>;
+    const blob = files.get('tree/file0000')!;
+    files.delete('tree/file0000');
+    files.set('tree/forged0000', blob);
+    const children = plan.children.get('tree') as Set<string>;
+    children.delete('file0000');
+    children.add('forged0000');
+    expect(() => assertSameV4PhysicalPlanSnapshot(snapshot, plan)).toThrow(/plan changed/u);
+  });
+
   it('rejects a HEAD link or Gitlink, a case collision, and a file/directory prefix conflict', () => {
     const { head, declarations } = fixture();
     const path = 'tree/file0000';
@@ -172,6 +227,30 @@ describe('V4 physical source census', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a coherent plan replacement across the between-passes await', async () => {
+    if (process.platform !== 'win32') return;
+    const { head, declarations, contents } = fixture();
+    const plan = buildV4PhysicalPlan(head, declarations);
+    const root = mkdtempSync(join(tmpdir(), 'v4-plan-await-'));
+    try {
+      mkdirSync(join(root, '.git'));
+      mkdirSync(join(root, 'tree'));
+      for (const [path, bytes] of contents) writeFileSync(join(root, ...path.split('/')), bytes);
+      const baseline = await captureV4PhysicalMetadata(root);
+      await expect(inspectV4PhysicalSource(root, plan, baseline, async () => {
+        const files = plan.files as Map<string, string>;
+        const blob = files.get('tree/file0000')!;
+        files.delete('tree/file0000');
+        files.set('tree/forged0000', blob);
+        const children = plan.children.get('tree') as Set<string>;
+        children.delete('file0000');
+        children.add('forged0000');
+      })).rejects.toThrow(/plan changed after snapshot/u);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 

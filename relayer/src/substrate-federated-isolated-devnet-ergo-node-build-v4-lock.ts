@@ -5,7 +5,12 @@ import { dirname, resolve } from 'node:path';
 export const V4_NODE_BUILD_LOCK_RELATIVE_PATH =
   'sources/substrate-federated-isolated-devnet-node-build-lock-v4.json';
 export const V4_NODE_BUILD_LOCK_SHA256_HEX =
-  'a79c7c8ff32bd3be5bf8c067b9420b1c0db9d5c7d4f2e1c51611801547ecd2aa';
+  'f5938646f5d4a9c4f2b08f551cb632e09171ab0b89c68fba82e80e58ba73fd64';
+export const V4_FILE_ONLY_REPOSITORIES_TEMPLATE =
+  '[repositories]\n'
+  + '  bridge-maven-central-cache: {{MAVEN_CENTRAL_CACHE_URI}}\n'
+  + '  bridge-gitlab-leveldb-local: {{GITLAB_LEVELDB_FILE_URI}}\n'
+  + '  bridge-empty-offline: {{EMPTY_REPOSITORY_URI}}, bootOnly\n';
 
 export interface V4NodeBuildLock {
   readonly schemaVersion: 4;
@@ -42,6 +47,12 @@ export interface V4NodeBuildLock {
   readonly ownedMavenMirrorDirectoryCount: 2267;
   readonly ownedMavenMirrorFileCount: 12341;
   readonly ownedMavenMirrorBytes: 1095267211;
+  readonly ownedGitlabLeveldbReceiptSha256: string;
+  readonly ownedGitlabLeveldbAggregateSha256: string;
+  readonly ownedGitlabLeveldbDirectoryCount: 4;
+  readonly ownedGitlabLeveldbFileCount: 2;
+  readonly ownedGitlabLeveldbBytes: 1295843;
+  readonly ownedGitlabLeveldbCoordinate: 'org.ethereum:leveldbjni-all:1.18.3';
   readonly ownedBootJarFrameSha256: string;
   readonly ownedBootJarCount: 87;
   readonly ownedBootJarBytes: 75917085;
@@ -84,6 +95,12 @@ function freezeDeep(value: unknown): void {
   }
 }
 
+export function assertV4FileOnlyRepositoriesTemplate(template: string): void {
+  if (template !== V4_FILE_ONLY_REPOSITORIES_TEMPLATE) {
+    throw new Error('V4 file-only repository template or order differs');
+  }
+}
+
 export function inspectV4NodeBuildLock(bridgeRoot: string): Readonly<{
   lock: Readonly<V4NodeBuildLock>;
   sha256Hex: typeof V4_NODE_BUILD_LOCK_SHA256_HEX;
@@ -111,6 +128,18 @@ export function inspectV4NodeBuildLock(bridgeRoot: string): Readonly<{
       || (value as Record<string, unknown>).kind
         !== 'substrate-federated-isolated-devnet-node-build-lock-v4') {
     throw new Error('V4 build lock identity differs');
+  }
+  const object = value as Record<string, unknown>;
+  assertV4FileOnlyRepositoriesTemplate(object.sbtLauncherRepositoriesFileTemplate as string);
+  if (object.ownedGitlabLeveldbReceiptSha256
+        !== 'cac8595aa48baad43eb7c6529fa8dd29e0dd7c551d4ade3ffa1e0137f31703b7'
+      || object.ownedGitlabLeveldbAggregateSha256
+        !== '82e96b8a1ea14dc4c3fcd5a5da2fdb208ed0932df2851dd6dd29d98883e8358e'
+      || object.ownedGitlabLeveldbDirectoryCount !== 4
+      || object.ownedGitlabLeveldbFileCount !== 2
+      || object.ownedGitlabLeveldbBytes !== 1295843
+      || object.ownedGitlabLeveldbCoordinate !== 'org.ethereum:leveldbjni-all:1.18.3') {
+    throw new Error('V4 LevelDB overlay lock differs');
   }
   freezeDeep(value);
   return Object.freeze({

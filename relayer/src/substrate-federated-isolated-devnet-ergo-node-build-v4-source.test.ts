@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -9,6 +11,8 @@ import {
 } from './substrate-federated-isolated-devnet-ergo-node-build-v4-source.js';
 
 const consensusSourceLockBytes = readHistoricalConsensusSourceLockBytes();
+const currentConsensusSourceLockBytes = readFileSync(resolve(
+  import.meta.dirname, '..', '..', 'sources', 'consensus-source-lock.json'));
 const consensusLock = JSON.parse(consensusSourceLockBytes.toString('utf8')) as {
   ergoNode: Record<string, unknown>;
 };
@@ -56,6 +60,24 @@ function candidate(changes: Record<string, unknown> = {}) {
 }
 
 describe('isolated devnet Ergo node build V4 source boundary', () => {
+  it('binds the current consensus only through an explicit V6 selection', () => {
+    expect(createHash('sha256').update(currentConsensusSourceLockBytes).digest('hex'))
+      .toBe('443fc2029710f85eb487fa5566e5395160ab946d65abce73380e046fd311cb32');
+    const selected = assertV4ErgoSourceObservation(candidate({
+      consensusSourceLockBytes: currentConsensusSourceLockBytes,
+      lockSelection: 'v6-current',
+    }));
+    expect(selected.expectedStatus).toBe(status);
+    expect(selected.sourceIdentityDigestHex)
+      .not.toBe(assertV4ErgoSourceObservation(candidate()).sourceIdentityDigestHex);
+    expect(() => assertV4ErgoSourceObservation(candidate({
+      consensusSourceLockBytes: currentConsensusSourceLockBytes,
+    }))).toThrow(/original consensus source lock bytes/u);
+    expect(() => assertV4ErgoSourceObservation(candidate({
+      lockSelection: 'v6-current',
+    }))).toThrow(/V6 current consensus source lock bytes/u);
+  });
+
   it('accepts exactly the original eight declarations and pinned ninth overlay', () => {
     const result = assertV4ErgoSourceObservation(candidate());
     expect(result.expectedStatus).toBe(status);

@@ -3,6 +3,7 @@ import { lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync }
 import { join, parse, sep } from 'node:path';
 
 import {
+  assertSelectedV4BuildSbtOverlay,
   parseV4GitSnapshot,
   prepareV4GitHome,
   type V4GitSnapshotBytes,
@@ -85,6 +86,24 @@ function createKnownHomeCache(home: string): void {
 }
 
 describe('V4 bounded raw Git checkout projection', () => {
+  it('requires an explicit current V6 selection for the reviewed 20,585-byte overlay', () => {
+    const currentOverlay = {
+      path: 'build.sbt' as const,
+      status: 'modified' as const,
+      baseBlob: BUILD_BASE,
+      patchedBlob: '23f9dbe303639b4e42cb85b9c4ef220b0a8aff78',
+      bytes: 20585,
+      sha256Hex: 'a0e138c7f4379b1c42e004d4e776a81e24f4b7757d09ceeb7488bc3951a4db03',
+    };
+    expect(() => assertSelectedV4BuildSbtOverlay(currentOverlay, 'v6-current'))
+      .not.toThrow();
+    expect(() => assertSelectedV4BuildSbtOverlay(currentOverlay))
+      .toThrow(/overlay differs/u);
+    expect(() => assertSelectedV4BuildSbtOverlay({
+      ...currentOverlay, sha256Hex: '0'.repeat(64),
+    }, 'v6-current')).toThrow(/overlay differs/u);
+  });
+
   it('accepts a pinned HEAD tree with clean index and exactly nine working changes', () => {
     const observed = parseV4GitSnapshot(fixture(), declared);
     expect(observed.headBuildSbtBlob).toBe(BUILD_BASE);
