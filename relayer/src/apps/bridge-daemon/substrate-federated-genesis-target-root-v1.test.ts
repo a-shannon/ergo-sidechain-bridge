@@ -11,7 +11,7 @@ import { parseErgoFullBlockObservationV1, assertErgoFullBlockHeaderProofV1 }
 // root control flow, journal ownership, box codecs and bounded FED RPC decoding stay real.
 // Downstream deposit, burn, checkpoint, tracker and payout are component doubles, not crypto evidence.
 const mocked = vi.hoisted(() => ({
-  frontier: vi.fn(), ergoBuild: vi.fn(), process: vi.fn(), owned: vi.fn(), readOnlyOwned: vi.fn(),
+  frontier: vi.fn(), ergoBuild: vi.fn(), ergoBuildV6: vi.fn(), process: vi.fn(), owned: vi.fn(), readOnlyOwned: vi.fn(),
   pause: vi.fn(), pauseRevalidate: vi.fn(), hold: vi.fn(),
   discover: vi.fn(), history: vi.fn(), compile: vi.fn(), materialize: vi.fn(),
   pin: vi.fn(), nodes: vi.fn(), environment: vi.fn(),
@@ -33,6 +33,10 @@ const mocked = vi.hoisted(() => ({
 }));
 vi.mock('../../substrate-federated-genesis-node-build-v1.js', () => ({ buildSubstrateFederatedGenesisNodeV1: mocked.frontier }));
 vi.mock('../../substrate-federated-isolated-devnet-ergo-node-build-v1.js', () => ({ buildSubstrateFederatedIsolatedDevnetErgoNodeV1: mocked.ergoBuild }));
+vi.mock('../../substrate-federated-isolated-devnet-ergo-node-build-v6-execution.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../substrate-federated-isolated-devnet-ergo-node-build-v6-execution.js')>(),
+  buildSubstrateFederatedIsolatedDevnetErgoNodeV6ForExecution: mocked.ergoBuildV6,
+}));
 vi.mock('../../substrate-federated-isolated-devnet-ergo-node-process-v1.js', async importOriginal => ({
   ...await importOriginal<typeof import('../../substrate-federated-isolated-devnet-ergo-node-process-v1.js')>(),
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2: mocked.process,
@@ -147,9 +151,11 @@ vi.mock('../../substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.js', 
   confirmSubstrateFederatedIsolatedDevnetWithdrawalV2: mocked.payoutConfirm,
 }));
 
-import { runSubstrateFederatedGenesisTargetRootV1, projectSubstrateFederatedNativeTrackerConfirmationFailureV1,
+import { runSubstrateFederatedGenesisTargetRootV1, runSubstrateFederatedGenesisTargetRootV2,
+  projectSubstrateFederatedNativeTrackerConfirmationFailureV1,
   projectSubstrateFederatedNativeTrackerConfirmationProgressV1,
-  type RunSubstrateFederatedGenesisTargetRootV1Input } from './substrate-federated-genesis-target-root-v1.js';
+  type RunSubstrateFederatedGenesisTargetRootV1Input,
+  type RunSubstrateFederatedGenesisTargetRootV2Input } from './substrate-federated-genesis-target-root-v1.js';
 import * as setups from '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js';
 import * as sources from '../../substrate-federated-isolated-devnet-source-attestation-session-v1.js';
 import * as operators from '../../adapters/federated-genesis-operator-v1.js';
@@ -2056,6 +2062,110 @@ describe('held deposit confirmation exact production helper', () => {
 });
 
 describe('fresh FED target composition', () => {
+  function currentV6RootInput(): RunSubstrateFederatedGenesisTargetRootV2Input {
+    const gitHomeNames = ['b0', 'preTarget', 'beforeResolverJob', 'afterResolverJob',
+      'beforeUpdateJob', 'afterUpdateJob', 'beforeAssemblyJob', 'afterAssemblyJob'];
+    const cap = (maxFiles: number, maxDirectories: number, maxBytes: number) =>
+      ({ maxFiles, maxDirectories, maxBytes });
+    return {
+      frontierBuild: input.frontierBuild,
+      ergoBuild: {
+        bridgeRoot: input.frontierBuild.bridgeRoot,
+        sourcePath: join(directory, 'sources', 'fresh-ergo'),
+        gitExecutablePath: join(directory, 'git.exe'),
+        javaExecutablePath: join(directory, 'jdk', 'bin', 'java.exe'),
+        sbtLauncherJarPath: join(directory, 'sbt-launch-1.12.11.jar'),
+        mirrorRoot: join(directory, 'mirror'),
+        bootRoot: join(directory, 'boot'),
+        leveldbRoot: join(directory, 'maven-inputs', 'gitlab-leveldb-file-repo-01'),
+        leveldbReceiptPath: join(directory, 'maven-inputs', 'gitlab-leveldb-file-repo-01.json'),
+        mavenNamespaceRoot: join(directory, 'maven-inputs'),
+        v6MavenSourceRoot: join(directory, 'public-maven'),
+        resultPath: join(directory, 'build-result', 'v6-process-owned-build-result.json'),
+        gitHomes: Object.fromEntries(gitHomeNames.map(name =>
+          [name, join(directory, 'git-homes', name)])) as
+          RunSubstrateFederatedGenesisTargetRootV2Input['ergoBuild']['gitHomes'],
+        caps: {
+          roots: {
+            target: cap(50_000, 4_096, 536_870_912),
+            'project/target': cap(4_096, 1_024, 67_108_864),
+            'project/project/target': cap(1_024, 256, 16_777_216),
+            'ergo-core/target': cap(20_000, 4_096, 536_870_912),
+            'ergo-wallet/target': cap(20_000, 4_096, 536_870_912),
+            'avldb/target': cap(20_000, 4_096, 536_870_912),
+          },
+          total: cap(50_000, 4_096, 536_870_912),
+        },
+        maxMembershipBytes: 16_777_216,
+        systemRoot: join(directory, 'windows'),
+        lockSelection: 'v6-current',
+      },
+    };
+  }
+
+  it('routes Root V2 only through V6 and passes its five-field handoff to the process', async () => {
+    const candidate = currentV6RootInput();
+    const handoff = Object.freeze({
+      javaExecutablePath: candidate.ergoBuild.javaExecutablePath,
+      expectedJavaExecutableSha256Hex: '62'.repeat(32),
+      nodeAssemblyJarPath: join(candidate.ergoBuild.sourcePath, 'target', 'scala-2.12', 'ergo-current.jar'),
+      expectedNodeAssemblyJarSha256Hex: '63'.repeat(32),
+      buildIdentityDigestHex: '64'.repeat(32),
+    });
+    mocked.ergoBuildV6.mockResolvedValueOnce(handoff);
+    const boundary = new Error('V6 process construction boundary');
+    mocked.process.mockImplementationOnce(() => { throw boundary; });
+    await expect(runSubstrateFederatedGenesisTargetRootV2(candidate)).rejects.toBe(boundary);
+    expect(mocked.ergoBuildV6).toHaveBeenCalledOnce();
+    expect(mocked.ergoBuildV6).toHaveBeenCalledWith(candidate.ergoBuild);
+    expect(mocked.ergoBuild).not.toHaveBeenCalled();
+    expect(mocked.process.mock.calls[0]![0]).toEqual(handoff);
+  });
+
+  it('keeps Root V1 on its legacy builder when the V6 adapter is available', async () => {
+    const boundary = new Error('legacy process construction boundary');
+    mocked.process.mockImplementationOnce(() => { throw boundary; });
+    await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toBe(boundary);
+    expect(mocked.ergoBuild).toHaveBeenCalledOnce();
+    expect(mocked.ergoBuildV6).not.toHaveBeenCalled();
+  });
+
+  it('rejects a legacy-shaped V2 request before custody or either builder', async () => {
+    await expect(runSubstrateFederatedGenesisTargetRootV2(
+      input as unknown as RunSubstrateFederatedGenesisTargetRootV2Input,
+    )).rejects.toThrow(/V6/u);
+    expect(order).toEqual([]);
+    expect(mocked.frontier).not.toHaveBeenCalled();
+    expect(mocked.ergoBuild).not.toHaveBeenCalled();
+    expect(mocked.ergoBuildV6).not.toHaveBeenCalled();
+    expect(mocked.process).not.toHaveBeenCalled();
+  });
+
+  it('does not inject a V6 build through the unchanged V1 entry', async () => {
+    await expect(runSubstrateFederatedGenesisTargetRootV1(
+      currentV6RootInput() as unknown as RunSubstrateFederatedGenesisTargetRootV1Input,
+    )).rejects.toThrow('exact data fields');
+    expect(order).toEqual([]);
+    expect(mocked.frontier).not.toHaveBeenCalled();
+    expect(mocked.ergoBuild).not.toHaveBeenCalled();
+    expect(mocked.ergoBuildV6).not.toHaveBeenCalled();
+    expect(mocked.process).not.toHaveBeenCalled();
+  });
+
+  it('rejects a Git HOME inside the source parent before custody or compilation', async () => {
+    const candidate = currentV6RootInput();
+    const invalid = { ...candidate, ergoBuild: { ...candidate.ergoBuild, gitHomes: {
+      ...candidate.ergoBuild.gitHomes,
+      beforeAssemblyJob: join(dirname(candidate.ergoBuild.sourcePath), 'refused-home'),
+    } } };
+    await expect(runSubstrateFederatedGenesisTargetRootV2(invalid)).rejects.toThrow('Git homes overlap');
+    expect(order).toEqual([]);
+    expect(mocked.frontier).not.toHaveBeenCalled();
+    expect(mocked.ergoBuild).not.toHaveBeenCalled();
+    expect(mocked.ergoBuildV6).not.toHaveBeenCalled();
+    expect(mocked.process).not.toHaveBeenCalled();
+  });
+
   for (const second of [false, true]) {
     const cycle = second ? 'continuation' : 'first';
     it.each(['reserve/withdrawal-fee', 'withdrawal-fee/tracker-fee'] as const)

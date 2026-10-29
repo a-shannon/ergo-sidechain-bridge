@@ -40,6 +40,12 @@ import { createOwnedFederatedGenesisDevnetProcessSessionV1, assertOwnedFederated
 import { buildSubstrateFederatedGenesisNodeV1, type BuildSubstrateFederatedGenesisNodeV1Input } from '../../substrate-federated-genesis-node-build-v1.js';
 import { collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2 } from '../../substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js';
 import { buildSubstrateFederatedIsolatedDevnetErgoNodeV1, type BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input } from '../../substrate-federated-isolated-devnet-ergo-node-build-v1.js';
+import {
+  buildSubstrateFederatedIsolatedDevnetErgoNodeV6ForExecution,
+  selectV6ErgoRuntimeBuildInputNonAuthorizing,
+  type V6ErgoRuntimeBuildInput,
+  type ErgoNodeExecutionHandoff,
+} from '../../substrate-federated-isolated-devnet-ergo-node-build-v6-execution.js';
 import { createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2, assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1, type SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2,
   type SubstrateFederatedIsolatedDevnetNativeTrackerCycleV1,
@@ -132,10 +138,31 @@ export interface RunSubstrateFederatedGenesisTargetRootV1Input {
   readonly ergoBuild: BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input;
 }
 
+export interface RunSubstrateFederatedGenesisTargetRootV2Input
+  extends Omit<RunSubstrateFederatedGenesisTargetRootV1Input, 'ergoBuild'> {
+  readonly ergoBuild: V6ErgoRuntimeBuildInput;
+}
+
 /** The optional observer exports only a finite stage; signer and transport stay private. */
 export async function runSubstrateFederatedGenesisTargetRootV1(
   input: RunSubstrateFederatedGenesisTargetRootV1Input,
   onDepositFundingStage?: NativeDepositFundingStageObserverV2,
+) {
+  return runSelectedGenesisTargetRoot(input, onDepositFundingStage, 'v1');
+}
+
+/** Explicit current-builder entry; it never retries through the legacy builder. */
+export async function runSubstrateFederatedGenesisTargetRootV2(
+  input: RunSubstrateFederatedGenesisTargetRootV2Input,
+  onDepositFundingStage?: NativeDepositFundingStageObserverV2,
+) {
+  return runSelectedGenesisTargetRoot(input, onDepositFundingStage, 'v6-current');
+}
+
+async function runSelectedGenesisTargetRoot(
+  input: RunSubstrateFederatedGenesisTargetRootV1Input | RunSubstrateFederatedGenesisTargetRootV2Input,
+  onDepositFundingStage: NativeDepositFundingStageObserverV2 | undefined,
+  builderSelection: 'v1' | 'v6-current',
 ) {
   let rootPhase: SubstrateFederatedNativeTwoCycleRootPhaseV1 = 'setup-and-custody';
   let cycleStep: NativeTwoCycleCycleStepV1 | null = null;
@@ -173,8 +200,12 @@ export async function runSubstrateFederatedGenesisTargetRootV1(
     const frontierInput = exact(captured.frontierBuild, ['bridgeRoot', 'frontierSourcePath',
       'buildParentDirectory', 'cargoHomeDirectory', 'cargoExecutablePath', 'rustcExecutablePath',
       'gitExecutablePath', 'protocExecutablePath']);
-    const ergoInput = exact(captured.ergoBuild, ['worktreeRoot', 'bridgeRoot', 'ergoSourcePath',
-      'gitExecutablePath', 'javaExecutablePath', 'sbtLauncherJarPath']);
+    const ergoInput = builderSelection === 'v6-current'
+      ? selectV6ErgoRuntimeBuildInputNonAuthorizing(
+        (captured as RunSubstrateFederatedGenesisTargetRootV2Input).ergoBuild)
+      : exact((captured as RunSubstrateFederatedGenesisTargetRootV1Input).ergoBuild,
+        ['worktreeRoot', 'bridgeRoot', 'ergoSourcePath',
+          'gitExecutablePath', 'javaExecutablePath', 'sbtLauncherJarPath']);
     if (realpathSync(frontierInput.bridgeRoot) !== realpathSync(ergoInput.bridgeRoot)) {
       throw new Error('FED target builders must use the same bridge repository');
     }
@@ -216,17 +247,25 @@ export async function runSubstrateFederatedGenesisTargetRootV1(
     }
     assertCustody();
     rootPhase = 'ergo-build';
-    const builtErgo = await buildSubstrateFederatedIsolatedDevnetErgoNodeV1(ergoInput);
+    let builtErgo: ErgoNodeExecutionHandoff;
+    if (builderSelection === 'v6-current') {
+      builtErgo = await buildSubstrateFederatedIsolatedDevnetErgoNodeV6ForExecution(
+        ergoInput as V6ErgoRuntimeBuildInput);
+    } else {
+      const legacy = await buildSubstrateFederatedIsolatedDevnetErgoNodeV1(
+        ergoInput as Readonly<BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input>);
+      builtErgo = Object.freeze({
+        javaExecutablePath: legacy.javaExecutablePath,
+        expectedJavaExecutableSha256Hex: legacy.receipt.toolchain.javaExecutableSha256Hex,
+        nodeAssemblyJarPath: legacy.nodeAssemblyJarPath,
+        expectedNodeAssemblyJarSha256Hex: legacy.receipt.build.artifactSha256Hex,
+        buildIdentityDigestHex: legacy.receipt.buildIdentityDigestHex,
+      });
+    }
     assertCustody();
     rootPhase = 'node-start';
     mining = claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2(setup);
-    ergo = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2({
-      javaExecutablePath: builtErgo.javaExecutablePath,
-      expectedJavaExecutableSha256Hex: builtErgo.receipt.toolchain.javaExecutableSha256Hex,
-      nodeAssemblyJarPath: builtErgo.nodeAssemblyJarPath,
-      expectedNodeAssemblyJarSha256Hex: builtErgo.receipt.build.artifactSha256Hex,
-      buildIdentityDigestHex: builtErgo.receipt.buildIdentityDigestHex,
-    }, {
+    ergo = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(builtErgo, {
       miningTargetPublicKeyHex: setup.signer.publicKeyHex,
       p2pkErgoTreeHex: setup.signer.p2pkErgoTreeHex,
       rewardInputErgoTrees: setup.signer.rewardInputErgoTrees,

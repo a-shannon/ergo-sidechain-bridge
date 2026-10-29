@@ -202,6 +202,8 @@ const REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS: ReadonlyMap<
 
 const FEDERATED_GENESIS_TARGET_ROOT =
   'apps/bridge-daemon/substrate-federated-genesis-target-root-v1.ts';
+const FEDERATED_GENESIS_TARGET_ROOT_TEST =
+  'apps/bridge-daemon/substrate-federated-genesis-target-root-v1.test.ts';
 const FEDERATED_V3_TARGET_ROOT =
   'apps/bridge-daemon/substrate-federated-v3-frontier-reservation-target-root.ts';
 const FEDERATED_V3_TARGET_ROOT_TEST =
@@ -393,6 +395,11 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
   ])],
   ['substrate-federated-isolated-devnet-ergo-node-build-v1.ts', new Set([
     'buildSubstrateFederatedIsolatedDevnetErgoNodeV1', 'BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input',
+  ])],
+  ['substrate-federated-isolated-devnet-ergo-node-build-v6-execution.ts', new Set([
+    'buildSubstrateFederatedIsolatedDevnetErgoNodeV6ForExecution',
+    'selectV6ErgoRuntimeBuildInputNonAuthorizing',
+    'V6ErgoRuntimeBuildInput', 'ErgoNodeExecutionHandoff',
   ])],
   ['substrate-federated-isolated-devnet-ergo-node-process-v1.ts', new Set([
     'createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2',
@@ -1929,6 +1936,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
   ])],
   [FEDERATED_GENESIS_TARGET_ROOT, new Set([
     'RunSubstrateFederatedGenesisTargetRootV1Input', 'runSubstrateFederatedGenesisTargetRootV1',
+    'RunSubstrateFederatedGenesisTargetRootV2Input', 'runSubstrateFederatedGenesisTargetRootV2',
     'projectSubstrateFederatedNativeTrackerConfirmationFailureV1',
     'projectSubstrateFederatedNativeTrackerConfirmationProgressV1',
   ])],
@@ -2263,6 +2271,9 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
   [FEDERATED_GENESIS_TARGET_ROOT, new Map([
     ['runSubstrateFederatedGenesisTargetRootV1', new Set([
       FEDERATED_NATIVE_TWO_CYCLE_WORKER, FEDERATED_NATIVE_TWO_CYCLE_WORKER_V2,
+    ])],
+    ['runSubstrateFederatedGenesisTargetRootV2', new Set([
+      FEDERATED_NATIVE_TWO_CYCLE_WORKER_V2, FEDERATED_GENESIS_TARGET_ROOT_TEST,
     ])],
   ])],
   [FEDERATED_V3_TARGET_ROOT, new Map([
@@ -2793,6 +2804,7 @@ const EXCLUSIVE_RUNTIME_MODULE_IMPORT_OWNERS: ReadonlyMap<
 > = new Map([
   [FEDERATED_GENESIS_TARGET_ROOT, new Set([
     FEDERATED_NATIVE_TWO_CYCLE_WORKER, FEDERATED_NATIVE_TWO_CYCLE_WORKER_V2,
+    FEDERATED_GENESIS_TARGET_ROOT_TEST,
   ])],
   [FEDERATED_V3_TARGET_ROOT, new Set([
     FEDERATED_V3_TARGET_ROOT_TEST, FEDERATED_V3_OWNED_RESERVATION_ROOT,
@@ -3136,6 +3148,12 @@ function inspectExclusiveRuntimeAuthorityImport(
     && imported.bindings.length === 1
     && imported.bindings[0]!.imported === 'runSubstrateFederatedGenesisTargetRootV1'
     && imported.bindings[0]!.local === imported.bindings[0]!.imported) return [];
+  if (file === FEDERATED_NATIVE_TWO_CYCLE_WORKER_V2
+    && imported.value === '../apps/bridge-daemon/substrate-federated-genesis-target-root-v1.js'
+    && imported.form === 'dynamic-import'
+    && imported.bindings.length === 1
+    && imported.bindings[0]!.imported === 'runSubstrateFederatedGenesisTargetRootV2'
+    && imported.bindings[0]!.local === imported.bindings[0]!.imported) return [];
   if (imported.form !== 'named-import') {
     return [{
       file,
@@ -3332,15 +3350,19 @@ function collectFixedCampaignScriptViolations(
   knownFiles: ReadonlySet<string>,
 ): LayerImportViolation[] {
   const entry = FIXED_CAMPAIGN_SCRIPT_EXPORTS.get(file);
-  if (entry === undefined) return [];
-  const violations = collectReviewedAppExportViolations(file, parsed, entry);
+  const directV2RootTest = file === FEDERATED_GENESIS_TARGET_ROOT_TEST;
+  if (entry === undefined && !directV2RootTest) return [];
+  const violations = entry === undefined ? [] : collectReviewedAppExportViolations(file, parsed, entry);
   const protectedNames = new Set<string>();
   for (const imported of imports) {
     if (imported.value === null || imported.typeOnly) continue;
     const resolved = resolveRelativeImport(file, imported.value, knownFiles);
     const restricted = resolved === null ? undefined : EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS.get(resolved);
     for (const binding of imported.bindings) {
-      if (restricted?.has(binding.imported)) protectedNames.add(binding.local);
+      if (restricted?.has(binding.imported)
+          && (!directV2RootTest || binding.imported === 'runSubstrateFederatedGenesisTargetRootV2')) {
+        protectedNames.add(binding.local);
+      }
     }
   }
   const visit = (node: ts.Node): void => {
@@ -3519,7 +3541,13 @@ function collectCapabilityRestrictedLayerViolations(
       ) {
         continue;
       }
-      const allowedBindings = restrictedFileBindings.get(statement.moduleSpecifier.text);
+      const specifier = statement.moduleSpecifier.text;
+      const v6Adapter = 'substrate-federated-isolated-devnet-ergo-node-build-v6-execution.ts';
+      const normalizedV6Adapter = file === FEDERATED_GENESIS_TARGET_ROOT
+        && resolveRelativeImport(file, specifier, new Set([v6Adapter])) === v6Adapter;
+      const allowedBindings = restrictedFileBindings.get(normalizedV6Adapter
+        ? '../../substrate-federated-isolated-devnet-ergo-node-build-v6-execution.js'
+        : specifier);
       const namedBindings = statement.importClause?.namedBindings;
       if (!allowedBindings || !namedBindings || !ts.isNamedImports(namedBindings)) {
         continue;

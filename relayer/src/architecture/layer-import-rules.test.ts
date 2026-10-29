@@ -325,6 +325,139 @@ describe('layer import rules', () => {
     });
   });
 
+  describe('V6 execution adapter at the reviewed genesis root', () => {
+    const module = 'substrate-federated-isolated-devnet-ergo-node-build-v6-execution';
+    const specifier = `../../${module}.js`;
+    it.each([
+      'buildSubstrateFederatedIsolatedDevnetErgoNodeV6ForExecution',
+      'selectV6ErgoRuntimeBuildInputNonAuthorizing',
+    ])('admits the direct %s call', binding => {
+      expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+        `import { ${binding} } from '${specifier}'; ${binding}({});`))).toEqual([]);
+    });
+    it.each(['V6ErgoRuntimeBuildInput', 'ErgoNodeExecutionHandoff'])(
+      'admits the erased %s type', binding => {
+        expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+          `import type { ${binding} } from '${specifier}'; let value: ${binding};`))).toEqual([]);
+      });
+    it.each(['runV6OwnedBuildAttempt', 'V6OwnedBuildInput', 'SubstrateFederatedIsolatedDevnetErgoNodeProcessV1Input'])(
+      'refuses the unreviewed %s binding', binding => {
+        expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+          `import { ${binding} } from '${specifier}';`)).map(item => item.message)).toContain(
+          `restricted capability import binding is not allowlisted: ${specifier}#${binding}`);
+      });
+    it.each([
+      ['alias', `import { selectV6ErgoRuntimeBuildInputNonAuthorizing as select } from '${specifier}'; select({});`,
+        'restricted capability import binding must not be aliased'],
+      ['namespace', `import * as adapter from '${specifier}';`,
+        'restricted capability import must use reviewed named bindings'],
+      ['dynamic', `const { selectV6ErgoRuntimeBuildInputNonAuthorizing } = await import('${specifier}');`,
+        'restricted capability import must use reviewed named bindings'],
+      ['re-export', `export { selectV6ErgoRuntimeBuildInputNonAuthorizing } from '${specifier}';`,
+        'restricted capability import must use reviewed named bindings'],
+      ['escape', `import { selectV6ErgoRuntimeBuildInputNonAuthorizing } from '${specifier}'; const escaped = selectV6ErgoRuntimeBuildInputNonAuthorizing;`,
+        'restricted capability binding must not escape its reviewed call'],
+    ])('refuses adapter %s access', (_fault, source, message) => {
+      expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, source))
+        .some(item => item.message.startsWith(message))).toBe(true);
+    });
+    it('admits only the two new root exports', () => {
+      expect(inspect({ [FEDERATED_GENESIS_TARGET_ROOT]: `
+        export interface RunSubstrateFederatedGenesisTargetRootV2Input {}
+        export async function runSubstrateFederatedGenesisTargetRootV2() {}
+      ` })).toEqual([]);
+      expect(inspect({ [FEDERATED_GENESIS_TARGET_ROOT]: 'export function runUnreviewedRoot() {}' })
+        .map(item => item.message)).toContain('reviewed app root export is not allowlisted: runUnreviewedRoot');
+    });
+    it.each([
+      'buildSubstrateFederatedIsolatedDevnetErgoNodeV6ForExecution',
+      'selectV6ErgoRuntimeBuildInputNonAuthorizing',
+    ])('detects normalized V6 adapter escape %s', binding => {
+      const alternate = `../.././${module}.js`;
+      expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+        `import { ${binding} } from '${alternate}'; const escaped = ${binding};`))
+        .some(item => item.message.startsWith('restricted capability binding must not escape'))).toBe(true);
+    });
+  });
+
+  describe('V6 root exclusive worker ownership', () => {
+    const worker = NATIVE_TWO_CYCLE_WORKER_V2;
+    const specifier = '../apps/bridge-daemon/substrate-federated-genesis-target-root-v1.js';
+    const binding = 'runSubstrateFederatedGenesisTargetRootV2';
+    it.each([
+      ['static', `import { ${binding} } from '${specifier}';`],
+      ['delayed', `const { ${binding} } = await import('${specifier}');`],
+    ])('admits only the canonical worker %s direct call', (_form, declaration) => {
+      expect(inspect({ [FEDERATED_GENESIS_TARGET_ROOT]: 'export {};',
+        [worker]: `${declaration} await ${binding}({});`,
+      })).toEqual([]);
+    });
+    it('admits the direct root unit test', () => {
+      const owner = FEDERATED_GENESIS_TARGET_ROOT.replace('.ts', '.test.ts');
+      expect(inspect(staticAppFixture(owner,
+        `import { ${binding} } from './substrate-federated-genesis-target-root-v1.js'; ${binding}({});`)))
+        .toEqual([]);
+    });
+    it.each([
+      ['assignment', `const escaped = ${binding};`],
+      ['re-export', `export { ${binding} };`],
+    ])('detects direct-unit V2 escape %s', (_fault, suffix) => {
+      const owner = FEDERATED_GENESIS_TARGET_ROOT.replace('.ts', '.test.ts');
+      expect(inspect(staticAppFixture(owner,
+        `import { ${binding} } from './substrate-federated-genesis-target-root-v1.js'; ${suffix}`))
+        .map(item => item.message)).toContain(`fixed campaign capability must only be called directly: ${binding}`);
+    });
+    it.each([
+      NATIVE_TWO_CYCLE_PARENT_V2, 'scripts/run-substrate-federated-native-two-cycle-v1.ts',
+      'scripts/run-substrate-federated-native-two-cycle-worker-v1.ts',
+      'scripts/foreign.ts', 'adapters/foreign.ts', 'foreign.ts',
+    ])('refuses the foreign V6 root owner %s', owner => {
+      const relative = `./${path.posix.relative(path.posix.dirname(owner), FEDERATED_GENESIS_TARGET_ROOT)
+        .replace(/\.ts$/, '.js')}`;
+      expect(inspect(staticAppFixture(owner, `import { ${binding} } from '${relative}'; ${binding}({});`))
+        .map(item => item.message)).toContain(
+        `exclusive authority import has the wrong owner: ${relative}#${binding}`);
+    });
+    it('refuses a static alias', () => {
+      expect(inspect({ [FEDERATED_GENESIS_TARGET_ROOT]: 'export {};',
+        [worker]: `import { ${binding} as root } from '${specifier}'; root({});`,
+      }).map(item => item.message)).toContain(
+        `exclusive authority import must not be aliased: ${specifier}#${binding}`);
+    });
+    it.each([
+      ['namespace', `import * as root from '${specifier}';`],
+      ['re-export', `export { ${binding} } from '${specifier}';`],
+      ['require', `const { ${binding} } = require('${specifier}');`],
+      ['dynamic namespace', `const root = await import('${specifier}');`],
+      ['dynamic alias', `const { ${binding}: root } = await import('${specifier}');`],
+      ['dynamic extra', `const { ${binding}, extra } = await import('${specifier}');`],
+      ['dynamic other binding', `const { RunSubstrateFederatedGenesisTargetRootV2Input } = await import('${specifier}');`],
+      ['dynamic alternate path', `const { ${binding} } = await import('../apps/bridge-daemon/./substrate-federated-genesis-target-root-v1.js');`],
+    ])('refuses %s access', (_fault, source) => {
+      const importedSpecifier = source.includes('/./')
+        ? '../apps/bridge-daemon/./substrate-federated-genesis-target-root-v1.js' : specifier;
+      expect(inspect({ [FEDERATED_GENESIS_TARGET_ROOT]: 'export {};', [worker]: source })
+        .map(item => item.message)).toContain(
+        `exclusive authority module must use named runtime imports: ${importedSpecifier}`);
+    });
+    describe.each([
+      ['static', `import { ${binding} } from '${specifier}';`],
+      ['delayed', `const { ${binding} } = await import('${specifier}');`],
+    ])('%s V6 root binding', (_form, declaration) => {
+      it.each([
+        ['assignment', `const escaped = ${binding};`],
+        ['argument', `capture(${binding});`],
+        ['return', `function expose() { return ${binding}; }`],
+        ['re-export', `export { ${binding} };`],
+      ])('refuses escape by %s', (_fault, suffix) => {
+        expect(inspect({ [FEDERATED_GENESIS_TARGET_ROOT]: 'export {};',
+          [worker]: `${declaration} ${suffix}`,
+        }).map(item => item.message)).toContain(
+          `fixed campaign capability must only be called directly: ${binding}`);
+      });
+    });
+  });
+
   describe('V2 native worker module import boundary', () => {
     const binding = 'runSubstrateFederatedNativeTwoCycleWorkerFromArgumentsV2';
     describe.each([NATIVE_TWO_CYCLE_PARENT_V2, 'scripts/foreign.ts', 'apps/bridge-daemon/foreign.ts'])(
