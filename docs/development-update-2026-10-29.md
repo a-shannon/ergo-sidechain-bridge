@@ -8,4 +8,4 @@ We're now connecting that builder to the bridge's execution path. The parent, wo
 
 The next milestone is two consecutive deposit, mint, burn and withdrawal cycles on a fresh synthetic local chain, preserving successor state and replay history between cycles. Stopped-state recovery and the operator rehearsal follow from that result.
 
-This work delivers an explicitly federated reference bridge. The STARK-based trustless upgrade remains a separate track; production readiness and external acceptance are still open.
+The bridge remains an explicitly federated reference and is not production-ready. External acceptance is pending. The STARK-based trustless upgrade remains a separate track.
