@@ -3,7 +3,7 @@
   "platform": "win32-x64",
   "nodeVersion": "24.18.1",
   "nodeExecutableSha256": "ac51903c4c111815d52280b1fdcc8da067cbb37e2fe1a765097b85c3292c8582",
-  "relayerPackageLockSha256": "ac35cf3f84afbe1ffd089f6f5b89864182045db05ad21c2c8a059f1d120aa5ad",
+  "relayerPackageLockSha256": "3a41a7c004d8fea1c6722c9edbb7648545b4e4f0cf0e822f62c9774337b5aea3",
   "parentRuntimePackages": [
     {
       "path": "relayer/node_modules/tsx",

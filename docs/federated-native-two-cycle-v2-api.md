@@ -14,6 +14,14 @@ after the pinned Node/loader arguments. This selects
 The parent supplies the same selector to its worker. The worker's V3 entry
 calls the explicit Root V2 API.
 
+The existing `preflight-substrate-federated-native-two-cycle-v1.ts` script also
+accepts `--invocation-v2 --config <config-file>` after the pinned Node/loader
+arguments. It selects the V2 loader, environment checks and V6 output metadata
+checks without consuming the three physical pre-entry scratch homes. Its V1
+report format and fourteen false execution/authorization flags remain unchanged.
+It does not establish full raw/cache integrity, port availability, custody,
+fees or operational admission.
+
 The filenames retain `v2`; the named entry functions are V3. Without the
 selector, the existing CLI and named V2 functions retain their V1 invocation
 contract. Unknown or repeated selectors are rejected. Configuration content

@@ -5,8 +5,13 @@ import {
   assertSubstrateFederatedIsolatedDevnetErgoNodeBuildOutputReadyV1,
 } from '../substrate-federated-isolated-devnet-ergo-node-build-v1.js';
 import {
+  assertV6ErgoRuntimeBuildOutputReady,
+} from '../substrate-federated-isolated-devnet-ergo-node-build-v6-execution.js';
+import {
   loadSubstrateFederatedNativeTwoCycleInvocationV1,
+  loadSubstrateFederatedNativeTwoCycleInvocationV2,
   validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1,
+  validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV2,
 } from '../substrate-federated-native-two-cycle-invocation-v1.js';
 
 export const SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_PREFLIGHT_V1_SCHEMA =
@@ -49,6 +54,13 @@ export interface SubstrateFederatedNativeTwoCyclePreflightV1Dependencies {
     typeof assertSubstrateFederatedIsolatedDevnetErgoNodeBuildOutputReadyV1;
 }
 
+export interface SubstrateFederatedNativeTwoCyclePreflightV2Dependencies {
+  readonly loadInvocation: typeof loadSubstrateFederatedNativeTwoCycleInvocationV2;
+  readonly validateEnvironment:
+    typeof validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV2;
+  readonly assertBuildOutputReady: typeof assertV6ErgoRuntimeBuildOutputReady;
+}
+
 const DEFAULT_DEPENDENCIES: SubstrateFederatedNativeTwoCyclePreflightV1Dependencies =
   Object.freeze({
     loadInvocation: loadSubstrateFederatedNativeTwoCycleInvocationV1,
@@ -56,6 +68,14 @@ const DEFAULT_DEPENDENCIES: SubstrateFederatedNativeTwoCyclePreflightV1Dependenc
       validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1,
     assertBuildOutputReady:
       assertSubstrateFederatedIsolatedDevnetErgoNodeBuildOutputReadyV1,
+  });
+
+const V2_DEPENDENCIES: SubstrateFederatedNativeTwoCyclePreflightV2Dependencies =
+  Object.freeze({
+    loadInvocation: loadSubstrateFederatedNativeTwoCycleInvocationV2,
+    validateEnvironment:
+      validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV2,
+    assertBuildOutputReady: assertV6ErgoRuntimeBuildOutputReady,
   });
 
 export async function preflightSubstrateFederatedNativeTwoCycleFromArgumentsV1(
@@ -79,6 +99,34 @@ export async function preflightSubstrateFederatedNativeTwoCycleFromArgumentsV1(
     invocation.config.ergoSourcePath,
   );
 
+  return projectReport(environment);
+}
+
+export async function preflightSubstrateFederatedNativeTwoCycleFromArgumentsV2(
+  argv: readonly string[],
+  dependencies: SubstrateFederatedNativeTwoCyclePreflightV2Dependencies =
+    V2_DEPENDENCIES,
+  observePhase?: (phase: SubstrateFederatedNativeTwoCyclePreflightV1Phase) => void,
+): Promise<Readonly<SubstrateFederatedNativeTwoCyclePreflightV1Report>> {
+  observePhase?.('arguments');
+  const configPath = parseArguments(argv);
+
+  observePhase?.('invocation config');
+  const invocation = dependencies.loadInvocation(configPath);
+
+  observePhase?.('environment');
+  const environment = await dependencies.validateEnvironment(invocation);
+
+  observePhase?.('Ergo node build output');
+  dependencies.assertBuildOutputReady(invocation.config.ergoBuild);
+
+  return projectReport(environment);
+}
+
+function projectReport(environment: Readonly<{
+  repository: Readonly<{ commit: string; tree: string }>;
+  toolIdentityDigestHex: string;
+}>): Readonly<SubstrateFederatedNativeTwoCyclePreflightV1Report> {
   return Object.freeze({
     schema: SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_PREFLIGHT_V1_SCHEMA,
     version: 1,
@@ -118,13 +166,15 @@ function parseArguments(argv: readonly string[]): string {
 async function main(): Promise<void> {
   let phase: SubstrateFederatedNativeTwoCyclePreflightV1Phase = 'arguments';
   try {
-    const report = await preflightSubstrateFederatedNativeTwoCycleFromArgumentsV1(
-      process.argv.slice(2),
-      DEFAULT_DEPENDENCIES,
-      currentPhase => {
-        phase = currentPhase;
-      },
-    );
+    const argv = process.argv.slice(2);
+    const observePhase = (currentPhase: SubstrateFederatedNativeTwoCyclePreflightV1Phase) => {
+      phase = currentPhase;
+    };
+    const report = argv[0] === '--invocation-v2'
+      ? await preflightSubstrateFederatedNativeTwoCycleFromArgumentsV2(
+        argv.slice(1), V2_DEPENDENCIES, observePhase)
+      : await preflightSubstrateFederatedNativeTwoCycleFromArgumentsV1(
+        argv, DEFAULT_DEPENDENCIES, observePhase);
     process.stdout.write(`${JSON.stringify(report)}\n`);
   } catch {
     process.stderr.write(`native two-cycle preflight failed during ${phase}\n`);
