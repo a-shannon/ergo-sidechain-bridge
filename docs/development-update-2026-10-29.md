@@ -4,7 +4,9 @@ A fresh Ergo node build now completes against the bridge's current source locks.
 
 This closes the current assembly blocker. The generated build has about 42,000 files; its full path inventory needed more space than the earlier capture limit allowed. The new build used a 16 MiB path-inventory limit while retaining the existing file-count, output-size and process controls.
 
-We're now connecting that builder to the bridge's execution path. The parent, worker and root must all select the current build explicitly and reject stale source locks before starting an attempt. The physical build is verified locally; that runtime integration is still in progress.
+The current builder is now connected in source through an explicit invocation format and the versioned parent, worker and Root V2 entry points. Local composed tests reject altered source, Maven, boot and LevelDB inputs before attempt creation. Those fixtures do not establish the full native process path; that is the next integration check.
+
+CI rebuilt the pinned Frontier and Ergo sources successfully. Its public-audit job still fails on an isolated HTTP regression's 10-second deadline. One local canary/client comparison using the CI-locked Node version completed within the unchanged limits; it does not explain the hosted timeout.
 
 The next milestone is two consecutive deposit, mint, burn and withdrawal cycles on a fresh synthetic local chain, preserving successor state and replay history between cycles. Stopped-state recovery and the operator rehearsal follow from that result.
 
