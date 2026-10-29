@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync,
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync,
   realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, parse, resolve } from 'node:path';
 
@@ -48,7 +48,7 @@ import { inspectSelectedV6NodeBuildLock, V6_NODE_BUILD_LOCK_CANONICAL_TEXT,
   V6_NODE_BUILD_LOCK_RELATIVE_PATH, V6_NODE_BUILD_LOCK_SHA256_HEX }
   from './substrate-federated-isolated-devnet-ergo-node-build-v6-lock.js';
 import { buildSubstrateFederatedIsolatedDevnetErgoNodeV6ForExecution,
-  selectV6ErgoRuntimeBuildInputNonAuthorizing }
+  selectV6ErgoRuntimeBuildInputNonAuthorizing, assertV6ErgoRuntimeBuildOutputReady }
   from './substrate-federated-isolated-devnet-ergo-node-build-v6-execution.js';
 
 const hash = (value: Buffer | string): string => createHash('sha256').update(value).digest('hex');
@@ -263,6 +263,52 @@ describe('V6 execution literal selection', () => {
     expect(() => selectV6ErgoRuntimeBuildInputNonAuthorizing(input)).toThrow(/data fields/u);
     expect(accessed).toBe(false);
   });
+});
+
+describe('V6 read-only runtime output readiness', () => {
+  function readyFixture(): V6OwnedBuildInput {
+    const input = fixture();
+    for (const path of [input.mirrorRoot, input.bootRoot, input.leveldbRoot,
+      input.mavenNamespaceRoot, input.v6MavenSourceRoot]) mkdirSync(path, { recursive: true });
+    for (const file of [input.gitExecutablePath, input.javaExecutablePath, input.sbtLauncherJarPath,
+      join(input.sourcePath, '.git', 'config')]) {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, 'readiness-metadata-fixture', { flag: 'wx' });
+    }
+    return input;
+  }
+
+  it('checks fresh output metadata without a build, tool capture or filesystem writes', () => {
+    const input = readyFixture();
+    const before = readdirSync(input.sourcePath);
+    expect(() => assertV6ErgoRuntimeBuildOutputReady(input)).not.toThrow();
+    expect(readdirSync(input.sourcePath)).toEqual(before);
+    expect(existsSync(input.resultPath)).toBe(false);
+    for (const path of Object.values(input.gitHomes)) expect(existsSync(path)).toBe(false);
+    expect(actor).not.toHaveBeenCalled();
+    expect(toolCapture).not.toHaveBeenCalled();
+  });
+
+  it.each(['target', 'nested-target', 'home', 'result', 'source-parent-result',
+    'outside-d-home', 'outside-d-result', 'system-root'] as const)(
+    'refuses isolated %s runtime output state before effects', fault => {
+      let input = readyFixture();
+      if (fault === 'target') mkdirSync(join(input.sourcePath, 'target'));
+      if (fault === 'nested-target') mkdirSync(join(input.sourcePath, 'project', 'project', 'target'),
+        { recursive: true });
+      if (fault === 'home') mkdirSync(input.gitHomes.afterAssemblyJob);
+      if (fault === 'result') writeFileSync(join(dirname(input.resultPath), 'occupied'), 'fixture');
+      if (fault === 'source-parent-result') input = { ...input,
+        resultPath: join(dirname(input.sourcePath), 'result', 'v6-process-owned-build-result.json') };
+      if (fault === 'outside-d-home') input = { ...input, gitHomes: { ...input.gitHomes,
+        afterAssemblyJob: join(input.systemRoot, 'never-created-home') } };
+      if (fault === 'outside-d-result') input = { ...input,
+        resultPath: join(input.systemRoot, 'v6-process-owned-build-result.json') };
+      if (fault === 'system-root') input = { ...input, systemRoot: dirname(input.sourcePath) };
+      expect(() => assertV6ErgoRuntimeBuildOutputReady(input)).toThrow();
+      expect(actor).not.toHaveBeenCalled();
+      expect(toolCapture).not.toHaveBeenCalled();
+    });
 });
 
 describe('fresh V6 builder to fixed node-owner input', () => {

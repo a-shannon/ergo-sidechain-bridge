@@ -61,10 +61,16 @@ import {
 } from '../substrate-federated-native-wasm-avl-build-tool-pins-v1.js';
 import {
   loadSubstrateFederatedNativeTwoCycleInvocationV1,
+  loadSubstrateFederatedNativeTwoCycleInvocationV2,
   projectSubstrateFederatedNativeTwoCycleResultV1,
   validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1,
+  validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV2,
+  type LoadedSubstrateFederatedNativeTwoCycleInvocationV1,
+  type LoadedSubstrateFederatedNativeTwoCycleInvocationV2,
 } from '../substrate-federated-native-two-cycle-invocation-v1.js';
-import { createNativeTwoCycleWorkerRecoveryLocatorV1 }
+import { assertV6ErgoRuntimeBuildInputsReady }
+  from '../substrate-federated-isolated-devnet-ergo-node-build-v6-execution.js';
+import { createNativeTwoCycleWorkerRecoveryLocatorV1, type RecoveryLocatorPointerV1 }
   from '../substrate-federated-native-two-cycle-recovery-locator-v1.js';
 import {
   createNativeTwoCycleWorkerCopiedErgoSelectionV1,
@@ -81,18 +87,29 @@ const WASM_PACKAGE_EVIDENCE_SCHEMA =
   'e2s.substrate-federated-native-two-cycle-wasm-avl-package.v2';
 const WORKER_WASM_PACKAGE_CHECK_SCHEMA =
   'e2s.substrate-federated-native-two-cycle-worker-wasm-avl-package.v1';
-
 export async function runSubstrateFederatedNativeTwoCycleWorkerFromArgumentsV2(
+  argv: readonly string[],
+): Promise<void> {
+  return runWorkerFromArguments(1, argv);
+}
+
+export async function runSubstrateFederatedNativeTwoCycleWorkerFromArgumentsV3(
+  argv: readonly string[],
+): Promise<void> {
+  return runWorkerFromArguments(2, argv);
+}
+
+async function runWorkerFromArguments(
+  invocationVersion: 1 | 2,
   argv: readonly string[],
 ): Promise<void> {
   const args = parseArguments(argv);
   if (process.platform !== 'win32' || process.arch !== 'x64') {
     throw new Error('native two-cycle worker requires Windows x64');
   }
-  const invocation = loadSubstrateFederatedNativeTwoCycleInvocationV1(
-    args.configPath,
-    args.attemptPath,
-  );
+  const invocation = invocationVersion === 1
+    ? loadSubstrateFederatedNativeTwoCycleInvocationV1(args.configPath, args.attemptPath)
+    : loadSubstrateFederatedNativeTwoCycleInvocationV2(args.configPath, args.attemptPath);
   if (invocation.configSha256Hex !== args.expectedConfigSha256Hex) {
     throw new Error('native two-cycle worker config digest differs');
   }
@@ -124,6 +141,20 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArgumentsV2(
     invocation.config.expectedBridgeCommit,
     String(parent.expectedBridgeTree),
   );
+  const beforeV2 = invocationVersion === 2
+    ? await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV2(
+      invocation as Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV2>) : undefined;
+  if (invocationVersion === 2) {
+    assertSubstrateFederatedNativeWasmAvlPackageMatchesV1(
+      invocation.config.bridgeRoot, wasmPackageEvidence);
+    await assertV6ErgoRuntimeBuildInputsReady(
+      (invocation as Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV2>).config.ergoBuild,
+      'worker-before-claim');
+    if (beforeV2!.repository.tree !== parent.expectedBridgeTree
+      || beforeV2!.toolIdentityDigestHex !== parent.toolIdentityDigestHex) {
+      throw new Error('native two-cycle worker environment differs from parent start');
+    }
+  }
   // Claim the attempt before entering signing custody. Even a failed root call
   // permanently consumes this worker entry; a retained attempt cannot replay it.
   writeNewFile(
@@ -134,10 +165,9 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArgumentsV2(
   let stage: NativeTwoCycleFailureStageV1 = 'pre-root';
   const depositFundingLatch = createNativeTwoCyclePublicFailureLatchV2();
   try {
-    const before =
-      await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(
-        invocation,
-      );
+    const before = invocationVersion === 1
+      ? await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(
+        invocation as Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV1>) : beforeV2!;
     if (before.repository.tree !== parent.expectedBridgeTree
       || before.toolIdentityDigestHex !== parent.toolIdentityDigestHex) {
       throw new Error('native two-cycle worker environment differs from parent start');
@@ -146,25 +176,38 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArgumentsV2(
       invocation.config.bridgeRoot,
       wasmPackageEvidence,
     );
-    const { runSubstrateFederatedGenesisTargetRootV1 } = await import(
-      '../apps/bridge-daemon/substrate-federated-genesis-target-root-v1.js'
-    );
-    assertSubstrateFederatedNativeWasmAvlPackageMatchesV1(
-      invocation.config.bridgeRoot,
-      wasmPackageEvidence,
-    );
-    stage = 'root-or-cleanup';
-    const rootResult = await runSubstrateFederatedGenesisTargetRootV1(
-      invocation.rootInput,
-      depositFundingLatch.observe,
-    );
+    let rootResult: Readonly<{ recoveryEvidence: Readonly<RecoveryLocatorPointerV1> }>;
+    if (invocationVersion === 1) {
+      const { runSubstrateFederatedGenesisTargetRootV1 } = await import(
+        '../apps/bridge-daemon/substrate-federated-genesis-target-root-v1.js'
+      );
+      assertSubstrateFederatedNativeWasmAvlPackageMatchesV1(
+        invocation.config.bridgeRoot, wasmPackageEvidence);
+      stage = 'root-or-cleanup';
+      rootResult = await runSubstrateFederatedGenesisTargetRootV1(
+        (invocation as Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV1>).rootInput,
+        depositFundingLatch.observe,
+      );
+    } else {
+      const { runSubstrateFederatedGenesisTargetRootV2 } = await import(
+        '../apps/bridge-daemon/substrate-federated-genesis-target-root-v1.js'
+      );
+      assertSubstrateFederatedNativeWasmAvlPackageMatchesV1(
+        invocation.config.bridgeRoot, wasmPackageEvidence);
+      stage = 'root-or-cleanup';
+      rootResult = await runSubstrateFederatedGenesisTargetRootV2(
+        (invocation as Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV2>).rootInput,
+        depositFundingLatch.observe,
+      );
+    }
     stage = 'projection';
     const result = projectSubstrateFederatedNativeTwoCycleResultV1(rootResult);
     stage = 'post-root-identity';
-    const after =
-      await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(
-        invocation,
-      );
+    const after = invocationVersion === 1
+      ? await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(
+        invocation as Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV1>)
+      : await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV2(
+        invocation as Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV2>);
     if (
       before.repository.commit !== after.repository.commit
       || before.repository.tree !== after.repository.tree
@@ -635,9 +678,12 @@ function exactRecord(
 }
 
 async function main(): Promise<void> {
-  await runSubstrateFederatedNativeTwoCycleWorkerFromArgumentsV2(
-    process.argv.slice(2),
-  );
+  const argv = process.argv.slice(2);
+  if (argv[0] === '--invocation-v2') {
+    await runSubstrateFederatedNativeTwoCycleWorkerFromArgumentsV3(argv.slice(1));
+  } else {
+    await runSubstrateFederatedNativeTwoCycleWorkerFromArgumentsV2(argv);
+  }
 }
 
 const invokedPath = process.argv[1]

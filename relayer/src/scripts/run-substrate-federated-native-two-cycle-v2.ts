@@ -85,10 +85,16 @@ import {
 } from '../substrate-federated-isolated-devnet-ergo-node-build-v1.js';
 import {
   loadSubstrateFederatedNativeTwoCycleInvocationV1,
+  loadSubstrateFederatedNativeTwoCycleInvocationV2,
   validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1,
+  validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV2,
+  type LoadedSubstrateFederatedNativeTwoCycleInvocationV1,
+  type LoadedSubstrateFederatedNativeTwoCycleInvocationV2,
   type SubstrateFederatedNativeTwoCycleEnvironmentV1,
   type SubstrateFederatedNativeTwoCycleResultV1,
 } from '../substrate-federated-native-two-cycle-invocation-v1.js';
+import { assertV6ErgoRuntimeBuildInputsReady }
+  from '../substrate-federated-isolated-devnet-ergo-node-build-v6-execution.js';
 import { createNativeTwoCycleParentRecoveryLocatorV1,
   parseNativeTwoCycleWorkerRecoveryLocatorV1,
   type RecoveryLocatorPointerV1 }
@@ -211,25 +217,45 @@ interface RunSubstrateFederatedNativeTwoCycleResult {
   readonly attemptName: string;
   readonly receiptDigestHex: string;
 }
+type LoadedInvocation = Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV1>
+  | Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV2>;
 
 export async function runSubstrateFederatedNativeTwoCycleFromArgumentsV2(
   argv: readonly string[],
 ): Promise<Readonly<RunSubstrateFederatedNativeTwoCycleResult>> {
+  return runFromArguments(1, argv);
+}
+
+export async function runSubstrateFederatedNativeTwoCycleFromArgumentsV3(
+  argv: readonly string[],
+): Promise<Readonly<RunSubstrateFederatedNativeTwoCycleResult>> {
+  return runFromArguments(2, argv);
+}
+
+async function runFromArguments(
+  invocationVersion: 1 | 2,
+  argv: readonly string[],
+): Promise<Readonly<RunSubstrateFederatedNativeTwoCycleResult>> {
   const configPath = parseArguments(argv);
-  const initial = loadSubstrateFederatedNativeTwoCycleInvocationV1(configPath);
+  const initial = loadInvocation(invocationVersion, configPath);
   const environmentBeforeBuild =
-    await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(initial);
-  assertSubstrateFederatedIsolatedDevnetErgoNodeBuildOutputReadyV1(
-    initial.config.bridgeRoot,
-    initial.config.ergoSourcePath,
-  );
+    await validateEnvironment(invocationVersion, initial);
+  if (invocationVersion === 1) {
+    const legacy = initial as Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV1>;
+    assertSubstrateFederatedIsolatedDevnetErgoNodeBuildOutputReadyV1(
+      legacy.config.bridgeRoot, legacy.config.ergoSourcePath);
+  } else {
+    await assertV6ErgoRuntimeBuildInputsReady(
+      (initial as Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV2>).config.ergoBuild,
+      'parent-before-wasm');
+  }
   const wasmPackage = await buildWasmAvlPackageV2(initial.config.bridgeRoot, { quiet: true });
   assertSubstrateFederatedNativeWasmAvlPackageMatchesV1(
     initial.config.bridgeRoot,
     wasmPackage,
   );
   const environmentBefore =
-    await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(initial);
+    await validateEnvironment(invocationVersion, initial);
   assertSameEnvironment(environmentBeforeBuild, environmentBefore);
   if (copiedSelectionEntryExists(join(initial.attemptPath,
     'worker-deposit-funding-stage-v2.json'))
@@ -237,6 +263,9 @@ export async function runSubstrateFederatedNativeTwoCycleFromArgumentsV2(
       'failure-deposit-funding-stage-v2.json'))) {
     throw new Error('native two-cycle V2 deposit funding output is occupied before entry');
   }
+  if (invocationVersion === 2) await assertV6ErgoRuntimeBuildInputsReady(
+    (initial as Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV2>).config.ergoBuild,
+    'parent-before-attempt');
   const attemptPath = createAttemptDirectory(initial.attemptPath);
   const capturedConfigPath = join(attemptPath, 'config.json');
   const startPath = join(attemptPath, 'start.json');
@@ -252,7 +281,7 @@ export async function runSubstrateFederatedNativeTwoCycleFromArgumentsV2(
       initial.configBytes,
       'native two-cycle captured config',
     );
-    const captured = loadSubstrateFederatedNativeTwoCycleInvocationV1(
+    const captured = loadInvocation(invocationVersion,
       capturedConfigPath,
       attemptPath,
     );
@@ -325,6 +354,7 @@ export async function runSubstrateFederatedNativeTwoCycleFromArgumentsV2(
       args: [
         ...process.execArgv,
         workerPath,
+        ...(invocationVersion === 2 ? ['--invocation-v2'] : []),
         '--config',
         capturedConfigPath,
         '--expected-config-sha256',
@@ -397,7 +427,7 @@ export async function runSubstrateFederatedNativeTwoCycleFromArgumentsV2(
     );
     const transport = readWorkerTransport(workerResultPath, initial.configSha256Hex);
     const environmentAfter =
-      await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(captured);
+      await validateEnvironment(invocationVersion, captured);
     assertSameEnvironment(environmentBefore, environmentAfter);
     if (
       transport.bridgeCommit !== environmentAfter.repository.commit
@@ -515,7 +545,7 @@ export async function runSubstrateFederatedNativeTwoCycleFromArgumentsV2(
   } catch (primaryFailure) {
     if (startPublished && !terminalPublicationStarted) {
       try {
-        const postcheckPassed = await boundedPostcheck(initial, environmentBefore);
+        const postcheckPassed = await boundedPostcheck(invocationVersion, initial, environmentBefore);
         const failureBody = Object.freeze({
           schema: FAILURE_SCHEMA,
           version: 1 as const,
@@ -1127,8 +1157,8 @@ function createAttemptDirectory(path: string): string {
 }
 
 function assertSameCapture(
-  first: Readonly<ReturnType<typeof loadSubstrateFederatedNativeTwoCycleInvocationV1>>,
-  second: Readonly<ReturnType<typeof loadSubstrateFederatedNativeTwoCycleInvocationV1>>,
+  first: LoadedInvocation,
+  second: LoadedInvocation,
 ): void {
   if (
     first.configSha256Hex !== second.configSha256Hex
@@ -1152,13 +1182,14 @@ function assertSameEnvironment(
 }
 
 async function boundedPostcheck(
-  invocation: Readonly<ReturnType<typeof loadSubstrateFederatedNativeTwoCycleInvocationV1>>,
+  invocationVersion: 1 | 2,
+  invocation: LoadedInvocation,
   before: Readonly<SubstrateFederatedNativeTwoCycleEnvironmentV1>,
 ): Promise<boolean> {
   try {
     const after =
-      await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(
-        loadSubstrateFederatedNativeTwoCycleInvocationV1(
+      await validateEnvironment(invocationVersion,
+        loadInvocation(invocationVersion,
           join(invocation.attemptPath, 'config.json'),
           invocation.attemptPath,
         ),
@@ -1168,6 +1199,18 @@ async function boundedPostcheck(
   } catch {
     return false;
   }
+}
+
+function loadInvocation(version: 1 | 2, path: string, attempt?: string): LoadedInvocation {
+  return version === 1 ? loadSubstrateFederatedNativeTwoCycleInvocationV1(path, attempt)
+    : loadSubstrateFederatedNativeTwoCycleInvocationV2(path, attempt);
+}
+
+function validateEnvironment(version: 1 | 2, invocation: LoadedInvocation) {
+  return version === 1 ? validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(
+    invocation as Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV1>)
+    : validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV2(
+      invocation as Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV2>);
 }
 
 function parseArguments(argv: readonly string[]): string {
@@ -1182,7 +1225,7 @@ function parseArguments(argv: readonly string[]): string {
 }
 
 function childEnvironment(
-  config: Readonly<ReturnType<typeof loadSubstrateFederatedNativeTwoCycleInvocationV1>>['config'],
+  config: LoadedInvocation['config'],
   gitExecutablePath: string,
 ): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {};
@@ -1198,12 +1241,17 @@ function childEnvironment(
   const configuredSystemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? process.env.WINDIR;
   if (configuredSystemRoot === undefined) throw new Error('worker SystemRoot is required');
   const systemRoot = realpathSync.native(configuredSystemRoot);
+  if (config.version === 2 && canonicalPathIdentity(systemRoot)
+      !== canonicalPathIdentity(realpathSync.native(config.ergoBuild.systemRoot))) {
+    throw new Error('worker SystemRoot differs from selected V6 build input');
+  }
   environment.SystemRoot = systemRoot;
   environment.WINDIR = systemRoot;
   environment.SystemDrive = parse(systemRoot).root.replace(/[\\/]+$/u, '');
   const inheritedPath = process.env.Path ?? process.env.PATH;
   environment.PATH = [dirname(gitExecutablePath), ...(inheritedPath ? [inheritedPath] : [])].join(delimiter);
-  environment.JAVA_HOME = dirname(dirname(config.ergoJavaExecutablePath));
+  environment.JAVA_HOME = dirname(dirname(config.version === 1
+    ? config.ergoJavaExecutablePath : config.ergoBuild.javaExecutablePath));
   environment.CARGO_HOME = config.frontierCargoHomeDirectory;
   return environment;
 }
@@ -1247,9 +1295,10 @@ function flexibleHex(value: unknown, bytes: number, label: string): string {
 }
 
 async function main(): Promise<void> {
-  const result = await runSubstrateFederatedNativeTwoCycleFromArgumentsV2(
-    process.argv.slice(2),
-  );
+  const argv = process.argv.slice(2);
+  const result = argv[0] === '--invocation-v2'
+    ? await runSubstrateFederatedNativeTwoCycleFromArgumentsV3(argv.slice(1))
+    : await runSubstrateFederatedNativeTwoCycleFromArgumentsV2(argv);
   process.stdout.write(`${canonicalJson(result)}\n`);
 }
 

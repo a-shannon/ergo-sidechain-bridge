@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstatSync, readdirSync, realpathSync } from 'node:fs';
+import { lstatSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, resolve } from 'node:path';
 
 import { canonicalJson, parseStrictJson, sha256CanonicalJson } from './strict-json.js';
@@ -17,7 +17,7 @@ import {
   inspectSelectedV6NodeBuildLock, V6_NODE_BUILD_LOCK_RELATIVE_PATH,
   V6_NODE_BUILD_LOCK_SHA256_HEX,
 } from './substrate-federated-isolated-devnet-ergo-node-build-v6-lock.js';
-import { selectV6BuildPreentryInputNonAuthorizing }
+import { inspectV6BuildPreentry, selectV6BuildPreentryInputNonAuthorizing }
   from './substrate-federated-isolated-devnet-ergo-node-build-v6-preentry.js';
 import {
   inspectSelectedV6PublicBuildResult, readDirectV6PublicBuildFile,
@@ -149,6 +149,112 @@ function fresh(input: Readonly<V6OwnedBuildInput>): void {
     directParents(home);
     absent(home);
   }
+}
+
+/** Read-only output gate, paired with the caller's immutable V2 environment check. */
+export function assertV6ErgoRuntimeBuildOutputReady(inputValue: Readonly<V6OwnedBuildInput>): void {
+  const input = selectV6ErgoRuntimeBuildInputNonAuthorizing(inputValue);
+  if (process.platform !== 'win32' || process.arch !== 'x64'
+      || typeof process.env.SystemRoot !== 'string'
+      || resolve(input.systemRoot).toLowerCase() !== resolve(process.env.SystemRoot).toLowerCase()) {
+    fail('Windows runtime or SystemRoot differs');
+  }
+  const homes = Object.values(input.gitHomes);
+  if ([input.resultPath, ...homes].some(path => !/^[d]:[\\/]/iu.test(path))) {
+    fail('runtime result and Git homes must be on D');
+  }
+  const sourceParent = dirname(input.sourcePath);
+  const resultParent = dirname(input.resultPath);
+  const protectedRoots = [input.bridgeRoot, input.sourcePath, input.mirrorRoot,
+    input.bootRoot, input.leveldbRoot, input.mavenNamespaceRoot, input.v6MavenSourceRoot];
+  if (rootsOverlap(resultParent, sourceParent)
+      || protectedRoots.some(root => rootsOverlap(resultParent, root))) {
+    fail('runtime result parent overlaps selected source or dependencies');
+  }
+  for (const directory of [...protectedRoots, input.systemRoot]) {
+    if (!/^[cd]:[\\/]/iu.test(directory)) fail('runtime input is not on a local selected volume');
+    const stat = lstatSync(directory, { bigint: true });
+    if (!stat.isDirectory() || stat.isSymbolicLink()
+        || resolve(realpathSync.native(directory)).toLowerCase() !== directory.toLowerCase()) {
+      fail('indirect runtime input directory');
+    }
+    directParents(directory);
+  }
+  for (const file of [input.gitExecutablePath, input.javaExecutablePath, input.sbtLauncherJarPath,
+    resolve(input.sourcePath, '.git', 'config')]) {
+    directParents(file);
+    identity(file);
+  }
+  for (const root of V4_GENERATED_OUTPUT_ROOTS) {
+    let cursor = input.sourcePath;
+    const parts = root.split('/');
+    for (let index = 0; index < parts.length; index++) {
+      cursor = resolve(cursor, parts[index]!);
+      let stat;
+      try { stat = lstatSync(cursor, { bigint: true }); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') break;
+        throw error;
+      }
+      if (index === parts.length - 1) fail('generated runtime output is already occupied');
+      if (!stat.isDirectory() || stat.isSymbolicLink()
+          || resolve(realpathSync.native(cursor)).toLowerCase() !== cursor.toLowerCase()) {
+        fail('indirect generated-output ancestor');
+      }
+    }
+  }
+  fresh(input);
+}
+
+/** Full source/dependency verification before an invocation boundary; no Java or receipt. */
+export async function assertV6ErgoRuntimeBuildInputsReady(
+  inputValue: Readonly<V6OwnedBuildInput>,
+  stage: 'parent-before-wasm' | 'parent-before-attempt' | 'worker-before-claim',
+): Promise<void> {
+  if (!['parent-before-wasm', 'parent-before-attempt', 'worker-before-claim'].includes(stage)) {
+    fail('unknown physical preentry stage');
+  }
+  const input = selectV6ErgoRuntimeBuildInputNonAuthorizing(inputValue);
+  assertV6ErgoRuntimeBuildOutputReady(input);
+  const parent = dirname(input.gitHomes.b0);
+  const protectedPaths = [input.bridgeRoot, dirname(input.sourcePath), input.mirrorRoot,
+    input.bootRoot, input.leveldbRoot, input.mavenNamespaceRoot, input.v6MavenSourceRoot,
+    dirname(input.resultPath), input.gitExecutablePath, input.javaExecutablePath,
+    input.sbtLauncherJarPath];
+  if (dirname(parent) === parent || !/^[d]:[\\/]/iu.test(parent)
+      || protectedPaths.some(path => rootsOverlap(parent, path))) {
+    fail('physical preentry HOME parent is not separate owned storage');
+  }
+  const home = resolve(parent, `.v6-preentry-${stage}`);
+  if (Object.values(input.gitHomes).some(path => rootsOverlap(home, path))) {
+    fail('physical preentry HOME overlaps an actor HOME');
+  }
+  directParents(home);
+  const anchor = (path: string): string => {
+    const stat = lstatSync(path, { bigint: true });
+    if (!stat.isDirectory() || stat.isSymbolicLink()
+        || resolve(realpathSync.native(path)).toLowerCase() !== path.toLowerCase()) {
+      fail('physical preentry HOME is indirect');
+    }
+    return [stat.dev, stat.ino, stat.mode].join(':');
+  };
+  const parentIdentity = anchor(parent);
+  absent(home);
+  mkdirSync(home, { recursive: false, mode: 0o700 });
+  const homeIdentity = anchor(home);
+  if (anchor(parent) !== parentIdentity) fail('physical preentry HOME parent changed');
+  await inspectV6BuildPreentry({
+    bridgeRoot: input.bridgeRoot, sourcePath: input.sourcePath,
+    gitExecutablePath: input.gitExecutablePath, gitHomePath: home,
+    lockSelection: 'v6-current', mirrorRoot: input.mirrorRoot, bootRoot: input.bootRoot,
+    leveldbRoot: input.leveldbRoot, leveldbReceiptPath: input.leveldbReceiptPath,
+    mavenNamespaceRoot: input.mavenNamespaceRoot, v6MavenSourceRoot: input.v6MavenSourceRoot,
+    caps: input.caps, maxMembershipBytes: input.maxMembershipBytes,
+  });
+  if (anchor(parent) !== parentIdentity || anchor(home) !== homeIdentity) {
+    fail('physical preentry HOME identity changed');
+  }
+  assertV6ErgoRuntimeBuildOutputReady(input);
 }
 function actorClaims(built: Readonly<V6OwnedBuildResult>): void {
   data(built, ['schema', 'resolverExecuted', 'updateExecuted', 'assemblyExecuted',

@@ -459,6 +459,14 @@ describe('layer import rules', () => {
   });
 
   describe('V2 native worker module import boundary', () => {
+    it.each([
+      [NATIVE_TWO_CYCLE_PARENT_V2, 'runSubstrateFederatedNativeTwoCycleFromArgumentsV3'],
+      [NATIVE_TWO_CYCLE_WORKER_V2, 'runSubstrateFederatedNativeTwoCycleWorkerFromArgumentsV3'],
+    ])('admits only the fixed V3 entry on %s', (file, binding) => {
+      expect(inspect({ [file]: `export async function ${binding}() {}` })).toEqual([]);
+      expect(inspect({ [file]: 'export async function runUnreviewedVariant() {}' })
+        .map(item => item.message)).toContain('reviewed app root export is not allowlisted: runUnreviewedVariant');
+    });
     const binding = 'runSubstrateFederatedNativeTwoCycleWorkerFromArgumentsV2';
     describe.each([NATIVE_TWO_CYCLE_PARENT_V2, 'scripts/foreign.ts', 'apps/bridge-daemon/foreign.ts'])(
       'caller %s', caller => {

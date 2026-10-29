@@ -46,9 +46,21 @@ import {
 import {
   assertPinnedFederatedJvmCompilerRuntimeV1,
 } from './substrate-federated-tracker-jvm-compiler-v1.js';
+import {
+  selectV6ErgoRuntimeBuildInputNonAuthorizing,
+  type V6ErgoRuntimeBuildInput,
+} from './substrate-federated-isolated-devnet-ergo-node-build-v6-execution.js';
+import {
+  inspectSelectedV6NodeBuildLock, V6_NODE_BUILD_LOCK_RELATIVE_PATH,
+  V6_NODE_BUILD_LOCK_SHA256_HEX,
+} from './substrate-federated-isolated-devnet-ergo-node-build-v6-lock.js';
+import { captureV4PinnedToolchain }
+  from './substrate-federated-isolated-devnet-ergo-node-build-v4-toolchain.js';
 
 export const SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_INVOCATION_V1_SCHEMA =
   'e2s.substrate-federated-native-two-cycle-invocation.v1' as const;
+export const SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_INVOCATION_V2_SCHEMA =
+  'e2s.substrate-federated-native-two-cycle-invocation.v2' as const;
 export const SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_RESULT_V1_SCHEMA =
   'e2s.substrate-federated-native-two-cycle-result.v1' as const;
 
@@ -62,6 +74,10 @@ const PATH_IDENTITY_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_PATH_IDENTITY_V1';
 const TOOL_IDENTITY_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_TOOL_IDENTITY_V1';
+const V2_PATH_IDENTITY_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_PATH_IDENTITY_V2';
+const V2_TOOL_IDENTITY_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_TOOL_IDENTITY_V2';
 
 const ROOT_RESULT_KEYS = Object.freeze([
   'status', 'nativeGenesisHashHex', 'typedGenesisSha256Hex',
@@ -166,6 +182,29 @@ export interface SubstrateFederatedNativeTwoCycleEnvironmentV1 {
   readonly toolIdentityDigestHex: string;
 }
 
+type CommonInvocationConfig = Omit<SubstrateFederatedNativeTwoCycleInvocationV1Config,
+  'schema' | 'version' | 'ergoSourcePath' | 'ergoGitExecutablePath'
+  | 'ergoJavaExecutablePath' | 'ergoSbtLauncherJarPath'>;
+export interface SubstrateFederatedNativeTwoCycleInvocationV2Config extends CommonInvocationConfig {
+  readonly schema: typeof SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_INVOCATION_V2_SCHEMA;
+  readonly version: 2;
+  readonly ergoBuild: Readonly<V6ErgoRuntimeBuildInput>;
+}
+export interface LoadedSubstrateFederatedNativeTwoCycleInvocationV2 extends
+  Omit<LoadedSubstrateFederatedNativeTwoCycleInvocationV1, 'config' | 'rootInput'> {
+  readonly config: Readonly<SubstrateFederatedNativeTwoCycleInvocationV2Config>;
+  readonly rootInput: Readonly<{
+    readonly captureCommittedReserveConfirmationProgress?: true;
+    readonly frontierBuild: LoadedSubstrateFederatedNativeTwoCycleInvocationV1['rootInput']['frontierBuild'];
+    readonly ergoBuild: Readonly<V6ErgoRuntimeBuildInput>;
+  }>;
+}
+export type SubstrateFederatedNativeTwoCycleEnvironmentV2 = SubstrateFederatedNativeTwoCycleEnvironmentV1;
+type InvocationConfig = SubstrateFederatedNativeTwoCycleInvocationV1Config
+  | SubstrateFederatedNativeTwoCycleInvocationV2Config;
+type LoadedInvocation = LoadedSubstrateFederatedNativeTwoCycleInvocationV1
+  | LoadedSubstrateFederatedNativeTwoCycleInvocationV2;
+
 export interface SubstrateFederatedNativeTwoCycleResultV1 {
   readonly schema: typeof SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_RESULT_V1_SCHEMA;
   readonly version: 1;
@@ -233,6 +272,23 @@ export function loadSubstrateFederatedNativeTwoCycleInvocationV1(
   configPathInput: string,
   expectedExistingAttemptPath?: string,
 ): Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV1> {
+  return loadInvocation(1, configPathInput, expectedExistingAttemptPath) as
+    Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV1>;
+}
+
+export function loadSubstrateFederatedNativeTwoCycleInvocationV2(
+  configPathInput: string,
+  expectedExistingAttemptPath?: string,
+): Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV2> {
+  return loadInvocation(2, configPathInput, expectedExistingAttemptPath) as
+    Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV2>;
+}
+
+function loadInvocation(
+  version: 1 | 2,
+  configPathInput: string,
+  expectedExistingAttemptPath?: string,
+): Readonly<LoadedInvocation> {
   const configPath = existingPath(configPathInput, 'invocation config', 'file');
   const loaded = readBoundedRegularFile(
     configPath,
@@ -253,7 +309,11 @@ export function loadSubstrateFederatedNativeTwoCycleInvocationV1(
     && Object.prototype.hasOwnProperty.call(parsed, progressKey);
   const hasSelectionOption = parsed !== null && typeof parsed === 'object'
     && Object.prototype.hasOwnProperty.call(parsed, selectionKey);
-  const raw = exactRecord(parsed, [...CONFIG_KEYS,
+  const keys = version === 1 ? CONFIG_KEYS : [
+    ...CONFIG_KEYS.filter(key => !['ergoSourcePath', 'ergoGitExecutablePath',
+      'ergoJavaExecutablePath', 'ergoSbtLauncherJarPath'].includes(key)), 'ergoBuild',
+  ];
+  const raw = exactRecord(parsed, [...keys,
     ...(hasProgressOption ? [progressKey] : []), ...(hasSelectionOption ? [selectionKey] : [])],
     'native two-cycle invocation config');
   if (hasProgressOption && typeof raw[progressKey] !== 'boolean') {
@@ -263,8 +323,9 @@ export function loadSubstrateFederatedNativeTwoCycleInvocationV1(
     throw new Error('native copied Ergo recovery selection option must be Boolean');
   }
   if (
-    raw.schema !== SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_INVOCATION_V1_SCHEMA
-    || raw.version !== 1
+    raw.schema !== (version === 1 ? SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_INVOCATION_V1_SCHEMA
+      : SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_INVOCATION_V2_SCHEMA)
+    || raw.version !== version
     || raw.profile !== PROFILE
   ) {
     throw new Error('native two-cycle invocation config identity is unsupported');
@@ -314,22 +375,23 @@ export function loadSubstrateFederatedNativeTwoCycleInvocationV1(
     'Protobuf compiler executable',
     'file',
   );
-  const ergoSourcePath = existingPath(raw.ergoSourcePath, 'Ergo source', 'directory');
-  const ergoGitExecutablePath = existingPath(
-    raw.ergoGitExecutablePath,
-    'Ergo Git executable',
-    'file',
-  );
-  const ergoJavaExecutablePath = existingPath(
-    raw.ergoJavaExecutablePath,
-    'Java executable',
-    'file',
-  );
-  const ergoSbtLauncherJarPath = existingPath(
-    raw.ergoSbtLauncherJarPath,
-    'sbt launcher JAR',
-    'file',
-  );
+  const ergoBuild = version === 2 ? selectV6ErgoRuntimeBuildInputNonAuthorizing(
+    raw.ergoBuild as V6ErgoRuntimeBuildInput) : undefined;
+  if (ergoBuild !== undefined && !samePath(ergoBuild.bridgeRoot, bridgeRoot)) {
+    throw new Error('nested Ergo build bridge root differs from invocation bridge root');
+  }
+  const ergoPaths = ergoBuild === undefined ? {
+    source: raw.ergoSourcePath, git: raw.ergoGitExecutablePath,
+    java: raw.ergoJavaExecutablePath, sbt: raw.ergoSbtLauncherJarPath,
+  } : { source: ergoBuild.sourcePath, git: ergoBuild.gitExecutablePath,
+    java: ergoBuild.javaExecutablePath, sbt: ergoBuild.sbtLauncherJarPath };
+  const ergoSourcePath = existingPath(ergoPaths.source, 'Ergo source', 'directory');
+  const ergoGitExecutablePath = existingPath(ergoPaths.git,
+    'Ergo Git executable', 'file');
+  const ergoJavaExecutablePath = existingPath(ergoPaths.java,
+    'Java executable', 'file');
+  const ergoSbtLauncherJarPath = existingPath(ergoPaths.sbt,
+    'sbt launcher JAR', 'file');
   const outputParentDirectory = existingPath(
     raw.outputParentDirectory,
     'invocation output parent',
@@ -357,11 +419,9 @@ export function loadSubstrateFederatedNativeTwoCycleInvocationV1(
     throw new Error('original invocation config must be outside the checkout');
   }
 
-  const config: SubstrateFederatedNativeTwoCycleInvocationV1Config = Object.freeze({
+  const commonConfig = {
     ...(hasProgressOption ? { captureCommittedReserveConfirmationProgress: raw[progressKey] as boolean } : {}),
     ...(hasSelectionOption ? { captureCopiedErgoRecoverySelection: raw[selectionKey] as boolean } : {}),
-    schema: SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_INVOCATION_V1_SCHEMA,
-    version: 1,
     profile: PROFILE,
     expectedBridgeCommit,
     bridgeRoot,
@@ -372,12 +432,16 @@ export function loadSubstrateFederatedNativeTwoCycleInvocationV1(
     frontierRustcExecutablePath,
     frontierGitExecutablePath,
     frontierProtocExecutablePath,
-    ergoSourcePath,
-    ergoGitExecutablePath,
-    ergoJavaExecutablePath,
-    ergoSbtLauncherJarPath,
     outputParentDirectory,
     attemptName,
+  };
+  const config: InvocationConfig = version === 1 ? Object.freeze({
+    ...commonConfig, schema: SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_INVOCATION_V1_SCHEMA,
+    version: 1 as const, ergoSourcePath, ergoGitExecutablePath,
+    ergoJavaExecutablePath, ergoSbtLauncherJarPath,
+  }) : Object.freeze({
+    ...commonConfig, schema: SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_INVOCATION_V2_SCHEMA,
+    version: 2 as const, ergoBuild: ergoBuild!,
   });
   assertRequiredPathRelationships(config, roots.worktreeRoot, attemptPath);
   const pathIdentityDigestHex = sha256CanonicalJson({
@@ -390,13 +454,11 @@ export function loadSubstrateFederatedNativeTwoCycleInvocationV1(
     frontierRustcExecutablePath,
     frontierGitExecutablePath,
     frontierProtocExecutablePath,
-    ergoSourcePath,
-    ergoGitExecutablePath,
-    ergoJavaExecutablePath,
-    ergoSbtLauncherJarPath,
+    ...(config.version === 1 ? { ergoSourcePath, ergoGitExecutablePath,
+      ergoJavaExecutablePath, ergoSbtLauncherJarPath } : { ergoBuild: config.ergoBuild }),
     outputParentDirectory,
     attemptPath,
-  }, PATH_IDENTITY_DIGEST_DOMAIN);
+  }, version === 1 ? PATH_IDENTITY_DIGEST_DOMAIN : V2_PATH_IDENTITY_DIGEST_DOMAIN);
   return Object.freeze({
     config,
     configBytes: loaded.bytes,
@@ -417,7 +479,7 @@ export function loadSubstrateFederatedNativeTwoCycleInvocationV1(
         gitExecutablePath: frontierGitExecutablePath,
         protocExecutablePath: frontierProtocExecutablePath,
       }),
-      ergoBuild: Object.freeze({
+      ergoBuild: version === 2 ? ergoBuild! : Object.freeze({
         worktreeRoot: roots.worktreeRoot,
         bridgeRoot,
         ergoSourcePath,
@@ -426,26 +488,45 @@ export function loadSubstrateFederatedNativeTwoCycleInvocationV1(
         sbtLauncherJarPath: ergoSbtLauncherJarPath,
       }),
     }),
-  });
+  }) as Readonly<LoadedInvocation>;
 }
 
 export async function validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(
   invocation: Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV1>,
 ): Promise<Readonly<SubstrateFederatedNativeTwoCycleEnvironmentV1>> {
+  return validateInvocationEnvironment(1, invocation);
+}
+
+export async function validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV2(
+  invocation: Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV2>,
+): Promise<Readonly<SubstrateFederatedNativeTwoCycleEnvironmentV2>> {
+  return validateInvocationEnvironment(2, invocation);
+}
+
+async function validateInvocationEnvironment(
+  version: 1 | 2,
+  invocation: Readonly<LoadedInvocation>,
+): Promise<Readonly<SubstrateFederatedNativeTwoCycleEnvironmentV1>> {
+  if (invocation.config.version !== version
+      || invocation.config.schema !== (version === 1
+        ? SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_INVOCATION_V1_SCHEMA
+        : SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_INVOCATION_V2_SCHEMA)) {
+    throw new Error('invocation environment version differs from selected entry point');
+  }
   revalidateLoadedInvocation(invocation);
+  const ergoPaths = invocationErgoPaths(invocation.config);
   const runtime = validatePinnedFederatedCampaignParentRuntime(
     invocation.config.bridgeRoot,
   );
   if (
     !samePath(runtime.gitExecutablePath, invocation.config.frontierGitExecutablePath)
-    || !samePath(runtime.gitExecutablePath, invocation.config.ergoGitExecutablePath)
+    || !samePath(runtime.gitExecutablePath, ergoPaths.git)
   ) {
     throw new Error('invocation Git paths differ from the pinned parent runtime');
   }
-  const javaHome = javaHomeFromExecutable(invocation.config.ergoJavaExecutablePath);
-  assertPinnedFederatedJvmCompilerRuntimeV1({
-    bridgeRoot: invocation.config.bridgeRoot,
-    javaHome,
+  const javaHome = javaHomeFromExecutable(ergoPaths.java);
+  if (version === 1) assertPinnedFederatedJvmCompilerRuntimeV1({
+    bridgeRoot: invocation.config.bridgeRoot, javaHome,
   });
   assertSubstrateFederatedAuthoritySafeMsvcBuildHostV1();
   const repository = await inspectCleanRepository(
@@ -461,18 +542,9 @@ export async function validateSubstrateFederatedNativeTwoCycleInvocationEnvironm
     cwd: invocation.config.frontierSourcePath,
   });
   const protoc = inspectPinnedProtoc(invocation.config);
-  const ergoLock = inspectSubstrateFederatedIsolatedDevnetErgoNodeBuildLockV1(
-    invocation.config.bridgeRoot,
-  );
-  if (
-    sha256(readFileSync(invocation.config.ergoGitExecutablePath))
-      !== ergoLock.gitExecutableSha256Hex
-    || sha256(readFileSync(invocation.config.ergoSbtLauncherJarPath))
-      !== ergoLock.sbtLauncherJarSha256Hex
-    || hashDirectoryFiles(javaHome) !== ergoLock.javaHomeSha256Hex
-  ) {
-    throw new Error('invocation Ergo build tools differ from committed locks');
-  }
+  const ergo = version === 1 ? inspectV1ErgoTools(invocation.config.bridgeRoot,
+    ergoPaths, javaHome) : inspectV2ErgoTools(invocation.config as
+      SubstrateFederatedNativeTwoCycleInvocationV2Config);
   const toolIdentityDigestHex = sha256CanonicalJson({
     nodeVersion: runtime.nodeVersion,
     nodeExecutableSha256: runtime.nodeExecutableSha256,
@@ -487,16 +559,63 @@ export async function validateSubstrateFederatedNativeTwoCycleInvocationEnvironm
       version: protoc.version,
       sha256Hex: protoc.sha256Hex,
     },
-    ergo: {
-      gitVersion: ergoLock.gitVersion,
-      gitExecutableSha256Hex: ergoLock.gitExecutableSha256Hex,
-      javaHomeSha256Hex: ergoLock.javaHomeSha256Hex,
-      sbtLauncherJarSha256Hex: ergoLock.sbtLauncherJarSha256Hex,
-      projectSbtVersion: ergoLock.projectSbtVersion,
-    },
-  }, TOOL_IDENTITY_DIGEST_DOMAIN);
+    ergo,
+  }, version === 1 ? TOOL_IDENTITY_DIGEST_DOMAIN : V2_TOOL_IDENTITY_DIGEST_DOMAIN);
   revalidateLoadedInvocation(invocation);
   return Object.freeze({ repository, runtime, toolIdentityDigestHex });
+}
+
+function inspectV1ErgoTools(bridgeRoot: string,
+  paths: ReturnType<typeof invocationErgoPaths>, javaHome: string) {
+  const lock = inspectSubstrateFederatedIsolatedDevnetErgoNodeBuildLockV1(bridgeRoot);
+  if (sha256(readFileSync(paths.git)) !== lock.gitExecutableSha256Hex
+      || sha256(readFileSync(paths.sbt)) !== lock.sbtLauncherJarSha256Hex
+      || hashDirectoryFiles(javaHome) !== lock.javaHomeSha256Hex) {
+    throw new Error('invocation Ergo build tools differ from committed locks');
+  }
+  return {
+    gitVersion: lock.gitVersion, gitExecutableSha256Hex: lock.gitExecutableSha256Hex,
+    javaHomeSha256Hex: lock.javaHomeSha256Hex,
+    sbtLauncherJarSha256Hex: lock.sbtLauncherJarSha256Hex,
+    projectSbtVersion: lock.projectSbtVersion,
+  };
+}
+
+function inspectV2ErgoTools(config: Readonly<SubstrateFederatedNativeTwoCycleInvocationV2Config>) {
+  const selected = inspectSelectedV6NodeBuildLock({
+    path: resolve(config.bridgeRoot, V6_NODE_BUILD_LOCK_RELATIVE_PATH),
+    expectedSha256Hex: V6_NODE_BUILD_LOCK_SHA256_HEX,
+  });
+  const bridgeLocks = Object.fromEntries(([
+    ['solidity/package-lock.json', 'package-lock.json'],
+    ['solidity/compiled/build-manifest.json', 'build-manifest.json'],
+    ['sources/consensus-source-lock.json', 'consensus-source-lock.json'],
+  ] as const).map(([path, key]) => {
+    const file = readBoundedRegularFile(resolve(config.bridgeRoot, path),
+      'V6 current bridge lock', MAX_GIT_OUTPUT_BYTES);
+    const digest = sha256(file.bytes);
+    if (digest !== selected.lock.currentBridgeLockSha256[key]) {
+      throw new Error('invocation V6 current bridge lock differs');
+    }
+    return [path, digest];
+  }));
+  const git = readBoundedRegularFile(config.ergoBuild.gitExecutablePath,
+    'V6 Git executable', 64 * 1024 * 1024);
+  if (sha256(git.bytes) !== selected.lock.gitExecutableSha256) {
+    throw new Error('invocation V6 Git tool differs from current lock');
+  }
+  const toolchain = captureV4PinnedToolchain({
+    javaExecutablePath: config.ergoBuild.javaExecutablePath,
+    sbtLauncherJarPath: config.ergoBuild.sbtLauncherJarPath, lock: selected.lock,
+  });
+  return {
+    lockSelection: 'v6-current', lockSha256Hex: selected.sha256Hex,
+    bridgeLocks, gitVersion: selected.lock.gitVersion,
+    gitExecutableSha256Hex: selected.lock.gitExecutableSha256,
+    projectSbtVersion: selected.lock.projectSbtVersion, toolchain,
+    // The complete selected input binds every path, cap and membership bound.
+    ergoBuild: config.ergoBuild,
+  };
 }
 
 export function projectSubstrateFederatedNativeTwoCycleResultV1(
@@ -679,7 +798,7 @@ function normalizeRootResultForV1(value: unknown): Record<string, unknown> {
 }
 
 function revalidateLoadedInvocation(
-  invocation: Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV1>,
+  invocation: Readonly<LoadedInvocation>,
 ): void {
   const current = readBoundedRegularFile(
     invocation.configCanonicalPath,
@@ -692,6 +811,7 @@ function revalidateLoadedInvocation(
   ) {
     throw new Error('native two-cycle invocation config changed');
   }
+  const ergo = invocationErgoPaths(invocation.config);
   for (const [value, label, kind] of [
     [invocation.config.bridgeRoot, 'bridge root', 'directory'],
     [invocation.worktreeRoot, 'worktree root', 'directory'],
@@ -702,16 +822,17 @@ function revalidateLoadedInvocation(
     [invocation.config.frontierRustcExecutablePath, 'Rust compiler executable', 'file'],
     [invocation.config.frontierGitExecutablePath, 'Frontier Git executable', 'file'],
     [invocation.config.frontierProtocExecutablePath, 'Protobuf compiler executable', 'file'],
-    [invocation.config.ergoSourcePath, 'Ergo source', 'directory'],
-    [invocation.config.ergoGitExecutablePath, 'Ergo Git executable', 'file'],
-    [invocation.config.ergoJavaExecutablePath, 'Java executable', 'file'],
-    [invocation.config.ergoSbtLauncherJarPath, 'sbt launcher JAR', 'file'],
+    [ergo.source, 'Ergo source', 'directory'],
+    [ergo.git, 'Ergo Git executable', 'file'],
+    [ergo.java, 'Java executable', 'file'],
+    [ergo.sbt, 'sbt launcher JAR', 'file'],
     [invocation.config.outputParentDirectory, 'invocation output parent', 'directory'],
   ] as const) {
     if (!samePath(existingPath(value, label, kind), value)) {
       throw new Error(`${label} identity changed`);
     }
   }
+  if (invocation.config.version === 2) validateV2BuildPaths(invocation.config.ergoBuild);
 }
 
 async function inspectCleanRepository(
@@ -745,7 +866,7 @@ async function inspectCleanRepository(
 }
 
 function inspectPinnedProtoc(
-  config: Readonly<SubstrateFederatedNativeTwoCycleInvocationV1Config>,
+  config: Readonly<CommonInvocationConfig>,
 ) {
   const original = process.env.PROTOC;
   process.env.PROTOC = config.frontierProtocExecutablePath;
@@ -765,10 +886,26 @@ function inspectPinnedProtoc(
 }
 
 function assertRequiredPathRelationships(
-  config: Readonly<SubstrateFederatedNativeTwoCycleInvocationV1Config>,
+  config: Readonly<InvocationConfig>,
   worktreeRoot: string,
   attemptPath: string,
 ): void {
+  const ergo = invocationErgoPaths(config);
+  const extraPaths = config.version === 1 ? [] : validateV2BuildPaths(config.ergoBuild);
+  if (config.version === 2) {
+    const build = config.ergoBuild;
+    const outputProtectedRoots = [worktreeRoot, config.bridgeRoot,
+      dirname(build.sourcePath), config.frontierSourcePath,
+      dirname(config.frontierCargoExecutablePath), dirname(config.frontierRustcExecutablePath),
+      dirname(config.frontierGitExecutablePath), dirname(config.frontierProtocExecutablePath),
+      javaHomeFromExecutable(build.javaExecutablePath), dirname(build.sbtLauncherJarPath),
+      build.systemRoot, build.mirrorRoot, build.bootRoot, build.leveldbRoot,
+      build.mavenNamespaceRoot, build.v6MavenSourceRoot];
+    if ([build.resultPath, ...Object.values(build.gitHomes)].some(output =>
+      outputProtectedRoots.some(root => pathsOverlap(output, root)))) {
+      throw new Error('V6 result and Git homes must not overlap source parents, repository, caches or tools');
+    }
+  }
   const protectedPaths = [
     worktreeRoot,
     config.bridgeRoot,
@@ -779,9 +916,10 @@ function assertRequiredPathRelationships(
     dirname(config.frontierRustcExecutablePath),
     dirname(config.frontierGitExecutablePath),
     dirname(config.frontierProtocExecutablePath),
-    config.ergoSourcePath,
-    javaHomeFromExecutable(config.ergoJavaExecutablePath),
-    dirname(config.ergoSbtLauncherJarPath),
+    ergo.source,
+    javaHomeFromExecutable(ergo.java),
+    dirname(ergo.sbt),
+    ...extraPaths,
   ];
   for (const path of protectedPaths) {
     if (pathsOverlap(attemptPath, path)) {
@@ -791,21 +929,68 @@ function assertRequiredPathRelationships(
   const mutableRoots = [config.frontierBuildParentDirectory,
     config.frontierCargoHomeDirectory, config.outputParentDirectory];
   const immutableRoots = [worktreeRoot, config.bridgeRoot,
-    config.frontierSourcePath, config.ergoSourcePath,
+    config.frontierSourcePath, ergo.source,
     dirname(config.frontierCargoExecutablePath), dirname(config.frontierRustcExecutablePath),
     dirname(config.frontierGitExecutablePath), dirname(config.frontierProtocExecutablePath),
-    javaHomeFromExecutable(config.ergoJavaExecutablePath), dirname(config.ergoSbtLauncherJarPath)];
+    javaHomeFromExecutable(ergo.java), dirname(ergo.sbt), ...extraPaths];
   for (const [index, mutable] of mutableRoots.entries()) {
     if ([...immutableRoots, ...mutableRoots.slice(index + 1)]
       .some(protectedRoot => pathsOverlap(mutable, protectedRoot))) {
       throw new Error('build, cache and output roots must not overlap repository, source, tools or each other');
     }
   }
-  if ([config.frontierSourcePath, config.ergoSourcePath]
+  if ([config.frontierSourcePath, ergo.source]
     .some(source => pathsOverlap(source, worktreeRoot) || pathsOverlap(source, config.bridgeRoot))
-    || pathsOverlap(config.frontierSourcePath, config.ergoSourcePath)) {
+    || pathsOverlap(config.frontierSourcePath, ergo.source)) {
     throw new Error('source roots must not overlap the bridge checkout or each other');
   }
+}
+
+/** A path view, not a legacy config: V2 never receives V1's flat Ergo keys. */
+function invocationErgoPaths(config: Readonly<InvocationConfig>) {
+  return config.version === 1 ? {
+    source: config.ergoSourcePath, git: config.ergoGitExecutablePath,
+    java: config.ergoJavaExecutablePath, sbt: config.ergoSbtLauncherJarPath,
+  } : {
+    source: config.ergoBuild.sourcePath, git: config.ergoBuild.gitExecutablePath,
+    java: config.ergoBuild.javaExecutablePath, sbt: config.ergoBuild.sbtLauncherJarPath,
+  };
+}
+
+/** Immutable path checks accept outputs created by the legitimate V6 build. */
+function validateV2BuildPaths(input: Readonly<V6ErgoRuntimeBuildInput>): readonly string[] {
+  selectV6ErgoRuntimeBuildInputNonAuthorizing(input);
+  for (const [path, kind] of [
+    [input.bridgeRoot, 'directory'], [input.sourcePath, 'directory'],
+    [input.gitExecutablePath, 'file'], [input.mirrorRoot, 'directory'],
+    [input.bootRoot, 'directory'], [input.leveldbRoot, 'directory'],
+    [input.leveldbReceiptPath, 'file'], [input.mavenNamespaceRoot, 'directory'],
+    [input.v6MavenSourceRoot, 'directory'], [input.javaExecutablePath, 'file'],
+    [input.sbtLauncherJarPath, 'file'], [input.systemRoot, 'directory'],
+  ] as const) {
+    if (!samePath(existingPath(path, 'V6 Ergo build input', kind), path)) {
+      throw new Error('V6 Ergo build input path identity changed');
+    }
+  }
+  for (const path of [input.resultPath, ...Object.values(input.gitHomes)]) {
+    // Check each existing ancestor without requiring an output to exist or be absent.
+    let ancestor = path;
+    for (;;) {
+      try { lstatSync(ancestor); break; } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        const parent = dirname(ancestor);
+        if (parent === ancestor) throw new Error('V6 output has no existing ancestor');
+        ancestor = parent;
+      }
+    }
+    if (!samePath(existingPath(ancestor, 'V6 output ancestor',
+      ancestor === path && path === input.resultPath ? 'file' : 'directory'), ancestor)) {
+      throw new Error('V6 output ancestor identity changed');
+    }
+  }
+  return [input.mirrorRoot, input.bootRoot, input.leveldbRoot, input.leveldbReceiptPath,
+    input.mavenNamespaceRoot, input.v6MavenSourceRoot, input.resultPath,
+    input.systemRoot, ...Object.values(input.gitHomes)];
 }
 
 function issuanceTransactions(value: unknown): Readonly<{
