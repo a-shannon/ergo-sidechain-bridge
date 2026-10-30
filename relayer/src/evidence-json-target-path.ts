@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync } from 'fs';
+import { lstatSync, readFileSync, realpathSync } from 'fs';
 import { basename, extname, isAbsolute, relative, resolve } from 'path';
 import {
   evidenceTargetInspectionVariants,
@@ -8,6 +8,7 @@ import {
   isEvidenceSecretOrRuntimeName,
 } from './evidence-sensitive-target.js';
 import { classifyPublicationClaimText } from './publication-claim-boundary.js';
+import { canonicalPathIdentity, isPathInside, readBoundedRegularFile } from './create-only-out-of-repository-artifact.js';
 
 export interface EvidenceJsonTargetRead {
   errors: string[];
@@ -16,6 +17,31 @@ export interface EvidenceJsonTargetRead {
 }
 
 const blockedTargetLabel = '<blocked JSON evidence target>';
+
+// Preserve raw text for consumers whose schema requires duplicate-key and canonical-byte checks.
+export function readBoundedEvidenceJsonTargetText(target: string, optionName: string): {
+  errors: string[]; label: string; text?: string;
+} {
+  const label = formatEvidenceJsonTargetLabel(target);
+  const errors = validateEvidenceJsonTargetPath(target, optionName);
+  if (errors.length) return { errors, label };
+  if (evidenceTargetInspectionVariants(target.toLowerCase()).some(value =>
+    /(?:^|[\\/_.-])(?:worker|runtime|recovery|locator|manifest|journal|logs?)(?:$|[\\/_.-])/u.test(value))) {
+    return { errors: [`${blockedTargetLabel}: ${optionName} accepts public evidence only`], label: blockedTargetLabel };
+  }
+  try {
+    const path = resolve(process.cwd(), target);
+    const bridgeRoot = realpathSync(resolve(process.cwd(), '..'));
+    const canonical = realpathSync(path);
+    if (!isPathInside(bridgeRoot, canonical) || canonicalPathIdentity(canonical) !== canonicalPathIdentity(path)
+      || lstatSync(path).nlink !== 1) throw new Error('evidence target identity differs');
+    const file = readBoundedRegularFile(path, 'public FED evidence', 64 * 1024);
+    if (lstatSync(path).nlink !== 1) throw new Error('evidence target link count differs');
+    return { errors: [], label, text: new TextDecoder('utf-8', { fatal: true }).decode(file.bytes) };
+  } catch {
+    return { errors: [`${label}: ${optionName} requires bounded regular direct single-link JSON evidence inside the bridge repository`], label };
+  }
+}
 
 export function readEvidenceJsonTarget(target: string, optionName = '--json'): EvidenceJsonTargetRead {
   const trimmedTarget = target.trim();

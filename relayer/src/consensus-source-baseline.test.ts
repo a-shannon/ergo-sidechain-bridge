@@ -119,7 +119,7 @@ const ergoNode = {
   baseCommit: '2'.repeat(40),
   baseTag: 'v6.0.2',
   patchCommitProvenance: 'e'.repeat(40),
-  patchPath: 'sources/ergo-node/0001-sidechain-extension-fields.patch',
+  patchPath: 'sources/ergo-node/0002-sidechain-extension-fields-candidate-recovery.patch',
   patchSha256: 'f'.repeat(64),
   role: 'operator-provided-ergo-extension-producer',
   commitmentInput: 'operator-provided',
@@ -136,6 +136,22 @@ const ergoNode = {
     },
   ],
 };
+
+const addedErgoPath = 'src/main/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1.scala';
+
+function mixedErgoCheckoutFixture() {
+  const declaration: any = structuredClone(ergoNode);
+  declaration.files.push({ path: addedErgoPath, status: 'added', patchedBlob: '6'.repeat(40) });
+  return {
+    declaration,
+    observation: {
+      head: declaration.baseCommit,
+      status: declaration.files.map((file: any) =>
+        `${file.status === 'added' ? '??' : ' M'} ${file.path}`).join('\n'),
+      blobs: Object.fromEntries(declaration.files.map((file: any) => [file.path, file.patchedBlob])),
+    },
+  };
+}
 
 const solidityBuild = {
   schema: 'ergo-sidechain-bridge/solidity-build-closure/v1',
@@ -184,6 +200,28 @@ async function loadCliModule(): Promise<any | undefined> {
   }
 }
 
+function extractAddedPatchFile(patch: string, path: string): string {
+  const marker = `diff --git a/${path} b/${path}\n`;
+  const start = patch.indexOf(marker);
+  if (start < 0) throw new Error(`patch does not add ${path}`);
+  const next = patch.indexOf('\ndiff --git ', start + marker.length);
+  const section = patch.slice(start, next < 0 ? undefined : next);
+  const sourceLines = section
+    .split('\n')
+    .filter(line => line.startsWith('+') && line !== `+++ b/${path}`)
+    .map(line => line.slice(1));
+  if (sourceLines.length === 0) throw new Error(`patch body for ${path} is empty`);
+  return sourceLines.join('\n');
+}
+
+function extractTopLevelRustFunction(source: string, name: string): string {
+  const marker = `fn ${name}(`;
+  const start = source.indexOf(marker);
+  if (start < 0) throw new Error(`Rust function ${name} is absent`);
+  const next = source.indexOf('\nfn ', start + marker.length);
+  return source.slice(start, next < 0 ? undefined : next);
+}
+
 describe('consensus source baseline', () => {
   it('tracks the reachable Frontier submodule and Ergo patch artifacts in the repository', () => {
     const gitmodulesPath = resolve(REPOSITORY_ROOT, '.gitmodules');
@@ -195,7 +233,7 @@ describe('consensus source baseline', () => {
       BRIDGE_ROOT,
       'sources',
       'ergo-node',
-      '0001-sidechain-extension-fields.patch',
+      '0002-sidechain-extension-fields-candidate-recovery.patch',
     );
     const frontierPatchPath = resolve(
       BRIDGE_ROOT,
@@ -247,6 +285,62 @@ describe('consensus source baseline', () => {
       );
       expect(attributes).toContain('sources/consensus-source-lock.json text eol=lf');
     }
+  });
+
+  it('derives the LAB source-proof validity window from the activated runtime profile', () => {
+    const frontierPatch = readFileSync(
+      resolve(
+        BRIDGE_ROOT,
+        'sources',
+        'frontier',
+        '0001-bridge-runtime-commitment.patch',
+      ),
+      'utf8',
+    );
+    const rustSource = extractAddedPatchFile(
+      frontierPatch,
+      'template/node/src/bridge_federated_lab_reservation_tests.rs',
+    );
+    const fixture = extractTopLevelRustFunction(
+      rustSource,
+      'unactivated_fixture',
+    );
+    const admission = extractTopLevelRustFunction(
+      rustSource,
+      'federated_lab_reservation_is_admitted_without_evm_state_change',
+    );
+
+    expect(fixture).toContain(
+      '\tlet issued_at_native_height = profile.activation_height;',
+    );
+    expect(fixture).toContain(
+      '\tlet expires_at_native_height = issued_at_native_height\n'
+        + '\t\t.checked_add(u64::from(profile.max_pending_blocks))\n'
+        + '\t\t.expect("LAB source-proof validity window fits u64");',
+    );
+    expect(fixture).not.toMatch(
+      /let expires_at_native_height\s*=\s*\d[\d_]*;/u,
+    );
+    expect(fixture).toContain(
+      '\tlet proof = source_proof_from_environment_or_fixture(\n'
+        + '\t\t&profile,\n'
+        + '\t\t&statement,\n'
+        + '\t\tissued_at_native_height,\n'
+        + '\t\texpires_at_native_height,\n'
+        + '\t);',
+    );
+    expect(fixture).not.toMatch(
+      /source_proof_from_environment_or_fixture\(\s*&profile,\s*&statement,\s*\d[\d_]*,\s*\d[\d_]*,?\s*\)/u,
+    );
+    expect(admission).toContain(
+      '\t\tfixture\n'
+        + '\t\t\t.profile\n'
+        + '\t\t\t.activation_height\n'
+        + '\t\t\t.checked_add(u64::from(fixture.profile.max_pending_blocks))',
+    );
+    expect(admission).not.toMatch(
+      /assert_eq!\(\s*pending\.expires_at_native_height,\s*\d[\d_]*,?\s*\)/u,
+    );
   });
 
   it('pins effective LF checkout semantics for the external-fee JVM fixture closure', () => {
@@ -583,6 +677,25 @@ describe('consensus source baseline', () => {
     expect(result.errors).toEqual([]);
   });
 
+  it('rejects the historical Ergo patch path with all other bindings unchanged', async () => {
+    const baseline = await loadBaselineModule();
+    expect(baseline, 'consensus-source-baseline module').toBeDefined();
+    if (!baseline) return;
+
+    const drifted = structuredClone(validLock);
+    drifted.ergoNode.patchPath = 'sources/ergo-node/0001-sidechain-extension-fields.patch';
+    const result = baseline.validateConsensusSourceLock(drifted, {
+      frontierGitlinkCommit: frontier.commit,
+      frontierSubmoduleUrl: frontier.repository,
+      frontierPatchSha256: frontier.patchSha256,
+      ergoPatchSha256: ergoNode.patchSha256,
+    });
+
+    expect(result.errors).toEqual([
+      'Ergo patch path must identify the tracked sidechain extension and candidate recovery patch',
+    ]);
+  });
+
   it('rejects gitlink, patch, or trust-boundary drift', async () => {
     const baseline = await loadBaselineModule();
     expect(baseline, 'consensus-source-baseline module').toBeDefined();
@@ -753,6 +866,181 @@ describe('consensus source baseline', () => {
     );
   });
 
+  it.each(['legacy omitted', 'explicit modified'])(
+    'accepts exact unstaged Ergo additions with %s modified declarations',
+    async (modifiedStatus) => {
+      const baseline = await loadBaselineModule();
+      expect(baseline, 'consensus-source-baseline module').toBeDefined();
+      if (!baseline) return;
+      const { declaration, observation } = mixedErgoCheckoutFixture();
+      if (modifiedStatus === 'explicit modified') {
+        for (const file of declaration.files.slice(0, 2)) file.status = 'modified';
+      }
+      expect(baseline.validateConsensusSourceLock({ ...validLock, ergoNode: declaration }, {
+        frontierGitlinkCommit: frontier.commit,
+        frontierSubmoduleUrl: frontier.repository,
+        frontierPatchSha256: frontier.patchSha256,
+        ergoPatchSha256: ergoNode.patchSha256,
+      }).errors).toEqual([]);
+      const exact = baseline.validateErgoCheckout(declaration, observation);
+      expect(exact.errors).toEqual([]);
+      expect(exact.expectedStatus.split('\n')).toEqual(observation.status.split('\n').sort());
+      expect(exact.expectedStatus).toContain(`?? ${addedErgoPath}`);
+    },
+  );
+
+  it.each([
+    {
+      name: 'added base blob',
+      mutate: (node: any) => { node.files[2].baseBlob = '7'.repeat(40); },
+      expected: `Ergo added patch file ${addedErgoPath} must not declare a base blob`,
+    },
+    {
+      name: 'present undefined added base blob',
+      mutate: (node: any) => { node.files[2].baseBlob = undefined; },
+      expected: `Ergo added patch file ${addedErgoPath} must not declare a base blob`,
+    },
+    {
+      name: 'missing modified base blob',
+      mutate: (node: any) => { delete node.files[0].baseBlob; },
+      expected: `Ergo base blob ${ergoNode.files[0].path} must be a 40-character Git object ID`,
+    },
+    {
+      name: 'malformed modified base blob',
+      mutate: (node: any) => { node.files[0].baseBlob = 'malformed'; },
+      expected: `Ergo base blob ${ergoNode.files[0].path} must be a 40-character Git object ID`,
+    },
+    {
+      name: 'invalid status',
+      mutate: (node: any) => { node.files[2].status = 'deleted'; },
+      expected: 'Ergo patch file status must be modified or added',
+    },
+    {
+      name: 'null status',
+      mutate: (node: any) => { node.files[0].status = null; },
+      expected: 'Ergo patch file status must be modified or added',
+    },
+    {
+      name: 'present undefined status',
+      mutate: (node: any) => { node.files[0].status = undefined; },
+      expected: 'Ergo patch file status must be modified or added',
+    },
+    {
+      name: 'inherited null status',
+      mutate: (node: any) => { node.files[0] = Object.assign(Object.create({ status: null }), node.files[0]); },
+      expected: 'Ergo patch file status must be modified or added',
+    },
+    {
+      name: 'duplicate path',
+      mutate: (node: any) => { node.files.push({ ...node.files[2] }); },
+      expected: 'Ergo patch file paths must be unique',
+    },
+    {
+      name: 'unsafe path',
+      mutate: (node: any) => { node.files[2].path = '../escape.scala'; },
+      expected: 'Ergo patch file paths must be safe repository-relative paths',
+    },
+    {
+      name: 'missing declared result blob',
+      mutate: (node: any) => { delete node.files[2].patchedBlob; },
+      expected: `Ergo patched blob ${addedErgoPath} must be a 40-character Git object ID`,
+    },
+    {
+      name: 'malformed declared result blob',
+      mutate: (node: any) => { node.files[2].patchedBlob = 'malformed'; },
+      expected: `Ergo patched blob ${addedErgoPath} must be a 40-character Git object ID`,
+    },
+    {
+      name: 'null entry beside valid entries',
+      mutate: (node: any) => { node.files.push(null); },
+      expected: 'Ergo patch file paths must be safe repository-relative paths',
+    },
+    {
+      name: 'empty declaration',
+      mutate: (node: any) => { node.files = []; },
+      expected: 'Ergo patch files must be a non-empty array',
+    },
+    {
+      name: 'non-array declaration',
+      mutate: (node: any) => { node.files = null; },
+      expected: 'Ergo patch files must be a non-empty array',
+    },
+  ])('rejects the isolated Ergo declaration fault: $name', async ({ mutate, expected }) => {
+    const baseline = await loadBaselineModule();
+    expect(baseline, 'consensus-source-baseline module').toBeDefined();
+    if (!baseline) return;
+    const { declaration, observation } = mixedErgoCheckoutFixture();
+    mutate(declaration);
+    expect(baseline.validateConsensusSourceLock({ ...validLock, ergoNode: declaration }, {
+      frontierGitlinkCommit: frontier.commit,
+      frontierSubmoduleUrl: frontier.repository,
+      frontierPatchSha256: frontier.patchSha256,
+      ergoPatchSha256: ergoNode.patchSha256,
+    }).errors).toContain(expected);
+    const direct = baseline.validateErgoCheckout(declaration, observation);
+    expect(direct.errors).toContain(expected);
+    expect(direct.expectedStatus).toBe('');
+  });
+
+  it.each(['\n', '\r', '\r\n'])(
+    'rejects a status-record delimiter in an Ergo declaration: %j',
+    async delimiter => {
+      const baseline = await loadBaselineModule();
+      expect(baseline, 'consensus-source-baseline module').toBeDefined();
+      if (!baseline) return;
+      const { declaration } = mixedErgoCheckoutFixture();
+      const path = `one.scala${delimiter} M two.scala`;
+      declaration.files = [{ path, baseBlob: '1'.repeat(40), patchedBlob: '2'.repeat(40) }];
+      const expected = 'Ergo patch file paths must be safe repository-relative paths';
+      expect(baseline.validateConsensusSourceLock({ ...validLock, ergoNode: declaration }, {
+        frontierGitlinkCommit: frontier.commit,
+        frontierSubmoduleUrl: frontier.repository,
+        frontierPatchSha256: frontier.patchSha256,
+        ergoPatchSha256: ergoNode.patchSha256,
+      }).errors).toContain(expected);
+      const direct = baseline.validateErgoCheckout(declaration, {
+        head: declaration.baseCommit,
+        status: ` M one.scala${delimiter} M two.scala`,
+        blobs: { [path]: '2'.repeat(40) },
+      });
+      expect(direct.errors).toContain(expected);
+      expect(direct.expectedStatus).toBe('');
+    },
+  );
+
+  it.each([
+    { name: 'staged addition', replacement: `A  ${addedErgoPath}` },
+    { name: 'staged index marker', suffix: '\n!! INDEX DRIFT' },
+    { name: 'addition reported as modified', replacement: ` M ${addedErgoPath}` },
+    { name: 'missing addition', replacement: '' },
+    { name: 'extra change', suffix: '\n?? unexpected.scala' },
+    { name: 'absent changes', empty: true },
+    { name: 'modified file reported as untracked', modifiedReplacement: `?? ${ergoNode.files[0].path}` },
+  ])('rejects the isolated Ergo checkout status fault: $name', async (fault) => {
+    const baseline = await loadBaselineModule();
+    expect(baseline, 'consensus-source-baseline module').toBeDefined();
+    if (!baseline) return;
+    const { declaration, observation } = mixedErgoCheckoutFixture();
+    const faultyStatus = fault.empty ? '' : observation.status
+      .replace(`?? ${addedErgoPath}`, fault.replacement ?? `?? ${addedErgoPath}`)
+      .replace(` M ${ergoNode.files[0].path}`, fault.modifiedReplacement ?? ` M ${ergoNode.files[0].path}`)
+      + (fault.suffix ?? '');
+    expect(baseline.validateErgoCheckout(declaration, {
+      ...observation, status: faultyStatus,
+    }).errors).toContain('Ergo checkout changes must be limited to the declared patch files');
+  });
+
+  it.each(['missing', 'wrong'])('rejects an isolated %s observed Ergo result blob', async (fault) => {
+    const baseline = await loadBaselineModule();
+    expect(baseline, 'consensus-source-baseline module').toBeDefined();
+    if (!baseline) return;
+    const { declaration, observation } = mixedErgoCheckoutFixture();
+    if (fault === 'missing') delete observation.blobs[addedErgoPath];
+    else observation.blobs[addedErgoPath] = '7'.repeat(40);
+    expect(baseline.validateErgoCheckout(declaration, observation).errors)
+      .toContain(`Ergo patched blob ${addedErgoPath} does not match the source lock`);
+  });
+
   it('drops Windows stat-only status noise only for raw or controlled CRLF-equivalent bytes', async () => {
     const baseline = await loadBaselineModule();
     expect(baseline, 'consensus-source-baseline module').toBeDefined();
@@ -810,10 +1098,160 @@ describe('consensus source baseline', () => {
       Buffer.from('line one\n'),
     )).toBe(true);
     expect(baseline.isRawOrControlledCrLfEquivalent(
+      'proof-vector.hex',
+      Buffer.from('0123abcd\r\n'),
+      Buffer.from('0123abcd\n'),
+    )).toBe(true);
+    expect(baseline.isRawOrControlledCrLfEquivalent(
       'build.sbt',
       Buffer.from('line one\r\n'),
       Buffer.from('line one\r\n'),
     )).toBe(true);
+  });
+
+  it('preserves the pinned Git blob identity for CRLF-materialized hex vectors', async () => {
+    const baseline = await loadBaselineModule();
+    expect(baseline, 'consensus-source-baseline module').toBeDefined();
+    if (!baseline) return;
+
+    const root = mkdtempSync(resolve(tmpdir(), 'bridge-hex-checkout-'));
+    const git = (...args: string[]) => execFileSync('git', args, {
+      cwd: root,
+      encoding: 'utf8',
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    try {
+      git('init', '--quiet');
+      git('config', 'user.name', 'Bridge Test');
+      git('config', 'user.email', 'bridge-test@example.invalid');
+      writeFileSync(resolve(root, 'proof-vector.hex'), '0123abcd\n');
+      git('add', 'proof-vector.hex');
+      git('commit', '--quiet', '-m', 'fixture');
+      const pinnedBlob = git('rev-parse', 'HEAD:proof-vector.hex').trim();
+
+      writeFileSync(resolve(root, 'proof-vector.hex'), '0123abcd\r\n');
+      const inspected = baseline.inspectRawCheckout(root, ['proof-vector.hex']);
+
+      expect(inspected.status).toBe('');
+      expect(inspected.blobs['proof-vector.hex']).toBe(pinnedBlob);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['unpatched.rs', 'unmodified'],
+    ['patched.rs', 'modified'],
+    ['added.rs', 'added'],
+    ['Cargo.toml', 'modified'],
+    ['Cargo.lock', 'modified'],
+  ])('keeps raw build identity for %s distinct from controlled CRLF identity', async (path, state) => {
+    const baseline = await loadBaselineModule();
+    expect(baseline).toBeDefined();
+    if (!baseline) return;
+    const root = mkdtempSync(resolve(tmpdir(), 'bridge-raw-build-checkout-'));
+    const git = (...args: string[]) => execFileSync('git', args, {
+      cwd: root, encoding: 'utf8', windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const blobId = (bytes: Buffer) => createHash('sha1')
+      .update(Buffer.from(`blob ${bytes.length}\0`)).update(bytes).digest('hex');
+    const original = 'original\n';
+    const expected = Buffer.from(state === 'unmodified' ? original : 'patched\n');
+    try {
+      git('init', '--quiet');
+      git('config', 'user.name', 'Bridge Test');
+      git('config', 'user.email', 'bridge-test@example.invalid');
+      git('config', 'core.autocrlf', 'false');
+      writeFileSync(resolve(root, 'README.md'), 'fixture\n');
+      if (state !== 'added') writeFileSync(resolve(root, path), original);
+      git('add', 'README.md', ...(state === 'added' ? [] : [path]));
+      git('commit', '--quiet', '-m', 'fixture');
+      writeFileSync(resolve(root, path), expected);
+      const before = baseline.inspectRawCheckout(root, [path], undefined, 'raw');
+      expect(before.blobs[path]).toBe(blobId(expected));
+
+      const materialized = Buffer.from(expected.toString().replaceAll('\n', '\r\n'));
+      writeFileSync(resolve(root, path), materialized);
+      const compatible = baseline.inspectRawCheckout(root, [path]);
+      const exact = baseline.inspectRawCheckout(root, [path], undefined, 'raw');
+      expect(compatible.blobs[path]).toBe(blobId(expected));
+      expect(exact.blobs[path]).toBe(blobId(materialized));
+      expect(exact.blobs[path]).not.toBe(before.blobs[path]);
+      if (state === 'unmodified') {
+        expect(compatible.status).toBe('');
+        expect(exact.status).toBe(` M ${path}`);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('forwards raw policy through the real baseline entry point', async () => {
+    const baseline = await loadBaselineModule();
+    const cli = await loadCliModule();
+    expect(baseline).toBeDefined();
+    expect(cli).toBeDefined();
+    if (!baseline) return;
+    const root = mkdtempSync(resolve(tmpdir(), 'bridge-raw-policy-forwarding-'));
+    const source = resolve(root, 'frontier');
+    const bridge = resolve(root, 'bridge');
+    const git = (...args: string[]) => execFileSync('git', args, {
+      cwd: source, encoding: 'utf8', windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    try {
+      mkdirSync(source);
+      mkdirSync(resolve(bridge, 'sources'), { recursive: true });
+      const files = ['Cargo.lock', 'rust-toolchain.toml',
+        'template/node/Cargo.toml', 'template/runtime/Cargo.toml'];
+      for (const path of files) {
+        mkdirSync(dirname(resolve(source, path)), { recursive: true });
+        writeFileSync(resolve(source, path), 'source input\n');
+      }
+      git('init', '--quiet');
+      git('config', 'user.name', 'Bridge Test');
+      git('config', 'user.email', 'bridge-test@example.invalid');
+      git('config', 'core.autocrlf', 'false');
+      git('add', ...files);
+      git('commit', '--quiet', '-m', 'fixture');
+      const blob = git('rev-parse', 'HEAD:Cargo.lock').trim();
+      writeFileSync(resolve(bridge, 'sources', 'consensus-source-lock.json'),
+        JSON.stringify({ frontier: {
+          commit: git('rev-parse', 'HEAD').trim(), files: [],
+          cargoLockBlob: blob, rustToolchainBlob: blob,
+          nodeManifestBlob: blob, runtimeManifestBlob: blob,
+        } }));
+      const inspect = (frontierCheckoutBytePolicy?: string) => {
+        const args = cli.parseConsensusSourceBaselineArgs(frontierCheckoutBytePolicy === undefined
+          ? [] : ['--frontier-byte-policy', frontierCheckoutBytePolicy]);
+        return baseline.inspectConsensusSourceBaseline({
+          worktreeRoot: bridge, bridgeRoot: bridge, frontierSourcePath: source,
+          requireFrontierCheckout: true, requireErgoCheckout: false,
+          frontierCheckoutBytePolicy: args.frontierCheckoutBytePolicy,
+        });
+      };
+      // This fixture isolates checkout validation; release inputs are absent.
+      const exactLf = inspect('raw');
+      expect(exactLf.checks.lockBindingsValidated).toBe(false);
+      expect(exactLf.checks.frontierCheckoutValidated).toBe(true);
+      writeFileSync(resolve(source, 'Cargo.lock'), 'source input\r\n');
+      expect(inspect().checks.frontierCheckoutValidated).toBe(true);
+      const exactCrLf = inspect('raw');
+      expect(exactCrLf.checks.frontierCheckoutValidated).toBe(false);
+      expect(exactCrLf.errors).toContain('Frontier Cargo.lock does not match the source lock');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an unknown checkout byte policy before reading a checkout', async () => {
+    const baseline = await loadBaselineModule();
+    expect(baseline).toBeDefined();
+    if (!baseline) return;
+    expect(() => baseline.inspectRawCheckout('absent-source', [], undefined, 'unknown'))
+      .toThrow(/checkout byte policy/);
   });
 
   it('detects raw checkout and index drift even when a Git clean filter rewrites the blob identity', async () => {
@@ -916,6 +1354,49 @@ describe('consensus source baseline', () => {
       '75329a2df49e2cc7981485392c31160929d1bd48',
     );
     expect(report.boundaries.gate5Closed).toBe(false);
+  });
+
+  it.each(['raw', 'controlled-crlf'])('selects the explicit Frontier CLI byte policy %s', async policy => {
+    const cli = await loadCliModule();
+    expect(cli).toBeDefined();
+    const args = cli.parseConsensusSourceBaselineArgs([
+      '--frontier-source', 'frontier-checkout', '--ergo-source', 'ergo-checkout',
+      '--frontier-byte-policy', policy,
+    ]);
+    expect(args.frontierCheckoutBytePolicy).toBe(policy);
+    expect(args.checkoutMode).toBe('full');
+    expect(args.requireFrontierCheckout).toBe(true);
+    expect(args.requireErgoCheckout).toBe(true);
+    expect(args.frontierSourcePath).toBe('frontier-checkout');
+    expect(args.ergoSourcePath).toBe('ergo-checkout');
+  });
+
+  it('preserves the omitted Frontier CLI byte-policy default', async () => {
+    const cli = await loadCliModule();
+    expect(cli).toBeDefined();
+    expect(cli.parseConsensusSourceBaselineArgs([]).frontierCheckoutBytePolicy).toBeUndefined();
+  });
+
+  it.each([
+    { name: 'missing value', argv: ['--frontier-byte-policy'], error: /requires a value/ },
+    { name: 'empty value', argv: ['--frontier-byte-policy', ''], error: /requires a value/ },
+    { name: 'next option', argv: ['--frontier-byte-policy', '--frontier-source', 'source'], error: /requires a value/ },
+    { name: 'unknown value', argv: ['--frontier-byte-policy', 'other'], error: /must be raw or controlled-crlf/ },
+    { name: 'case alias', argv: ['--frontier-byte-policy', 'RAW'], error: /must be raw or controlled-crlf/ },
+    { name: 'Boolean alias', argv: ['--frontier-byte-policy', 'true'], error: /must be raw or controlled-crlf/ },
+    { name: 'option alias', argv: ['--frontier-byte-policy=raw'], error: /Unknown argument/ },
+    { name: 'duplicate value', argv: ['--frontier-byte-policy', 'raw', '--frontier-byte-policy', 'raw'], error: /may be supplied only once/ },
+    { name: 'conflicting value', argv: ['--frontier-byte-policy', 'raw', '--frontier-byte-policy', 'controlled-crlf'], error: /may be supplied only once/ },
+    { name: 'raw before lock-only', argv: ['--frontier-byte-policy', 'raw', '--lock-only'], error: /requires full checkout mode/ },
+    { name: 'raw after lock-only', argv: ['--lock-only', '--frontier-byte-policy', 'raw'], error: /requires full checkout mode/ },
+    { name: 'raw before Ergo-only', argv: ['--frontier-byte-policy', 'raw', '--ergo-only', '--ergo-source', 'source'], error: /requires full checkout mode/ },
+    { name: 'raw after Ergo-only', argv: ['--ergo-only', '--ergo-source', 'source', '--frontier-byte-policy', 'raw'], error: /requires full checkout mode/ },
+    { name: 'controlled before lock-only', argv: ['--frontier-byte-policy', 'controlled-crlf', '--lock-only'], error: /requires full checkout mode/ },
+    { name: 'controlled after Ergo-only', argv: ['--ergo-only', '--ergo-source', 'source', '--frontier-byte-policy', 'controlled-crlf'], error: /requires full checkout mode/ },
+  ])('rejects the isolated Frontier CLI byte-policy fault: $name', async ({ argv, error }) => {
+    const cli = await loadCliModule();
+    expect(cli).toBeDefined();
+    expect(() => cli.parseConsensusSourceBaselineArgs(argv)).toThrow(error);
   });
 
   it('exposes lock-only and full-checkout CLI modes with explicit boundaries', async () => {
@@ -1027,7 +1508,7 @@ describe('consensus source baseline', () => {
     expect(workflow).toContain('cargo test --locked -p bridge-state-proof');
     expect(workflow).toContain('https://github.com/ergoplatform/ergo.git');
     expect(workflow).toContain('2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1');
-    expect(workflow).toContain('0001-sidechain-extension-fields.patch');
+    expect(workflow).toContain('0002-sidechain-extension-fields-candidate-recovery.patch');
     expect(workflow).toContain('testOnly org.ergoplatform.mining.CandidateGeneratorSpec');
     expect(workflow).toContain('node-version: "24.14.0"');
     expect(workflow).toContain('distribution: microsoft');

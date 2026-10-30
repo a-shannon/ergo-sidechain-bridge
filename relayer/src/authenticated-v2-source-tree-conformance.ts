@@ -844,7 +844,7 @@ export function validateAuthenticatedV2CompilerProjectFileSet(
   }
 }
 
-function validatePinnedParentRuntime(paths: CompilerLockPaths): VerifiedParentRuntime {
+function validatePinnedCompilerNode(paths: CompilerLockPaths): string {
   const lock = paths.lock;
   if (`${process.platform}-${process.arch}` !== lock.platform) {
     throw new Error('parent runtime platform does not match the compiler lock');
@@ -858,7 +858,12 @@ function validatePinnedParentRuntime(paths: CompilerLockPaths): VerifiedParentRu
   if (nodeExecutableSha256 !== lock.nodeExecutableSha256) {
     throw new Error('parent Node executable does not match the compiler lock');
   }
+  return nodeExecutableSha256;
+}
 
+function validatePinnedParentRuntime(paths: CompilerLockPaths): VerifiedParentRuntime {
+  const lock = paths.lock;
+  const nodeExecutableSha256 = validatePinnedCompilerNode(paths);
   const tsxRoot = resolve(paths.relayerRoot, 'node_modules', 'tsx');
   const expectedExecArgv = [
     '--require',
@@ -899,6 +904,28 @@ function validatePinnedParentRuntime(paths: CompilerLockPaths): VerifiedParentRu
     relayerPackageLockSha256: lock.relayerPackageLockSha256,
     parentRuntimePackagesValidated: true as const,
     loaderInvocationValidated: true as const,
+    gitEnvironmentSanitized: true as const,
+  });
+}
+
+/**
+ * Validate compiler host identity without asserting a TypeScript loader closure.
+ * Callers must separately validate the packages actually used by their entry.
+ */
+export function validatePinnedAuthenticatedV2CompilerHost(
+  bridgeRootInput: string,
+): Pick<VerifiedParentRuntime,
+  'nodeVersion' | 'nodeExecutableSha256' | 'gitVersion' | 'gitExecutableSha256'
+  | 'gitExecutablePath' | 'gitEnvironmentSanitized'> {
+  const paths = loadAuthenticatedV2CompilerLock(bridgeRootInput);
+  const nodeExecutableSha256 = validatePinnedCompilerNode(paths);
+  const gitExecutablePath = resolvePinnedGitExecutable(paths.lock);
+  return deepFreeze({
+    nodeVersion: paths.lock.nodeVersion,
+    nodeExecutableSha256,
+    gitVersion: paths.lock.gitVersion,
+    gitExecutableSha256: paths.lock.gitExecutableSha256,
+    gitExecutablePath,
     gitEnvironmentSanitized: true as const,
   });
 }

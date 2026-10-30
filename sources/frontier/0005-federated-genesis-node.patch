@@ -1,0 +1,783 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index aea2232808d64d04b7f79ab548a2ebba42f06c1c..c390b1a0985c61e0f8d1055619389bcb27d92dba 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -3534,6 +3534,7 @@ dependencies = [
+  "frame-system",
+  "frame-system-rpc-runtime-api",
+  "frontier-template-runtime",
++ "frontier-template-v4-fed-genesis-runtime",
+  "frontier-template-v4-lab-runtime",
+  "frontier-template-v4-test-runtime",
+  "futures",
+diff --git a/template/node/Cargo.toml b/template/node/Cargo.toml
+index 82dc5f4e72862643bcd3779f667340db2a82f4a7..8c740eeecf99d3aee98d4ab886ce970ddee3bd16 100644
+--- a/template/node/Cargo.toml
++++ b/template/node/Cargo.toml
+@@ -82,6 +82,7 @@ fp-dynamic-fee = { workspace = true, features = ["default"] }
+ fp-evm = { workspace = true, features = ["default"] }
+ fp-rpc = { workspace = true, features = ["default"] }
+ frontier-template-runtime = { workspace = true, optional = true, features = ["std"] }
++frontier-template-v4-fed-genesis-runtime = { path = "../runtime-v4-fed-genesis", optional = true, default-features = false, features = ["std"] }
+ frontier-template-v4-lab-runtime = { path = "../runtime-v4-lab", optional = true, default-features = false, features = ["std", "with-rocksdb-weights"] }
+ frontier-template-v4-test-runtime = { path = "../runtime-v4-test", optional = true, default-features = false, features = ["std", "with-rocksdb-weights"] }
+ bridge-finality-proof = { workspace = true }
+@@ -112,6 +113,14 @@ default = [
+ 	"rpc-binary-search-estimate",
+ ]
+ main-runtime = ["dep:frontier-template-runtime"]
++bridge-federated-v4-genesis-runtime = ["dep:frontier-template-v4-fed-genesis-runtime"]
++bridge-federated-v4-genesis-node = [
++	"bridge-federated-v4-genesis-runtime",
++	"rocksdb",
++	"sql",
++	"txpool",
++	"rpc-binary-search-estimate",
++]
+ bridge-atomicity-v4-test-runtime = ["main-runtime", "dep:frontier-template-v4-test-runtime"]
+ bridge-federated-v4-lab-runtime = ["dep:frontier-template-v4-lab-runtime"]
+ bridge-federated-v4-lab-node = [
+@@ -130,10 +139,12 @@ rocksdb = [
+ 	"fc-rpc/rocksdb",
+ 	"frontier-template-runtime?/with-rocksdb-weights",
+ 	"frontier-template-v4-lab-runtime?/with-rocksdb-weights",
++	"frontier-template-v4-fed-genesis-runtime?/with-rocksdb-weights",
+ ]
+ paritydb = [
+ 	"frontier-template-runtime?/with-paritydb-weights",
+ 	"frontier-template-v4-lab-runtime?/with-paritydb-weights",
++	"frontier-template-v4-fed-genesis-runtime?/with-paritydb-weights",
+ ]
+ sql = [
+ 	"fc-db/sql",
+diff --git a/template/node/src/command.rs b/template/node/src/command.rs
+index 739e6ff6738a4b89ef65c3cc723be2c4d45824f8..c410d4e28ea3555091a51e55990a18c60525d296 100644
+--- a/template/node/src/command.rs
++++ b/template/node/src/command.rs
+@@ -40,13 +40,24 @@ impl SubstrateCli for Cli {
+ 	}
+ 
+ 	fn load_spec(&self, id: &str) -> Result<Box<dyn ChainSpec>, String> {
++		#[cfg(feature = "bridge-federated-v4-genesis-runtime")]
++		{
++			// BuildSpec only materializes genesis; it has no block-production mode.
++			let manual_seal = match self.subcommand {
++				Some(Subcommand::BuildSpec(_)) => None,
++				_ => Some(self.sealing.is_some()),
++			};
++			return crate::federated_genesis::load_spec(id, manual_seal)
++				.map(|spec| Box::new(spec) as Box<dyn ChainSpec>);
++		}
++
+ 		#[cfg(feature = "bridge-federated-v4-lab-runtime")]
+ 		{
+ 			let enable_manual_seal = self.sealing.map(|_| true).unwrap_or_default();
+ 			return load_federated_lab_spec(id, enable_manual_seal);
+ 		}
+ 
+-		#[cfg(not(feature = "bridge-federated-v4-lab-runtime"))]
++		#[cfg(feature = "main-runtime")]
+ 		Ok(match id {
+ 			"dev" => {
+ 				let enable_manual_seal = self.sealing.map(|_| true).unwrap_or_default();
+diff --git a/template/node/src/federated_genesis.rs b/template/node/src/federated_genesis.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..df8527ad448dca7535d1bc51943ab7c842459fca
+--- /dev/null
++++ b/template/node/src/federated_genesis.rs
+@@ -0,0 +1,57 @@
++use std::{fs::File, io::Read};
++
++use sc_chain_spec::{ChainType, Properties};
++use sp_runtime::BuildStorage;
++
++use crate::{
++	chain_spec::ChainSpec,
++	selected_runtime::{RuntimeGenesisConfig, SS58Prefix, WASM_BINARY},
++};
++
++const MAX_GENESIS_JSON_BYTES: usize = 4 * 1024 * 1024;
++
++pub(crate) fn load_spec(selector: &str, manual_seal: Option<bool>) -> Result<ChainSpec, String> {
++	let path = selector
++		.strip_prefix("fed-genesis:")
++		.filter(|path| !path.is_empty())
++		.ok_or("the FED runtime requires `fed-genesis:<typed-genesis.json>`")?;
++	let mut bytes = Vec::new();
++	File::open(path)
++		.map_err(|_| "cannot open FED typed genesis")?
++		.take((MAX_GENESIS_JSON_BYTES + 1) as u64)
++		.read_to_end(&mut bytes)
++		.map_err(|_| "cannot read FED typed genesis")?;
++	from_genesis_json(&bytes, manual_seal)
++}
++
++fn from_genesis_json(bytes: &[u8], manual_seal: Option<bool>) -> Result<ChainSpec, String> {
++	if bytes.len() > MAX_GENESIS_JSON_BYTES {
++		return Err("FED typed genesis exceeds the input bound".into());
++	}
++	// FRAME's typed config rejects unknown fields; raw storage and caller WASM are not inputs.
++	let config: RuntimeGenesisConfig =
++		serde_json::from_slice(bytes).map_err(|_| "invalid FED RuntimeGenesisConfig JSON")?;
++	if manual_seal.is_some_and(|expected| config.manual_seal.enable != expected) {
++		return Err("FED genesis and CLI sealing mode differ".into());
++	}
++	let wasm = WASM_BINARY.ok_or("the selected FED runtime WASM is unavailable")?;
++	let mut properties = Properties::new();
++	properties.insert("tokenDecimals".into(), 18.into());
++	properties.insert("ss58Format".into(), SS58Prefix::get().into());
++	let spec = ChainSpec::builder(wasm, Default::default())
++		.with_name("Bridge Federated V4 Genesis")
++		.with_id("bridge_federated_v4_genesis")
++		.with_chain_type(ChainType::Development)
++		.with_properties(properties)
++		.with_genesis_config(
++			serde_json::to_value(config).map_err(|_| "cannot encode FED typed genesis")?,
++		)
++		.build();
++	// Execute the compiled WASM genesis consumer before returning a usable chain spec.
++	spec.build_storage()
++		.map_err(|_| "selected FED WASM rejected genesis")?;
++	Ok(spec)
++}
++
++#[cfg(test)]
++mod tests;
+diff --git a/template/node/src/federated_genesis/tests.rs b/template/node/src/federated_genesis/tests.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..30cff4578486797008605eb96ed40937d1408fb4
+--- /dev/null
++++ b/template/node/src/federated_genesis/tests.rs
+@@ -0,0 +1,390 @@
++use std::collections::BTreeMap;
++
++use clap::Parser;
++use sc_cli::SubstrateCli;
++use scale_codec::Encode;
++use sp_core::{hashing::sha2_256, H160, H256, U256};
++use sp_runtime::BuildStorage;
++
++use super::{from_genesis_json, load_spec, MAX_GENESIS_JSON_BYTES};
++use crate::selected_runtime::{
++	bridge_commitment,
++	peg_in_pooled_reserve_reservation::{
++		PooledReserveMintReservationRuntimeProfileV4,
++		PooledReserveMintReservationSourceProofVerifierV4,
++	},
++	Runtime, RuntimeGenesisConfig, VERSION, WASM_BINARY,
++};
++
++type Verifier =
++	<Runtime as bridge_commitment::Config>::PooledReserveMintReservationSourceProofVerifier;
++
++fn short_string(value: &[u8]) -> H256 {
++	let mut word = [0u8; 32];
++	word[..value.len()].copy_from_slice(value);
++	word[31] = (value.len() * 2) as u8;
++	H256::from(word)
++}
++
++fn fixture() -> RuntimeGenesisConfig {
++	let bridge_code =
++		hex::decode(include_str!("../tests/res/bridge-atomicity/ErgoBridge.runtime.bin").trim())
++			.unwrap();
++	let token_code =
++		hex::decode(include_str!("../tests/res/bridge-atomicity/SERG.runtime.bin").trim()).unwrap();
++	let operator = H160::repeat_byte(0x31);
++	let bridge = H160::repeat_byte(0x33);
++	let token = H160::repeat_byte(0x44);
++	let profile = PooledReserveMintReservationRuntimeProfileV4 {
++		format_version: 4,
++		lineage_profile_id: H256::repeat_byte(0x10),
++		source_network_id: H256::repeat_byte(0x11),
++		sidechain_id: H256::repeat_byte(0x22),
++		bridge_address: bridge,
++		token_address: token,
++		bridge_runtime_code_sha256: H256::from(sha2_256(&bridge_code)),
++		bridge_runtime_code_bytes: bridge_code.len() as u32,
++		token_runtime_code_sha256: H256::from(sha2_256(&token_code)),
++		token_runtime_code_bytes: token_code.len() as u32,
++		settlement_profile_id: H256::repeat_byte(0x55),
++		ergo_deposit_finality_policy_id: H256::repeat_byte(0x66),
++		source_proof_system_id: Verifier::proof_system_id(),
++		source_proof_profile_id: Verifier::proof_profile_id(),
++		activation_height: 0,
++		max_pending_blocks: 64,
++	};
++	let mut config = RuntimeGenesisConfig::default();
++	config.manual_seal.enable = true;
++	config.evm.accounts = BTreeMap::from([
++		(
++			bridge,
++			fp_evm::GenesisAccount {
++				nonce: U256::one(),
++				balance: U256::zero(),
++				code: bridge_code,
++				storage: BTreeMap::from([
++					(H256::zero(), H256::from(operator)),
++					(H256::from_low_u64_be(3), H256::from(token)),
++				]),
++			},
++		),
++		(
++			token,
++			fp_evm::GenesisAccount {
++				nonce: U256::one(),
++				balance: U256::zero(),
++				code: token_code,
++				storage: BTreeMap::from([
++					(H256::from_low_u64_be(3), short_string(b"Sidechain ERG")),
++					(H256::from_low_u64_be(4), short_string(b"sERG")),
++					(H256::from_low_u64_be(5), H256::from(bridge)),
++				]),
++			},
++		),
++	]);
++	config.bridge_commitment.legacy_mint_quarantine_address = Some(bridge);
++	config.bridge_commitment.pooled_reserve_mint_genesis_v4 =
++		Some((operator, profile.encode().try_into().unwrap()));
++	config
++}
++
++#[test]
++fn post_reservation_pool_rejects_genesis_bid_and_accepts_one_block_ceiling() {
++	use crate::selected_runtime::{
++		BaseFee, BridgeCommitmentCallbackWeight, Executive, Header, RuntimeOrigin, System,
++		Timestamp, MAXIMUM_BLOCK_WEIGHT,
++	};
++	use ethereum::{
++		LegacyTransaction, LegacyTransactionMessage, TransactionAction, TransactionSignature,
++		TransactionV2,
++	};
++	use fp_evm::FeeCalculator;
++	use frame_support::dispatch::DispatchClass;
++	use scale_codec::Decode;
++	use sp_runtime::{
++		traits::Header as _,
++		transaction_validity::{InvalidTransaction, TransactionSource, TransactionValidity},
++	};
++	let key = libsecp256k1::SecretKey::parse(&[0x11; 32]).unwrap();
++	let public = libsecp256k1::PublicKey::from_secret_key(&key).serialize();
++	let sender = H160::from_slice(&sp_core::hashing::keccak_256(&public[1..])[12..]);
++	for (full_block, gas_price, accepted) in [
++		(false, 1_000_000_000u64, false),
++		(false, 1_125_000_000, true),
++		(true, 1_124_999_999, false),
++		(true, 1_125_000_000, true),
++	] {
++		let mut config = fixture();
++		config.evm_chain_id.chain_id = 4242;
++		config.evm.accounts.insert(
++			sender,
++			fp_evm::GenesisAccount {
++				nonce: U256::one(),
++				balance: U256::from(100_000_000_000_000_000_000u128),
++				code: Vec::new(),
++				storage: BTreeMap::new(),
++			},
++		);
++		let mut ext: sp_io::TestExternalities = config.build_storage().unwrap().into();
++		ext.execute_with(|| {
++			let header = Header::new(
++				1,
++				H256::zero(),
++				H256::zero(),
++				H256::repeat_byte(0x19),
++				Default::default(),
++			);
++			Executive::initialize_block(&header);
++			Timestamp::set(RuntimeOrigin::none(), 6_000).unwrap();
++			// Exercise fee accounting and pool admission, not source-proof acceptance.
++			let dispatch_weight = if full_block {
++				MAXIMUM_BLOCK_WEIGHT.saturating_sub(System::block_weight().total())
++			} else {
++				BridgeCommitmentCallbackWeight::get()
++			};
++			System::register_extra_weight_unchecked(dispatch_weight, DispatchClass::Normal);
++			let parent = Executive::finalize_block().hash();
++			let base_fee = BaseFee::min_gas_price().0;
++			assert!(base_fee > U256::from(1_000_000_000));
++			assert!(base_fee <= U256::from(1_125_000_000));
++			if full_block {
++				assert_eq!(base_fee, U256::from(1_125_000_000));
++			}
++			let mut input =
++				sp_core::hashing::keccak_256(b"mintSERG(address,uint256,bytes32)")[..4].to_vec();
++			input.extend_from_slice(H256::from(sender).as_bytes());
++			input.extend_from_slice(H256::from_low_u64_be(20_000_000).as_bytes());
++			input.extend_from_slice(H256::repeat_byte(0x55).as_bytes());
++			let message = LegacyTransactionMessage {
++				nonce: U256::one(),
++				gas_price: U256::from(gas_price),
++				gas_limit: U256::from(5_000_000),
++				action: TransactionAction::Call(H160::repeat_byte(0x33)),
++				value: U256::zero(),
++				input: input.clone(),
++				chain_id: Some(4242),
++			};
++			let (signature, recovery) = libsecp256k1::sign(
++				&libsecp256k1::Message::parse(message.hash().as_fixed_bytes()),
++				&key,
++			);
++			let signature = signature.serialize();
++			let tx = TransactionV2::Legacy(LegacyTransaction {
++				nonce: message.nonce,
++				gas_price: message.gas_price,
++				gas_limit: message.gas_limit,
++				action: message.action,
++				value: message.value,
++				input,
++				signature: TransactionSignature::new(
++					u64::from(recovery.serialize()) + 4242 * 2 + 35,
++					H256::from_slice(&signature[..32]),
++					H256::from_slice(&signature[32..]),
++				)
++				.unwrap(),
++			});
++			let converted = crate::selected_runtime::api::dispatch(
++				"ConvertTransactionRuntimeApi_convert_transaction",
++				&tx.encode(),
++			)
++			.unwrap();
++			let extrinsic =
++				crate::selected_runtime::UncheckedExtrinsic::decode(&mut &converted[..]).unwrap();
++			let encoded = crate::selected_runtime::api::dispatch(
++				"TaggedTransactionQueue_validate_transaction",
++				&(TransactionSource::Local, extrinsic, parent).encode(),
++			)
++			.unwrap();
++			let result = TransactionValidity::decode(&mut &encoded[..]).unwrap();
++			if accepted {
++				assert!(result.is_ok(), "{result:?}");
++			} else {
++				assert_eq!(
++					result,
++					Err(InvalidTransaction::Custom(
++						fp_evm::TransactionValidationError::GasPriceTooLow as u8
++					)
++					.into())
++				);
++			}
++		});
++	}
++}
++
++#[test]
++fn selected_wasm_genesis_matches_native_state_and_cannot_be_replaced() {
++	assert_eq!(VERSION.spec_name, "frontier-template-v4-fed-genesis");
++	let config = fixture();
++	let native = config.build_storage().unwrap();
++	let path = std::env::temp_dir().join(format!(
++		"bridge-fed-genesis-{}-{}.json",
++		std::process::id(),
++		std::time::SystemTime::now()
++			.duration_since(std::time::UNIX_EPOCH)
++			.unwrap()
++			.as_nanos()
++	));
++	let mut file = std::fs::File::create_new(&path).unwrap();
++	struct Cleanup(std::path::PathBuf);
++	impl Drop for Cleanup {
++		fn drop(&mut self) {
++			let _ = std::fs::remove_file(&self.0);
++		}
++	}
++	let _cleanup = Cleanup(path.clone());
++	serde_json::to_writer(&mut file, &config).unwrap();
++	drop(file);
++	let selector = format!("fed-genesis:{}", path.display());
++	let cli = crate::cli::Cli::try_parse_from([
++		"bridge-node",
++		"--chain",
++		&selector,
++		"--sealing",
++		"manual",
++	])
++	.unwrap();
++	let spec = cli.load_spec(&selector).unwrap();
++	assert_eq!(spec.id(), "bridge_federated_v4_genesis");
++	assert!(spec.boot_nodes().is_empty());
++	assert!(spec.telemetry_endpoints().is_none());
++	let mut actual = spec.build_storage().unwrap();
++	assert_eq!(
++		actual.top.remove(sp_core::storage::well_known_keys::CODE),
++		Some(WASM_BINARY.unwrap().to_vec())
++	);
++	assert_eq!(actual.top, native.top);
++	assert_eq!(actual.children_default, native.children_default);
++	let build_cli = crate::cli::Cli::try_parse_from([
++		"bridge-node",
++		"build-spec",
++		"--chain",
++		&selector,
++		"--raw",
++	])
++	.unwrap();
++	let build_spec = build_cli.load_spec(&selector).unwrap();
++	assert_eq!(
++		build_spec.build_storage().unwrap().top,
++		spec.build_storage().unwrap().top
++	);
++	let missing_seal =
++		crate::cli::Cli::try_parse_from(["bridge-node", "--chain", &selector]).unwrap();
++	assert_eq!(
++		missing_seal.load_spec(&selector).err().as_deref(),
++		Some("FED genesis and CLI sealing mode differ")
++	);
++}
++
++#[test]
++fn rejects_non_typed_inputs_and_implicit_or_legacy_selectors() {
++	for selector in [
++		"",
++		"dev",
++		"local",
++		"bridge-lab",
++		"custom.json",
++		"fed-genesis:",
++	] {
++		assert!(
++			load_spec(selector, Some(true)).is_err(),
++			"accepted {selector}"
++		);
++	}
++	for field in ["raw", "runtimeGenesis", "unexpected"] {
++		let mut json = serde_json::to_value(fixture()).unwrap();
++		json[field] = serde_json::json!({"code": "0x00", "top": {}});
++		assert_eq!(
++			from_genesis_json(&serde_json::to_vec(&json).unwrap(), Some(true))
++				.err()
++				.as_deref(),
++			Some("invalid FED RuntimeGenesisConfig JSON")
++		);
++	}
++	let mut json = serde_json::to_value(fixture()).unwrap();
++	json["system"]["code"] = "0x00".into();
++	assert_eq!(
++		from_genesis_json(&serde_json::to_vec(&json).unwrap(), Some(true))
++			.err()
++			.as_deref(),
++		Some("invalid FED RuntimeGenesisConfig JSON")
++	);
++	let mut oversized = serde_json::to_vec(&fixture()).unwrap();
++	oversized.resize(MAX_GENESIS_JSON_BYTES + 1, b' ');
++	assert_eq!(
++		from_genesis_json(&oversized, Some(true)).err().as_deref(),
++		Some("FED typed genesis exceeds the input bound")
++	);
++	assert_eq!(
++		from_genesis_json(&serde_json::to_vec(&fixture()).unwrap(), Some(false))
++			.err()
++			.as_deref(),
++		Some("FED genesis and CLI sealing mode differ")
++	);
++}
++
++#[test]
++fn wasm_rejects_each_invalid_federated_genesis_before_spec_acceptance() {
++	for fault in [
++		"missing-profile",
++		"wrong-proof-profile",
++		"nonzero-activation",
++		"sudo",
++		"quarantine",
++		"code",
++		"owner",
++		"supply",
++	] {
++		let mut config = fixture();
++		let bridge = H160::repeat_byte(0x33);
++		let token = H160::repeat_byte(0x44);
++		match fault {
++			"missing-profile" => config.bridge_commitment.pooled_reserve_mint_genesis_v4 = None,
++			"wrong-proof-profile" | "nonzero-activation" => {
++				use scale_codec::Decode;
++				let bytes = &mut config
++					.bridge_commitment
++					.pooled_reserve_mint_genesis_v4
++					.as_mut()
++					.unwrap()
++					.1;
++				let mut profile =
++					PooledReserveMintReservationRuntimeProfileV4::decode(&mut &bytes[..]).unwrap();
++				if fault == "wrong-proof-profile" {
++					profile.source_proof_profile_id = H256::repeat_byte(0x99);
++				} else {
++					profile.activation_height = 4;
++				}
++				*bytes = profile.encode().try_into().unwrap();
++			}
++			"sudo" => config.sudo.key = Some(H160::repeat_byte(0x31).into()),
++			"quarantine" => config.bridge_commitment.legacy_mint_quarantine_address = None,
++			"code" => config.evm.accounts.get_mut(&bridge).unwrap().code.push(0),
++			"owner" => {
++				config
++					.evm
++					.accounts
++					.get_mut(&bridge)
++					.unwrap()
++					.storage
++					.insert(H256::zero(), H256::repeat_byte(0x77));
++			}
++			"supply" => {
++				config
++					.evm
++					.accounts
++					.get_mut(&token)
++					.unwrap()
++					.storage
++					.insert(H256::from_low_u64_be(2), H256::from_low_u64_be(1));
++			}
++			_ => unreachable!(),
++		}
++		assert_eq!(
++			from_genesis_json(&serde_json::to_vec(&config).unwrap(), Some(true))
++				.err()
++				.as_deref(),
++			Some("selected FED WASM rejected genesis"),
++			"wrong rejection for {fault}"
++		);
++	}
++}
+diff --git a/template/node/src/main.rs b/template/node/src/main.rs
+index 4598400d7c479de8f9a922072e51d8d8cd939b51..eb8ccebe8e5f0a7f45243b45c258b94deaaec46d 100644
+--- a/template/node/src/main.rs
++++ b/template/node/src/main.rs
+@@ -8,11 +8,29 @@
+ )]
+ #![cfg_attr(feature = "runtime-benchmarks", warn(unused_crate_dependencies))]
+ 
+-#[cfg(all(feature = "main-runtime", feature = "bridge-federated-v4-lab-runtime"))]
+-compile_error!("the main runtime and federated LAB runtime are mutually exclusive");
++#[cfg(any(
++	all(feature = "main-runtime", feature = "bridge-federated-v4-lab-runtime"),
++	all(
++		feature = "main-runtime",
++		feature = "bridge-federated-v4-genesis-runtime"
++	),
++	all(
++		feature = "bridge-federated-v4-lab-runtime",
++		feature = "bridge-federated-v4-genesis-runtime"
++	),
++))]
++compile_error!("select exactly one of the main, federated LAB or federated genesis runtimes");
++#[cfg(not(any(
++	feature = "main-runtime",
++	feature = "bridge-federated-v4-lab-runtime",
++	feature = "bridge-federated-v4-genesis-runtime"
++)))]
++compile_error!("a node runtime must be selected explicitly");
+ 
+-#[cfg(not(feature = "bridge-federated-v4-lab-runtime"))]
++#[cfg(feature = "main-runtime")]
+ pub use frontier_template_runtime as selected_runtime;
++#[cfg(feature = "bridge-federated-v4-genesis-runtime")]
++pub use frontier_template_v4_fed_genesis_runtime as selected_runtime;
+ #[cfg(feature = "bridge-federated-v4-lab-runtime")]
+ pub use frontier_template_v4_lab_runtime as selected_runtime;
+ 
+@@ -23,10 +41,12 @@ mod cli;
+ mod client;
+ mod command;
+ mod eth;
++#[cfg(feature = "bridge-federated-v4-genesis-runtime")]
++mod federated_genesis;
+ mod rpc;
+ mod service;
+ 
+-#[cfg(all(test, not(feature = "bridge-federated-v4-lab-runtime")))]
++#[cfg(all(test, feature = "main-runtime"))]
+ mod bridge_atomicity_tests;
+ #[cfg(all(test, feature = "bridge-federated-v4-lab-runtime"))]
+ mod bridge_federated_lab_reservation_tests;
+diff --git a/template/node/src/service.rs b/template/node/src/service.rs
+index afe0ef7111859d26f30e72667c4014316d1a408e..59d75806965238e0bdf433c38d3a685efb039780 100644
+--- a/template/node/src/service.rs
++++ b/template/node/src/service.rs
+@@ -659,6 +659,50 @@ where
+ 	Ok(task_manager)
+ }
+ 
++fn manual_seal_inherent_data_providers(
++	_target_gas_price: u64,
++) -> impl sp_inherents::InherentDataProvider {
++	thread_local!(static TIMESTAMP: RefCell<u64> = const { RefCell::new(0) });
++
++	/// Provide a mock duration starting at 0 in millisecond for timestamp inherent.
++	/// Each call will increment timestamp by slot_duration making Aura think time has passed.
++	struct MockTimestampInherentDataProvider;
++
++	#[async_trait::async_trait]
++	impl sp_inherents::InherentDataProvider for MockTimestampInherentDataProvider {
++		async fn provide_inherent_data(
++			&self,
++			inherent_data: &mut sp_inherents::InherentData,
++		) -> Result<(), sp_inherents::Error> {
++			TIMESTAMP.with(|x| {
++				*x.borrow_mut() += crate::selected_runtime::SLOT_DURATION;
++				inherent_data.put_data(sp_timestamp::INHERENT_IDENTIFIER, &*x.borrow())
++			})
++		}
++
++		async fn try_handle_error(
++			&self,
++			_identifier: &sp_inherents::InherentIdentifier,
++			_error: &[u8],
++		) -> Option<Result<(), sp_inherents::Error>> {
++			// The pallet never reports error.
++			None
++		}
++	}
++
++	let timestamp = MockTimestampInherentDataProvider;
++	#[cfg(feature = "bridge-federated-v4-genesis-runtime")]
++	{
++		// FED uses BaseFee, not DynamicFee. Manual seal counts every data entry.
++		(timestamp,)
++	}
++	#[cfg(not(feature = "bridge-federated-v4-genesis-runtime"))]
++	{
++		let dynamic_fee = fp_dynamic_fee::InherentDataProvider(U256::from(_target_gas_price));
++		(timestamp, dynamic_fee)
++	}
++}
++
+ fn run_manual_seal_authorship<B, RA, HF>(
+ 	eth_config: &EthConfiguration,
+ 	sealing: Sealing,
+@@ -688,40 +732,9 @@ where
+ 		telemetry.as_ref().map(|x| x.handle()),
+ 	);
+ 
+-	thread_local!(static TIMESTAMP: RefCell<u64> = const { RefCell::new(0) });
+-
+-	/// Provide a mock duration starting at 0 in millisecond for timestamp inherent.
+-	/// Each call will increment timestamp by slot_duration making Aura think time has passed.
+-	struct MockTimestampInherentDataProvider;
+-
+-	#[async_trait::async_trait]
+-	impl sp_inherents::InherentDataProvider for MockTimestampInherentDataProvider {
+-		async fn provide_inherent_data(
+-			&self,
+-			inherent_data: &mut sp_inherents::InherentData,
+-		) -> Result<(), sp_inherents::Error> {
+-			TIMESTAMP.with(|x| {
+-				*x.borrow_mut() += crate::selected_runtime::SLOT_DURATION;
+-				inherent_data.put_data(sp_timestamp::INHERENT_IDENTIFIER, &*x.borrow())
+-			})
+-		}
+-
+-		async fn try_handle_error(
+-			&self,
+-			_identifier: &sp_inherents::InherentIdentifier,
+-			_error: &[u8],
+-		) -> Option<Result<(), sp_inherents::Error>> {
+-			// The pallet never reports error.
+-			None
+-		}
+-	}
+-
+ 	let target_gas_price = eth_config.target_gas_price;
+-	let create_inherent_data_providers = move |_, ()| async move {
+-		let timestamp = MockTimestampInherentDataProvider;
+-		let dynamic_fee = fp_dynamic_fee::InherentDataProvider(U256::from(target_gas_price));
+-		Ok((timestamp, dynamic_fee))
+-	};
++	let create_inherent_data_providers =
++		move |_, ()| async move { Ok(manual_seal_inherent_data_providers(target_gas_price)) };
+ 
+ 	let manual_seal = match sealing {
+ 		Sealing::Manual => future::Either::Left(sc_consensus_manual_seal::run_manual_seal(
+@@ -756,6 +769,92 @@ where
+ 	Ok(())
+ }
+ 
++#[cfg(all(test, feature = "bridge-federated-v4-genesis-runtime"))]
++mod federated_manual_seal_tests {
++	use scale_codec::{Decode, Encode};
++	use sp_inherents::{InherentData, InherentDataProvider};
++
++	use super::manual_seal_inherent_data_providers;
++	use crate::selected_runtime as runtime;
++
++	fn service_data(gas_price: u64) -> InherentData {
++		futures::executor::block_on(
++			manual_seal_inherent_data_providers(gas_price).create_inherent_data(),
++		)
++		.unwrap()
++	}
++
++	fn generated(data: &InherentData) -> Vec<runtime::UncheckedExtrinsic> {
++		sp_io::TestExternalities::default().execute_with(|| {
++			let encoded =
++				runtime::api::dispatch("BlockBuilder_inherent_extrinsics", &data.encode()).unwrap();
++			let mut bytes = &encoded[..];
++			let extrinsics = Vec::<runtime::UncheckedExtrinsic>::decode(&mut bytes).unwrap();
++			assert!(bytes.is_empty());
++			extrinsics
++		})
++	}
++
++	#[test]
++	fn service_provider_matches_runtime_count_and_preserves_clock() {
++		std::thread::spawn(|| {
++			let first = service_data(1_000_000_000);
++			assert_eq!(first.len(), 1);
++			assert_eq!(
++				first
++					.get_data::<u64>(&sp_timestamp::INHERENT_IDENTIFIER)
++					.unwrap(),
++				Some(runtime::SLOT_DURATION),
++			);
++			let extrinsics = generated(&first);
++			assert_eq!(extrinsics.len(), first.len());
++			assert_eq!(hex::encode(extrinsics[0].encode()), "14050100c15d");
++			let second = service_data(1_000_000_000);
++			assert_eq!(
++				second
++					.get_data::<u64>(&sp_timestamp::INHERENT_IDENTIFIER)
++					.unwrap(),
++				Some(2 * runtime::SLOT_DURATION),
++			);
++			assert_eq!(generated(&second).len(), second.len());
++		})
++		.join()
++		.unwrap();
++	}
++
++	#[test]
++	fn obsolete_dynamic_fee_entry_reproduces_the_count_collision() {
++		let mut data = service_data(1_000_000_000);
++		let extrinsics = generated(&data);
++		assert_eq!(data.len(), extrinsics.len());
++		data.put_data(
++			fp_dynamic_fee::INHERENT_IDENTIFIER,
++			&sp_core::U256::from(1_000_000_000u64),
++		)
++		.unwrap();
++		assert_eq!(generated(&data).encode(), extrinsics.encode());
++		// SDK manual seal compares these counts before import when create_empty=false.
++		assert_eq!(data.len(), extrinsics.len() + 1);
++	}
++
++	#[test]
++	fn gas_price_never_adds_an_unconsumed_fed_inherent() {
++		for gas_price in [0, 1_000_000_000, u64::MAX] {
++			let data = service_data(gas_price);
++			assert_eq!(data.len(), 1);
++			assert!(data
++				.get_data::<u64>(&sp_timestamp::INHERENT_IDENTIFIER)
++				.unwrap()
++				.is_some());
++			assert!(data
++				.get_data::<sp_core::U256>(&fp_dynamic_fee::INHERENT_IDENTIFIER)
++				.unwrap()
++				.is_none());
++			assert_eq!(generated(&data).len(), data.len());
++		}
++	}
++}
++
+ pub async fn build_full(
+ 	config: Configuration,
+ 	eth_config: EthConfiguration,

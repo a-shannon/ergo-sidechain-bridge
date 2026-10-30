@@ -239,6 +239,7 @@ describe('pooled-reserve V4 cutover candidate', () => {
       'SPVTrackerPooledReserveBurnSettlementV6.es',
       'DoubleUnlockPreventionSubstrateFederatedV1.es',
       'SPVTrackerSubstrateFederatedV1.es',
+      'SPVTrackerSubstrateFederatedV2.es',
     ]);
     const contractDirectory = resolve(
       import.meta.dirname,

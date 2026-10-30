@@ -1,0 +1,3339 @@
+diff --git a/src/main/scala/org/ergoplatform/http/api/MiningApiRoute.scala b/src/main/scala/org/ergoplatform/http/api/MiningApiRoute.scala
+index ce0c10f204d9c05623c44e90e2edc7876a7b4cf9..cfad3bd4d15bda2c407c9f950dc6eea2b10b6c2a 100644
+--- a/src/main/scala/org/ergoplatform/http/api/MiningApiRoute.scala
++++ b/src/main/scala/org/ergoplatform/http/api/MiningApiRoute.scala
+@@ -2,11 +2,12 @@ package org.ergoplatform.http.api
+ 
+ import akka.actor.{ActorRef, ActorRefFactory}
+ import akka.http.scaladsl.server.Route
++import akka.http.scaladsl.model.{HttpRequest, StatusCodes}
+ import akka.pattern.ask
+ import io.circe.syntax._
+ import io.circe.{Encoder, Json}
+ import org.ergoplatform.mining.CandidateGenerator.Candidate
+-import org.ergoplatform.mining.{AutolykosSolution, CandidateGenerator, ErgoMiner}
++import org.ergoplatform.mining.{AutolykosSolution, CandidateGenerator, ErgoMiner, OwnedMiningSubmissionV1}
+ import org.ergoplatform.modifiers.mempool.ErgoTransaction
+ import org.ergoplatform.nodeView.wallet.ErgoAddressJsonEncoder
+ import org.ergoplatform.settings.{ErgoSettings, RESTApiSettings}
+@@ -15,11 +16,15 @@ import scorex.core.api.http.ApiResponse
+ import sigma.data.ProveDlog
+ 
+ import scala.concurrent.Future
++import scala.util.Try
+ 
+ case class MiningApiRoute(miner: ActorRef,
+-                          ergoSettings: ErgoSettings)
++                          ergoSettings: ErgoSettings,
++                          ownedSubmissionControl: Option[OwnedMiningSubmissionV1.Control] = OwnedMiningSubmissionV1.processControl)
+                          (implicit val context: ActorRefFactory) extends ErgoBaseApiRoute with ApiCodecs {
+ 
++  import MiningApiRoute.{PermitBinding, PermitRequest}
++
+   val settings: RESTApiSettings = ergoSettings.scorexSettings.restApi
+ 
+   implicit val addressEncoder: Encoder[ErgoAddress] = ErgoAddressJsonEncoder(ergoSettings.chainSettings).encoder
+@@ -28,6 +33,10 @@ case class MiningApiRoute(miner: ActorRef,
+     candidateR ~
+       candidateWithTxsR ~
+       solutionR ~
++      ownedSubmissionPauseR ~
++      ownedTransactionHoldR ~
++      ownedTransactionArmR ~
++      ownedTransactionStatusR ~
+       rewardAddressR ~
+       rewardPublicKeyR
+   }
+@@ -62,6 +71,32 @@ case class MiningApiRoute(miner: ActorRef,
+     ApiResponse(result)
+   }
+ 
++  def ownedSubmissionPauseR: Route = ownedSubmissionControl match {
++    case None => reject()
++    case Some(control) =>
++      (path("ownedSubmissionPauseV1") & pathEndOrSingleSlash & post & withAuth &
++        headerValueByName("X-Ergo-Owned-Mining-Nonce") &
++        headerValueByName("X-Ergo-Owned-Mining-Operation")) { (nonce, operationId) =>
++        if (!control.authenticate(nonce) || !OwnedMiningSubmissionV1.validOperationId(operationId)) {
++          complete(StatusCodes.Forbidden)
++        } else {
++          val result = miner.askWithStatus(CandidateGenerator.PauseOwnedSubmissionV1(nonce, operationId))
++            .mapTo[OwnedMiningSubmissionV1.PauseReceipt].map { receipt =>
++              Json.obj(
++                "schema" -> Json.fromString("e2s.owned-mining-submission-pause.v1"),
++                "operationId" -> Json.fromString(receipt.operationId),
++                "submissionPaused" -> Json.fromBoolean(true),
++                "maximumBlockHeight" -> receipt.maximumBlockHeight.map(Json.fromInt).getOrElse(Json.Null),
++                "latestAppliedBlock" -> receipt.watermark.map { block =>
++                  Json.obj("headerId" -> Json.fromString(block.headerId), "height" -> Json.fromInt(block.height))
++                }.getOrElse(Json.Null)
++              )
++            }
++          ApiResponse(result)
++        }
++      }
++  }
++
+   def rewardAddressR: Route = (path("rewardAddress") & get) {
+     val addressF: Future[ErgoAddress] =
+       miner.askWithStatus(ErgoMiner.ReadMinerPk)
+@@ -74,9 +109,97 @@ case class MiningApiRoute(miner: ActorRef,
+     ApiResponse(addressF.map(address => Json.obj("rewardAddress" -> address.asJson)))
+   }
+ 
++  private def permitRequest(request: HttpRequest, includeBinding: Boolean): Option[PermitRequest] = {
++    def header(name: String): Option[String] = {
++      val values = request.headers.filter(_.is(name)).map(_.value())
++      if (values.size == 1) Some(values.head) else None
++    }
++    def identity(name: String): Option[String] = header(name).filter(OwnedMiningSubmissionV1.validOperationId)
++    val unexpectedBinding = !includeBinding && request.headers.exists(header =>
++      Seq("x-ergo-owned-mining-transaction", "x-ergo-owned-mining-parent", "x-ergo-owned-mining-parent-height").exists(header.is))
++    if (!request.entity.isKnownEmpty() || request.uri.query().nonEmpty || unexpectedBinding) None
++    else for {
++      nonce <- identity("x-ergo-owned-mining-nonce")
++      operation <- identity("x-ergo-owned-mining-operation")
++      binding <- if (!includeBinding) Some(None) else for {
++        transaction <- identity("x-ergo-owned-mining-transaction")
++        parent <- identity("x-ergo-owned-mining-parent")
++        heightText <- header("x-ergo-owned-mining-parent-height").filter(_.matches("[1-9][0-9]*"))
++        height <- Try(heightText.toInt).toOption.filter(_ <= Int.MaxValue - OwnedMiningSubmissionV1.TransactionApplications)
++      } yield Some(PermitBinding(transaction, OwnedMiningSubmissionV1.Watermark(parent, height)))
++    } yield PermitRequest(nonce, operation, binding)
++  }
++
++  private def watermarkJson(value: OwnedMiningSubmissionV1.Watermark): Json =
++    Json.obj("headerId" -> Json.fromString(value.headerId), "height" -> Json.fromInt(value.height))
++
++  private def permitRoute(name: String, includeBinding: Boolean)
++                         (run: (OwnedMiningSubmissionV1.Control, PermitRequest) => Future[Json]): Route =
++    ownedSubmissionControl match {
++      case Some(control) if control.transactionPermitsEnabled =>
++        (path(name) & pathEndOrSingleSlash & post & withAuth & extractRequest) { request =>
++          permitRequest(request, includeBinding) match {
++            case Some(input) if control.authenticate(input.nonce) => ApiResponse(run(control, input))
++            case _ => complete(StatusCodes.Forbidden)
++          }
++        }
++      case _ => reject()
++    }
++
++  def ownedTransactionHoldR: Route = permitRoute("ownedTransactionHoldV1", includeBinding = false) { (control, input) =>
++    miner.askWithStatus(CandidateGenerator.HoldOwnedTransactionsV1(input.nonce, input.operationId))
++      .mapTo[OwnedMiningSubmissionV1.HoldReceipt].map { receipt =>
++        Json.obj(
++          "schema" -> Json.fromString("e2s.owned-mining-transaction-hold.v1"),
++          "operationId" -> Json.fromString(receipt.operationId),
++          "submissionHeld" -> Json.True,
++          "maximumBlockHeight" -> control.maximumBlockHeight.map(Json.fromInt).getOrElse(Json.Null),
++          "parent" -> watermarkJson(receipt.watermark)
++        )
++      }
++  }
++
++  def ownedTransactionArmR: Route = permitRoute("ownedTransactionArmV1", includeBinding = true) { (control, input) =>
++    val binding = input.binding.get
++    miner.askWithStatus(CandidateGenerator.ArmOwnedTransactionV1(input.nonce, input.operationId, binding.parent, binding.transactionId))
++      .mapTo[Unit].map { _ =>
++        Json.obj(
++          "schema" -> Json.fromString("e2s.owned-mining-transaction-arm.v1"),
++          "operationId" -> Json.fromString(input.operationId),
++          "transactionId" -> Json.fromString(binding.transactionId),
++          "initialParent" -> watermarkJson(binding.parent),
++          "accepted" -> Json.True,
++          "confirmations" -> Json.fromInt(OwnedMiningSubmissionV1.TransactionConfirmations),
++          "maximumBlockHeight" -> control.maximumBlockHeight.map(Json.fromInt).getOrElse(Json.Null)
++        )
++      }
++  }
++
++  def ownedTransactionStatusR: Route = permitRoute("ownedTransactionStatusV1", includeBinding = true) { (control, input) =>
++    val binding = input.binding.get
++    miner.askWithStatus(CandidateGenerator.GetOwnedTransactionPermitStatusV1(input.nonce, input.operationId, binding.transactionId, binding.parent))
++      .mapTo[OwnedMiningSubmissionV1.TransactionPermitStatus].map { receipt =>
++        Json.obj(
++          "schema" -> Json.fromString("e2s.owned-mining-transaction-status.v1"),
++          "operationId" -> Json.fromString(receipt.operationId),
++          "transactionId" -> Json.fromString(receipt.transactionId),
++          "initialParent" -> watermarkJson(receipt.initialParent),
++          "completed" -> Json.fromBoolean(receipt.completed),
++          "finalWatermark" -> receipt.finalWatermark.map(watermarkJson).getOrElse(Json.Null),
++          "confirmations" -> Json.fromInt(OwnedMiningSubmissionV1.TransactionConfirmations),
++          "maximumBlockHeight" -> control.maximumBlockHeight.map(Json.fromInt).getOrElse(Json.Null)
++        )
++      }
++  }
++
+   def rewardPublicKeyR: Route = (path("rewardPublicKey") & get) {
+     val pkF = miner.askWithStatus(ErgoMiner.ReadMinerPk).mapTo[ProveDlog]
+     ApiResponse(pkF.map(pk => Json.obj("rewardPubkey" -> pk.asJson)))
+   }
+ 
+ }
++
++object MiningApiRoute {
++  private final case class PermitBinding(transactionId: String, parent: OwnedMiningSubmissionV1.Watermark)
++  private final case class PermitRequest(nonce: String, operationId: String, binding: Option[PermitBinding])
++}
+diff --git a/src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala b/src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala
+index bfa0fe6162477fae9012eddd3de8736f2c140a1d..47cb89128a2c754e7d62bf93d983e5df6c2c37fd 100644
+--- a/src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala
++++ b/src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala
+@@ -8,7 +8,7 @@ import org.ergoplatform.mining.AutolykosPowScheme.derivedHeaderFields
+ import org.ergoplatform.mining.difficulty.DifficultySerializer
+ import org.ergoplatform.modifiers.ErgoFullBlock
+ import org.ergoplatform.modifiers.history._
+-import org.ergoplatform.modifiers.history.extension.Extension
++import org.ergoplatform.modifiers.history.extension.{Extension, ExtensionCandidate}
+ import org.ergoplatform.modifiers.history.header.{Header, HeaderWithoutPow}
+ import org.ergoplatform.modifiers.history.popow.NipopowAlgos
+ import org.ergoplatform.modifiers.mempool.{ErgoTransaction, UnconfirmedTransaction}
+@@ -19,8 +19,8 @@ import org.ergoplatform.nodeView.LocallyGeneratedModifier
+ import org.ergoplatform.nodeView.history.ErgoHistoryUtils.Height
+ import org.ergoplatform.nodeView.history.{ErgoHistoryReader, ErgoHistoryUtils}
+ import org.ergoplatform.nodeView.mempool.ErgoMemPoolReader
+-import org.ergoplatform.nodeView.state.{ErgoState, ErgoStateContext, StateType, UtxoStateReader}
+-import org.ergoplatform.settings.{ErgoSettings, ErgoValidationSettingsUpdate, Parameters}
++import org.ergoplatform.nodeView.state.{ErgoState, ErgoStateContext, StateType, UpcomingStateContext, UtxoStateReader}
++import org.ergoplatform.settings.{Constants, ErgoSettings, ErgoValidationSettingsUpdate, Parameters}
+ import org.ergoplatform.sdk.wallet.Constants.MaxAssetsPerBox
+ import org.ergoplatform.wallet.interpreter.ErgoInterpreter
+ import org.ergoplatform.{ErgoBox, ErgoBoxCandidate, ErgoTreePredef, Input}
+@@ -29,7 +29,7 @@ import scorex.util.encode.Base16
+ import scorex.util.{ModifierId, ScorexLogging}
+ import sigma.ast.syntax.ErgoBoxRType
+ import sigma.Extensions.ArrayOps
+-import sigma.crypto.CryptoFacade
++import sigma.crypto.{CryptoFacade, EcPointType}
+ import sigma.data.{Digest32Coll, ProveDlog}
+ import sigma.interpreter.ProverResult
+ import sigma.validation.ReplacedRule
+@@ -46,7 +46,8 @@ class CandidateGenerator(
+   minerPk: ProveDlog,
+   readersHolderRef: ActorRef,
+   viewHolderRef: ActorRef,
+-  ergoSettings: ErgoSettings
++  ergoSettings: ErgoSettings,
++  ownedSubmissionControl: Option[OwnedMiningSubmissionV1.Control] = OwnedMiningSubmissionV1.processControl
+ ) extends Actor
+   with ScorexLogging {
+ 
+@@ -54,6 +55,44 @@ class CandidateGenerator(
+ 
+   private val candidateGenInterval =
+     ergoSettings.nodeSettings.blockCandidateGenerationInterval
++  private val requiredMiningTransactionIdHex =
++    CandidateGenerator.parseRequiredMiningTransactionId(sys.env)
++  private var ownedPauseReply: Option[ActorRef] = None
++  private var ownedHoldReply: Option[ActorRef] = None
++
++  private def replyToCompletedOwnedHold(state: CandidateGeneratorState): Unit = {
++    ownedSubmissionControl.filter(_.transactionPermitsEnabled).foreach(_.observeReaders(
++      state.hr.bestFullBlockOpt.map(_.header), state.sr.stateContext.lastHeaderOpt))
++    for (control <- ownedSubmissionControl; reply <- ownedHoldReply) {
++      control.holdCompletion match {
++        case Right(Some(receipt)) =>
++          ownedHoldReply = None
++          reply ! StatusReply.success(receipt)
++        case Left(_) =>
++          ownedHoldReply = None
++          reply ! StatusReply.error("Owned transaction hold failed")
++        case Right(None) =>
++      }
++    }
++  }
++
++  private def requiredTransaction(state: CandidateGeneratorState): Option[String] =
++    ownedSubmissionControl.flatMap(_.requiredPermitTransaction).orElse(
++      requiredMiningTransactionForCandidate(requiredMiningTransactionIdHex, state.requiredMiningTransactionConfirmed))
++
++  private def replyToCompletedOwnedPause(): Unit = {
++    for (control <- ownedSubmissionControl; reply <- ownedPauseReply) {
++      control.pauseCompletion match {
++        case Right(Some(receipt)) =>
++          ownedPauseReply = None
++          reply ! StatusReply.success(receipt)
++        case Left(_) =>
++          ownedPauseReply = None
++          reply ! StatusReply.error("Owned mining submission pause failed")
++        case Right(None) =>
++      }
++    }
++  }
+ 
+   /** retrieve Readers once on start and then get updated by events */
+   override def preStart(): Unit = {
+@@ -87,22 +126,23 @@ class CandidateGenerator(
+       log.info(
+         s"CandidateGenerator initialized, avgMiningTime: ${avgMiningTime.toSeconds}s, avgTxsCount: $avgTxsCount"
+       )
+-      context.become(
+-        initialized(
+-          CandidateGeneratorState(
++      val initialState = CandidateGeneratorState(
+             cachedCandidate = None,
+             cachedPreviousCandidate = None,
+             solvedBlock = None,
++            requiredMiningTransactionConfirmed = requiredMiningTransactionIdHex.isEmpty,
+             h,
+             s,
+             m,
+             avgGenTime = 1000.millis
+           )
+-        )
+-      )
++      context.become(initialized(initialState))
++      replyToCompletedOwnedHold(initialState)
+       self ! GenerateCandidate(txsToInclude = Seq.empty, reply = false, forced = false)
+       context.system.eventStream
+         .subscribe(self, classOf[FullBlockApplied])
++      context.system.eventStream
++        .subscribe(self, classOf[SemanticallyFailedModification])
+       context.system.eventStream.subscribe(self, classOf[NodeViewChange])
+     case Readers(_, _, _, _) =>
+       log.error("Invalid readers state, mining is possible in UTXO mode only")
+@@ -113,12 +153,71 @@ class CandidateGenerator(
+   }
+ 
+   private def initialized(state: CandidateGeneratorState): Receive = {
++    case HoldOwnedTransactionsV1(ownerNonce, operationId) =>
++      ownedSubmissionControl match {
++        case Some(control) =>
++          control.hold(ownerNonce, operationId) match {
++            case Right(_) =>
++              ownedHoldReply = Some(sender())
++              replyToCompletedOwnedHold(state)
++            case Left(_) => sender() ! StatusReply.error("Owned transaction hold refused")
++          }
++        case _ => sender() ! StatusReply.error("Owned transaction hold is disabled")
++      }
++    case ArmOwnedTransactionV1(ownerNonce, operationId, parent, transactionId) =>
++      ownedSubmissionControl match {
++        case Some(control) =>
++          control.arm(ownerNonce, operationId, parent, transactionId,
++            state.hr.bestFullBlockOpt.map(_.header).filter(header =>
++              state.sr.stateContext.lastHeaderOpt.exists(_.id == header.id))
++              .map(header => OwnedMiningSubmissionV1.Watermark(header.id, header.height))) match {
++            case Right(_) => sender() ! StatusReply.success(())
++            case Left(_) => sender() ! StatusReply.error("Owned transaction permit refused")
++          }
++        case _ => sender() ! StatusReply.error("Owned transaction permit parent differs")
++      }
++    case GetOwnedTransactionPermitStatusV1(ownerNonce, operationId, transactionId, initialParent) =>
++      ownedSubmissionControl match {
++        case Some(control) =>
++          control.transactionPermitStatus(ownerNonce, operationId, transactionId, initialParent,
++            (state.hr.bestFullBlockOpt.map(_.header), state.sr.stateContext.lastHeaderOpt)) match {
++            case Right(receipt) => sender() ! StatusReply.success(receipt)
++            case Left(_) => sender() ! StatusReply.error("Owned transaction status refused")
++          }
++        case None => sender() ! StatusReply.error("Owned transaction status is disabled")
++      }
++    case PauseOwnedSubmissionV1(ownerNonce, operationId) =>
++      ownedSubmissionControl match {
++        case Some(control) =>
++          control.pause(ownerNonce, operationId) match {
++            case Right(Some(receipt)) => sender() ! StatusReply.success(receipt)
++            case Right(None) => ownedPauseReply = Some(sender())
++            case Left(_) => sender() ! StatusReply.error("Owned mining submission pause refused")
++          }
++        case None => sender() ! StatusReply.error("Owned mining submission control is disabled")
++      }
++      replyToCompletedOwnedHold(state)
++    case GenerateCandidate(_, reply, _) if ownedSubmissionControl.exists(_.submissionsClosed) =>
++      if (reply) sender() ! StatusReply.error("Owned mining submissions are closed")
++    case _: AutolykosSolution if ownedSubmissionControl.exists(_.submissionsClosed) =>
++      sender() ! StatusReply.error("Owned mining submissions are closed")
+     case ChangedHistory(h: ErgoHistoryReader) =>
+-      context.become(initialized(state.copy(hr = h)))
++      val next = state.copy(hr = h)
++      context.become(initialized(next))
++      replyToCompletedOwnedHold(next)
+     case ChangedState(s: UtxoStateReader) =>
+-      context.become(initialized(state.copy(sr = s)))
++      val next = state.copy(sr = s)
++      context.become(initialized(next))
++      replyToCompletedOwnedHold(next)
+     case ChangedMempool(mp: ErgoMemPoolReader) =>
+-      if (hasCandidateExpired(
++      val activeRequiredMiningTransactionIdHex =
++        requiredTransaction(state)
++      val requiredMiningTransactionArrived =
++        activeRequiredMiningTransactionIdHex.nonEmpty && containsRequiredMiningTransaction(
++          activeRequiredMiningTransactionIdHex,
++          mp.getAllPrioritized.map(_.id)
++        )
++      if (requiredMiningTransactionArrived || hasCandidateExpired(
+         state.cachedCandidate,
+         state.solvedBlock,
+         candidateGenInterval
+@@ -131,6 +230,24 @@ class CandidateGenerator(
+       } else {
+         context.become(initialized(state.copy(mpr = mp)))
+       }
++    case SemanticallyFailedModification(typeId, modifierId, _)
++        if typeId == ErgoFullBlock.modifierTypeId && ownedSubmissionControl.nonEmpty =>
++      ownedSubmissionControl.foreach(_.observeRejected(modifierId))
++      replyToCompletedOwnedPause()
++      replyToCompletedOwnedHold(state)
++      if (state.solvedBlock.exists(_.id == modifierId)) {
++        context.become(initialized(state.copy(
++          cachedCandidate = None, cachedPreviousCandidate = None, solvedBlock = None
++        )))
++      }
++    case SemanticallyFailedModification(typeId, modifierId, error)
++        if typeId == ErgoFullBlock.modifierTypeId && state.solvedBlock.exists(_.id == modifierId) =>
++      log.warn(s"Clearing solved candidate after semantic rejection of block $modifierId: ${error.getMessage}")
++      context.become(initialized(state.copy(
++        cachedCandidate = None,
++        cachedPreviousCandidate = None,
++        solvedBlock = None
++      )))
+     case _: NodeViewChange =>
+     // Just ignore all other NodeView Changes
+ 
+@@ -139,22 +256,46 @@ class CandidateGenerator(
+      * we need to generate new candidate and possibly also discard existing solution if it is also behind
+      */
+     case FullBlockApplied(header) =>
++      ownedSubmissionControl.foreach(_.observeApplied(header))
++      replyToCompletedOwnedPause()
++      replyToCompletedOwnedHold(state)
+       log.info(
+         s"Preparing new candidate on getting new block at ${header.height}"
+       )
++      val requiredMiningTransactionConfirmed =
++        state.requiredMiningTransactionConfirmed ||
++          state.solvedBlock.exists(block =>
++            requiredMiningTransactionConfirmedByAppliedBlock(
++              requiredMiningTransactionIdHex,
++              header.id,
++              block.id,
++              block.transactions.map(_.id)
++            )
++          )
++      val stateAfterAppliedBlock = state.copy(
++        requiredMiningTransactionConfirmed = requiredMiningTransactionConfirmed
++      )
+       if (needNewCandidate(state.cachedCandidate, header)) {
+         if (needNewSolution(state.solvedBlock, header.id))
+-          context.become(initialized(state.copy(cachedCandidate = None, cachedPreviousCandidate = None, solvedBlock = None)))
++          context.become(initialized(stateAfterAppliedBlock.copy(cachedCandidate = None, cachedPreviousCandidate = None, solvedBlock = None)))
+         else
+-          context.become(initialized(state.copy(cachedCandidate = None, cachedPreviousCandidate = None)))
++          context.become(initialized(stateAfterAppliedBlock.copy(cachedCandidate = None, cachedPreviousCandidate = None)))
+         self ! GenerateCandidate(txsToInclude = Seq.empty, reply = false, forced = false)
+       } else {
+-        context.become(initialized(state))
++        context.become(initialized(stateAfterAppliedBlock))
+       }
+ 
+     case gen @ GenerateCandidate(txsToInclude, reply, forced) =>
+       val senderOpt = if (reply) Some(sender()) else None
+-      if (!forced && cachedFor(state.cachedCandidate, txsToInclude)) {
++      val activeRequiredMiningTransactionIdHex =
++        requiredTransaction(state)
++      val cachedCandidateSatisfiesMiningRequirement =
++        state.cachedCandidate.exists(candidate => containsRequiredMiningTransaction(
++          activeRequiredMiningTransactionIdHex,
++          candidate.candidateBlock.transactions.map(_.id)
++        ))
++      if (!forced && cachedFor(state.cachedCandidate, txsToInclude) &&
++        cachedCandidateSatisfiesMiningRequirement) {
+         senderOpt.foreach(_ ! StatusReply.success(state.cachedCandidate.get))
+       } else {
+         val start = System.currentTimeMillis()
+@@ -164,7 +305,8 @@ class CandidateGenerator(
+           state.mpr,
+           minerPk,
+           txsToInclude,
+-          ergoSettings
++          ergoSettings,
++          activeRequiredMiningTransactionIdHex
+         ) match {
+           case Some(Failure(ex)) =>
+             log.error(s"Candidate generation failed", ex)
+@@ -211,16 +353,38 @@ class CandidateGenerator(
+           .filter(block => ergoSettings.chainSettings.powScheme.validate(block.header).isSuccess)
+           .getOrElse {
+             log.info(s"Using previous candidate as a solution: " + state.cachedPreviousCandidate)
+-            completeBlock(state.cachedPreviousCandidate.get.candidateBlock, solution)
++            completeBlock(
++              state.cachedPreviousCandidate.getOrElse(state.cachedCandidate.get).candidateBlock,
++              solution
++            )
+           }
+         log.info(s"New block mined, header: ${newBlock.header}")
+         ergoSettings.chainSettings.powScheme
+           .validate(newBlock.header)
+           .map(_ => newBlock) match {
+-          case Success(newBlock) =>
+-            sendToNodeView(newBlock)
+-            context.become(initialized(state.copy(solvedBlock = Some(newBlock))))
+-            StatusReply.success(())
++          case Success(newBlock) if solvedBlockSatisfiesMiningRequirement(
++            requiredMiningTransactionIdHex,
++            state.requiredMiningTransactionConfirmed,
++            newBlock.transactions.map(_.id)
++          ) =>
++            val admission: Either[String, Unit] = ownedSubmissionControl
++              .map(_.admitSubmission(newBlock.header, newBlock.transactions.map(_.id))).getOrElse(Right(()))
++            admission match {
++              case Right(_) =>
++                sendToNodeView(newBlock)
++                context.become(initialized(state.copy(solvedBlock = Some(newBlock))))
++                StatusReply.success(())
++              case Left(_) => StatusReply.error("Owned mining submission refused")
++            }
++          case Success(_) =>
++            log.warn("Removing candidates because the solved block omitted the required mining transaction")
++            context.become(initialized(state.copy(
++              cachedCandidate = None,
++              cachedPreviousCandidate = None
++            )))
++            StatusReply.error(
++              new Exception("Solved block omitted the required mining transaction")
++            )
+           case Failure(exception) =>
+             log.warn(s"Removing candidates due to invalid block", exception)
+             context.become(initialized(state.copy(cachedCandidate = None, cachedPreviousCandidate = None)))
+@@ -243,6 +407,69 @@ class CandidateGenerator(
+ 
+ object CandidateGenerator extends ScorexLogging {
+ 
++  final case class PauseOwnedSubmissionV1(ownerNonce: String, operationId: String) {
++    override def toString: String = "PauseOwnedSubmissionV1(<redacted>)"
++  }
++  final case class HoldOwnedTransactionsV1(ownerNonce: String, operationId: String) {
++    override def toString: String = "HoldOwnedTransactionsV1(<redacted>)"
++  }
++  final case class ArmOwnedTransactionV1(ownerNonce: String, operationId: String,
++                                       parent: OwnedMiningSubmissionV1.Watermark, transactionId: String) {
++    override def toString: String = "ArmOwnedTransactionV1(<redacted>)"
++  }
++  final case class GetOwnedTransactionPermitStatusV1(ownerNonce: String, operationId: String,
++                                                    transactionId: String, initialParent: OwnedMiningSubmissionV1.Watermark) {
++    override def toString: String = "GetOwnedTransactionPermitStatusV1(<redacted>)"
++  }
++
++  val SidechainExtensionFieldsEnv = "ERGO_SIDECHAIN_EXTENSION_FIELDS"
++  val RequiredMiningTransactionIdEnv = "ERGO_SIDECHAIN_REQUIRED_MINING_TRANSACTION_ID"
++
++  private[ergoplatform] def parseRequiredMiningTransactionId(
++    environment: collection.Map[String, String]
++  ): Option[String] =
++    environment.get(RequiredMiningTransactionIdEnv).map { value =>
++      require(
++        value.length == 64 && value.forall(character =>
++          character >= '0' && character <= '9' || character >= 'a' && character <= 'f'
++        ),
++        s"$RequiredMiningTransactionIdEnv must be 32-byte lowercase hexadecimal"
++      )
++      value
++    }
++
++  private[ergoplatform] def containsRequiredMiningTransaction(
++    requiredTransactionIdHex: Option[String],
++    transactionIds: Seq[String]
++  ): Boolean =
++    requiredTransactionIdHex.forall(transactionIds.contains)
++
++  private[ergoplatform] def requiredMiningTransactionForCandidate(
++    requiredTransactionIdHex: Option[String],
++    confirmed: Boolean
++  ): Option[String] =
++    if (confirmed) None else requiredTransactionIdHex
++
++  private[ergoplatform] def solvedBlockSatisfiesMiningRequirement(
++    requiredTransactionIdHex: Option[String],
++    confirmed: Boolean,
++    solvedTransactionIds: Seq[String]
++  ): Boolean =
++    containsRequiredMiningTransaction(
++      requiredMiningTransactionForCandidate(requiredTransactionIdHex, confirmed),
++      solvedTransactionIds
++    )
++
++  private[ergoplatform] def requiredMiningTransactionConfirmedByAppliedBlock(
++    requiredTransactionIdHex: Option[String],
++    appliedBlockId: String,
++    locallySolvedBlockId: String,
++    locallySolvedTransactionIds: Seq[String]
++  ): Boolean =
++    appliedBlockId == locallySolvedBlockId && requiredTransactionIdHex.exists(
++      locallySolvedTransactionIds.contains
++    )
++
+   /**
+     * Holder for both candidate block and data for external miners derived from it
+     * (to avoid possibly costly recalculation)
+@@ -268,6 +495,7 @@ object CandidateGenerator extends ScorexLogging {
+     cachedCandidate: Option[Candidate],
+     cachedPreviousCandidate: Option[Candidate],
+     solvedBlock: Option[ErgoFullBlock],
++    requiredMiningTransactionConfirmed: Boolean,
+     hr: ErgoHistoryReader,
+     sr: UtxoStateReader,
+     mpr: ErgoMemPoolReader,
+@@ -278,7 +506,8 @@ object CandidateGenerator extends ScorexLogging {
+     minerPk: ProveDlog,
+     readersHolderRef: ActorRef,
+     viewHolderRef: ActorRef,
+-    ergoSettings: ErgoSettings
++    ergoSettings: ErgoSettings,
++    ownedSubmissionControl: Option[OwnedMiningSubmissionV1.Control] = OwnedMiningSubmissionV1.processControl
+   )(implicit context: ActorRefFactory): ActorRef =
+     context.actorOf(
+       Props(
+@@ -286,7 +515,8 @@ object CandidateGenerator extends ScorexLogging {
+           minerPk,
+           readersHolderRef,
+           viewHolderRef,
+-          ergoSettings
++          ergoSettings,
++          ownedSubmissionControl
+         )
+       ).withDispatcher("critical-dispatcher"),
+       s"CandidateGenerator-${Random.alphanumeric.take(5).mkString}"
+@@ -355,7 +585,7 @@ object CandidateGenerator extends ScorexLogging {
+     val miningTimes =
+       timestamps.sorted
+         .sliding(2, 1)
+-        .map { case IndexedSeq(prev, next) => next - prev }
++        .collect { case IndexedSeq(prev, next) => next - prev }
+         .toVector
+     Math.round(miningTimes.sum / miningTimes.length.toDouble).millis
+   }
+@@ -368,6 +598,72 @@ object CandidateGenerator extends ScorexLogging {
+   private def inputsNotSpent(tx: ErgoTransaction, s: UtxoStateReader): Boolean =
+     tx.inputs.forall(inp => s.boxById(inp.boxId).isDefined)
+ 
++  private[mining] def parseSidechainExtensionFields(raw: String): ExtensionCandidate = {
++    val fields = raw
++      .split("[,;]")
++      .toSeq
++      .map(_.trim)
++      .filter(_.nonEmpty)
++      .map { entry =>
++        val parts = entry.split(":", 2).map(_.trim)
++        require(
++          parts.length == 2,
++          s"$SidechainExtensionFieldsEnv entries must use keyHex:valueHex format"
++        )
++
++        val key = Base16.decode(parts(0)).get
++        val value = Base16.decode(parts(1)).get
++
++        require(
++          key.lengthCompare(Extension.FieldKeySize) == 0,
++          s"Sidechain extension key ${parts(0)} must be ${Extension.FieldKeySize} bytes"
++        )
++        require(
++          key.headOption.contains(0x04.toByte),
++          s"Sidechain extension key ${parts(0)} must use the 0x04 key space"
++        )
++        require(
++          value.lengthCompare(Extension.FieldValueMaxSize) <= 0,
++          s"Sidechain extension value for ${parts(0)} exceeds ${Extension.FieldValueMaxSize} bytes"
++        )
++
++        key -> value
++      }
++
++    val encodedKeys = fields.map { case (key, _) => Base16.encode(key) }
++    require(
++      encodedKeys.distinct.length == encodedKeys.length,
++      s"$SidechainExtensionFieldsEnv contains duplicate keys"
++    )
++
++    ExtensionCandidate(fields)
++  }
++
++  private[mining] def sidechainExtensionFieldsFromEnv(): ExtensionCandidate =
++    sys.env
++      .get(SidechainExtensionFieldsEnv)
++      .map(_.trim)
++      .filter(_.nonEmpty)
++      .map(parseSidechainExtensionFields)
++      .getOrElse(ExtensionCandidate(Seq.empty))
++
++  private[mining] def appendConfiguredSidechainExtensionFields(base: ExtensionCandidate): ExtensionCandidate = {
++    val extra = sidechainExtensionFieldsFromEnv()
++    if (extra.fields.isEmpty) {
++      base
++    } else {
++      val duplicate = base.fields.exists { case (existingKey, _) =>
++        extra.fields.exists { case (extraKey, _) => existingKey sameElements extraKey }
++      }
++      require(
++        !duplicate,
++        s"$SidechainExtensionFieldsEnv duplicates an existing extension key"
++      )
++      log.info(s"Appending ${extra.fields.size} configured sidechain extension fields")
++      base ++ extra
++    }
++  }
++
+   /**
+     * @return None if chain is not synced or Some of attempt to create candidate
+     */
+@@ -377,7 +673,8 @@ object CandidateGenerator extends ScorexLogging {
+     m: ErgoMemPoolReader,
+     pk: ProveDlog,
+     txsToInclude: Seq[ErgoTransaction],
+-    ergoSettings: ErgoSettings
++    ergoSettings: ErgoSettings,
++    requiredMiningTransactionIdHex: Option[String] = None
+   ): Option[Try[(Candidate, EliminateTransactions)]] = {
+     // mandatory transactions to include into next block taken from the previous candidate
+     val stateWithMandatoryTxs = s.withTransactions(txsToInclude)
+@@ -399,7 +696,13 @@ object CandidateGenerator extends ScorexLogging {
+     def hasAnyMemPoolOrMinerTx =
+       poolTransactions.nonEmpty || unspentTxsToInclude.nonEmpty || emissionTxOpt.nonEmpty
+ 
+-    if (!hasAnyMemPoolOrMinerTx) {
++    if (!containsRequiredMiningTransaction(
++      requiredMiningTransactionIdHex,
++      poolTransactions.map(_.id)
++    )) {
++      log.info("Avoiding candidate generation until the required mining transaction is in the mempool")
++      None
++    } else if (!hasAnyMemPoolOrMinerTx) {
+       log.info(s"Avoiding generation of a block without any transactions")
+       None
+     } else if (!chainSynced) {
+@@ -427,7 +730,15 @@ object CandidateGenerator extends ScorexLogging {
+           emissionTxOpt,
+           unspentTxsToInclude,
+           ergoSettings
+-        )
++        ).flatMap { result =>
++          if (containsRequiredMiningTransaction(
++            requiredMiningTransactionIdHex,
++            result._1.candidateBlock.transactions.map(_.id)
++          )) Success(result)
++          else Failure(new IllegalStateException(
++            "Required mining transaction was not retained in the candidate"
++          ))
++        }
+       )
+     }
+   }
+@@ -482,6 +793,32 @@ object CandidateGenerator extends ScorexLogging {
+       nextHeightCondition
+   }
+ 
++  /**
++    * Build the transaction execution context for a block candidate. The predicted
++    * header consumes one of the consensus context's fixed header slots, so only
++    * its nine predecessors are exposed to scripts once the state has a full window.
++    */
++  private[ergoplatform] def candidateExecutionContext(
++    stateContext: ErgoStateContext,
++    minerPk: EcPointType,
++    timestamp: Long,
++    nBits: Long,
++    votes: Array[Byte],
++    proposedUpdate: ErgoValidationSettingsUpdate,
++    version: Byte
++  ): UpcomingStateContext = {
++    val upcoming = stateContext.upcoming(minerPk, timestamp, nBits, votes, proposedUpdate, version)
++    UpcomingStateContext(
++      upcoming.lastHeaders.take(Constants.LastHeadersInContext - 1),
++      upcoming.lastExtensionOpt,
++      upcoming.predictedHeader,
++      upcoming.genesisStateDigest,
++      upcoming.currentParameters,
++      upcoming.validationSettings,
++      upcoming.votingData
++    )(upcoming.chainSettings)
++  }
++
+   /**
+     * Assemble correct block candidate based on
+     *
+@@ -567,7 +904,11 @@ object CandidateGenerator extends ScorexLogging {
+           (interlinksExtension, Array(0: Byte, 0: Byte, 0: Byte), Header.InitialVersion)
+         )
+ 
+-      val upcomingContext = state.stateContext.upcoming(
++      val extensionCandidateWithSidechainFields =
++        appendConfiguredSidechainExtensionFields(extensionCandidate)
++
++      val upcomingContext = candidateExecutionContext(
++        state.stateContext,
+         minerPk.value,
+         timestamp,
+         nBits,
+@@ -624,7 +965,7 @@ object CandidateGenerator extends ScorexLogging {
+             adProof,
+             txs,
+             timestamp,
+-            extensionCandidate,
++            extensionCandidateWithSidechainFields,
+             votes
+           )
+           val ext = deriveWorkMessage(candidate)
+@@ -656,7 +997,7 @@ object CandidateGenerator extends ScorexLogging {
+                     adProof,
+                     fallbackTxs,
+                     timestamp,
+-                    extensionCandidate,
++                    extensionCandidateWithSidechainFields,
+                     votes
+                   )
+                   Candidate(
+diff --git a/src/main/scala/org/ergoplatform/mining/ErgoMiner.scala b/src/main/scala/org/ergoplatform/mining/ErgoMiner.scala
+index e2dc8060c735cee6eebbf9082a2e3519b42f7487..eab6548cff2c08a06d47afc061978a8352d7a2d0 100644
+--- a/src/main/scala/org/ergoplatform/mining/ErgoMiner.scala
++++ b/src/main/scala/org/ergoplatform/mining/ErgoMiner.scala
+@@ -2,7 +2,7 @@ package org.ergoplatform.mining
+ 
+ import akka.actor.{Actor, ActorRef, ActorRefFactory, Props, Stash}
+ import akka.pattern.StatusReply
+-import org.ergoplatform.mining.CandidateGenerator.GenerateCandidate
++import org.ergoplatform.mining.CandidateGenerator.{ArmOwnedTransactionV1, GenerateCandidate, GetOwnedTransactionPermitStatusV1, HoldOwnedTransactionsV1, PauseOwnedSubmissionV1}
+ import org.ergoplatform.nodeView.state.DigestState
+ import org.ergoplatform.modifiers.history.header.Header
+ import org.ergoplatform.nodeView.wallet.ErgoWalletActorMessages.{FirstSecretResponse, GetFirstSecret, GetMiningPubKey, MiningPubKeyResponse}
+@@ -158,12 +158,24 @@ class ErgoMiner(
+ 
+     case GenerateCandidate(_, _, _) =>
+       sender() ! StatusReply.error("Miner has not started yet")
++    case _: PauseOwnedSubmissionV1 =>
++      sender() ! StatusReply.error("Miner has not started yet")
++    case _: HoldOwnedTransactionsV1 | _: ArmOwnedTransactionV1 | _: GetOwnedTransactionPermitStatusV1 =>
++      sender() ! StatusReply.error("Miner has not started yet")
+   }
+ 
+   /** Bridge between external miner and CandidateGenerator (Internal mining threads are talking to CandidateGenerator directly.)
+     * The reason is that replying is optional and it is not possible to obtain a sender reference from MiningApiRoute 'ask'.
+     */
+   def started(minerState: MinerState): Receive = {
++    case pause: PauseOwnedSubmissionV1 =>
++      minerState.candidateGeneratorRef forward pause
++    case hold: HoldOwnedTransactionsV1 =>
++      minerState.candidateGeneratorRef forward hold
++    case arm: ArmOwnedTransactionV1 =>
++      minerState.candidateGeneratorRef forward arm
++    case status: GetOwnedTransactionPermitStatusV1 =>
++      minerState.candidateGeneratorRef forward status
+     case genCandidate @ GenerateCandidate(_, _, _) =>
+       minerState.candidateGeneratorRef forward genCandidate
+ 
+diff --git a/src/main/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1.scala b/src/main/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1.scala
+new file mode 100644
+index 0000000000000000000000000000000000000000..54831ed65c6ef37f2fd67362a15417c361dc4431
+--- /dev/null
++++ b/src/main/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1.scala
+@@ -0,0 +1,285 @@
++package org.ergoplatform.mining
++
++import org.ergoplatform.modifiers.history.header.Header
++
++import java.nio.charset.StandardCharsets
++import java.security.MessageDigest
++import scala.util.Try
++
++/** Optional process-lifetime gate for the owned synthetic miner's submissions.
++  * Actor replacement must reuse processControl; this gate does not stop a node,
++  * attest indexed state, authenticate a chain, or resume a paused submission.
++  */
++object OwnedMiningSubmissionV1 {
++  val OwnerNonceSha256Env = "ERGO_SIDECHAIN_OWNED_MINING_NONCE_SHA256"
++  val MaximumBlockHeightEnv = "ERGO_SIDECHAIN_MAXIMUM_MINING_BLOCK_HEIGHT"
++  val TransactionPermitEnv = "ERGO_SIDECHAIN_OWNED_TRANSACTION_PERMIT"
++  val TransactionConfirmations = 10
++  // The indexed API counts successors after the inclusion block, not inclusion itself.
++  val TransactionApplications = TransactionConfirmations + 1
++  // Canonical request/receipt identity; its value is public, never an owner nonce.
++  val OperationIdField = "operationId"
++
++  def validOperationId(value: String): Boolean = isLowerHex(value)
++
++  final case class Watermark(headerId: String, height: Int)
++  final case class PauseReceipt(operationId: String,
++                                watermark: Option[Watermark],
++                                maximumBlockHeight: Option[Int])
++  final case class HoldReceipt(operationId: String, watermark: Watermark)
++  final case class TransactionPermitStatus(operationId: String,
++                                           transactionId: String,
++                                           initialParent: Watermark,
++                                           completed: Boolean,
++                                           finalWatermark: Option[Watermark])
++  private final case class Permit(transactionId: String, parent: Watermark, applied: Int)
++
++  lazy val processControl: Option[Control] = fromEnvironment(sys.env)
++
++  def fromEnvironment(environment: collection.Map[String, String]): Option[Control] = {
++    val owner = environment.get(OwnerNonceSha256Env)
++    val maximum = environment.get(MaximumBlockHeightEnv)
++    val permit = environment.get(TransactionPermitEnv)
++    if (owner.isEmpty && maximum.isEmpty && permit.isEmpty) None
++    else {
++      val ownerDigest = owner.filter(isLowerHex).getOrElse(invalidConfiguration())
++      val maximumHeight = maximum.map { value =>
++        if (value == null || !value.matches("(?:0|[1-9][0-9]*)")) invalidConfiguration()
++        Try(value.toInt).toOption.filter(_ >= 0).getOrElse(invalidConfiguration())
++      }
++      val digestBytes = ownerDigest.grouped(2).map(Integer.parseInt(_, 16).toByte).toArray
++      if (permit.exists(_ != "1")) invalidConfiguration()
++      Some(new Control(digestBytes, maximumHeight, permit.nonEmpty))
++    }
++  }
++
++  private def invalidConfiguration(): Nothing =
++    throw new IllegalArgumentException("owned mining submission configuration is invalid")
++
++  private def isLowerHex(value: String): Boolean =
++    value != null && value.matches("[0-9a-f]{64}")
++
++  final class Control private[OwnedMiningSubmissionV1](ownerDigest: Array[Byte],
++                                                       val maximumBlockHeight: Option[Int],
++                                                       val transactionPermitsEnabled: Boolean) {
++    private var pausedOperation: Option[String] = None
++    private var pendingHeader: Option[Watermark] = None
++    private var latestAppliedWatermark: Option[Watermark] = None
++    private var permanentFailure = false
++    private var holdOperation: Option[String] = None
++    private var heldParent: Option[Watermark] = None
++    private var permit: Option[Permit] = None
++    private var operationIds = Set.empty[String]
++    private var heldReadersJoined = false
++    private var currentPermitStatus: Option[TransactionPermitStatus] = None
++
++    private def claimOperation(ownerNonce: String, operationId: String): Boolean = {
++      if (!transactionPermitsEnabled || !authenticate(ownerNonce) || !validOperationId(operationId)) false
++      else if (permanentFailure || pausedOperation.nonEmpty) false
++      else if (operationIds.contains(operationId) || operationIds.size >= 64) {
++        permanentFailure = true
++        false
++      } else {
++        operationIds += operationId
++        true
++      }
++    }
++
++    /** Close first, before the actor consults possibly skewed history/state readers. */
++    def hold(ownerNonce: String, operationId: String): Either[String, Unit] = synchronized {
++      if (!claimOperation(ownerNonce, operationId)) Left("owned transaction hold refused")
++      else if (holdOperation.nonEmpty) {
++        permanentFailure = true
++        Left("owned transaction hold state differs")
++      } else {
++        holdOperation = Some(operationId)
++        heldParent = latestAppliedWatermark
++        heldReadersJoined = false
++        Right(())
++      }
++    }
++
++    /** Reader lag waits; a conflicting/advanced parent cannot establish a hold. */
++    def observeReaders(historyParent: Option[Header], stateParent: Option[Header]): Unit = synchronized {
++      if (holdOperation.nonEmpty && permit.isEmpty && !permanentFailure && pausedOperation.isEmpty) {
++        val history = historyParent.flatMap(identity)
++        val state = stateParent.flatMap(identity)
++        val expected = pendingHeader.orElse(heldParent)
++        val conflict = expected.exists(parent => Seq(history, state).flatten.exists(value =>
++          value.height > parent.height || (value.height == parent.height && value != parent)))
++        heldReadersJoined = false
++        if (conflict) permanentFailure = true
++        else if (pendingHeader.isEmpty && history.nonEmpty && history == state &&
++          expected.forall(history.contains)) {
++          heldParent = history
++          heldReadersJoined = true
++        }
++      }
++    }
++
++    def holdCompletion: Either[String, Option[HoldReceipt]] = synchronized {
++      if (permanentFailure || pausedOperation.nonEmpty || holdOperation.isEmpty) Left("owned transaction hold unavailable")
++      else if (pendingHeader.nonEmpty || permit.nonEmpty || !heldReadersJoined) Right(None)
++      else Right(Some(HoldReceipt(holdOperation.get, heldParent.get)))
++    }
++
++    def arm(ownerNonce: String, operationId: String, parent: Watermark,
++            transactionId: String, currentParent: => Option[Watermark]): Either[String, Unit] = synchronized {
++      if (!claimOperation(ownerNonce, operationId)) Left("owned transaction permit refused")
++      else if (holdOperation.isEmpty || permit.nonEmpty || pendingHeader.nonEmpty ||
++        !heldReadersJoined || !heldParent.contains(parent) || !isLowerHex(transactionId) ||
++        parent.height > Int.MaxValue - TransactionApplications ||
++        maximumBlockHeight.exists(_ < parent.height + TransactionApplications) ||
++        !currentParent.contains(parent)) {
++        permanentFailure = true
++        Left("owned transaction permit binding differs")
++      } else {
++        heldReadersJoined = false
++        permit = Some(Permit(transactionId, parent, 0))
++        currentPermitStatus = Some(TransactionPermitStatus(operationId, transactionId, parent,
++          completed = false, finalWatermark = None))
++        Right(())
++      }
++    }
++
++    /** Repeatable observation of the current arm, never an operation claim or mining effect. */
++    def transactionPermitStatus(ownerNonce: String, operationId: String, transactionId: String,
++                                initialParent: Watermark,
++                                readers: => (Option[Header], Option[Header])): Either[String, TransactionPermitStatus] = synchronized {
++      if (!transactionPermitsEnabled || !authenticate(ownerNonce) || !validOperationId(operationId) ||
++        !isLowerHex(transactionId) || !currentPermitStatus.exists(status =>
++          status.operationId == operationId && status.transactionId == transactionId &&
++            status.initialParent == initialParent)) Left("owned transaction status binding differs")
++      else if (permanentFailure || pausedOperation.nonEmpty) Left("owned transaction status unavailable")
++      else {
++        val status = currentPermitStatus.get
++        val pending = status.copy(completed = false, finalWatermark = None)
++        // Reader notifications may precede the exact final FullBlockApplied in
++        // this mailbox. They cannot substitute for consuming that application.
++        if (!status.completed || pendingHeader.nonEmpty) Right(pending)
++        else {
++          val joined = Try {
++            val (history, state) = readers
++            observeReaders(history, state)
++            heldReadersJoined && heldParent == status.finalWatermark
++          }
++          if (joined.isFailure) permanentFailure = true
++          if (permanentFailure) Left("owned transaction status readers differ")
++          else if (joined.get) Right(status)
++          else Right(pending)
++        }
++      }
++    }
++
++    def requiredPermitTransaction: Option[String] = synchronized {
++      permit.filter(_.applied == 0).map(_.transactionId)
++    }
++
++    def authenticate(ownerNonce: String): Boolean = {
++      isLowerHex(ownerNonce) && MessageDigest.isEqual(
++        MessageDigest.getInstance("SHA-256").digest(ownerNonce.getBytes(StandardCharsets.UTF_8)),
++        ownerDigest
++      )
++    }
++
++    def submissionsClosed: Boolean = synchronized {
++      pausedOperation.nonEmpty || permanentFailure ||
++        (holdOperation.nonEmpty && (permit.isEmpty || pendingHeader.nonEmpty))
++    }
++
++    /** Reserve the identity before the caller sends its header and sections. */
++    def admitSubmission(header: Header, transactionIds: Seq[String] = Seq.empty): Either[String, Unit] = synchronized {
++      if (submissionsClosed || pendingHeader.nonEmpty) {
++        Left("owned mining submission is closed or pending")
++      } else {
++        identity(header) match {
++          case Some(value) if maximumBlockHeight.forall(value.height <= _)
++            && latestAppliedWatermark.forall(_.height < value.height)
++            && permit.forall(p => value.height == p.parent.height + 1 && header.parentId == p.parent.headerId &&
++              (p.applied > 0 || transactionIds.contains(p.transactionId))) =>
++            pendingHeader = Some(value)
++            Right(())
++          case _ => Left("owned mining submission header is outside its policy")
++        }
++      }
++    }
++
++    /** FullBlockApplied resolves only the exact registered local header. */
++    def observeApplied(header: Header): Unit = synchronized {
++      identity(header) match {
++        case None => permanentFailure = true
++        case Some(applied) =>
++          pendingHeader match {
++            case Some(pending) if applied == pending =>
++              if (maximumBlockHeight.exists(applied.height > _)) permanentFailure = true
++              latestAppliedWatermark = Some(applied)
++              pendingHeader = None
++              if (holdOperation.nonEmpty) {
++                heldParent = Some(applied)
++                heldReadersJoined = false
++              }
++              permit = permit.flatMap { p =>
++                if (applied.height != p.parent.height + 1 || header.parentId != p.parent.headerId) {
++                  permanentFailure = true
++                  None
++                } else if (p.applied + 1 == TransactionApplications) {
++                  currentPermitStatus match {
++                    case Some(status) if applied.height == status.initialParent.height + TransactionApplications =>
++                      currentPermitStatus = Some(status.copy(completed = true, finalWatermark = Some(applied)))
++                    case _ => permanentFailure = true
++                  }
++                  None
++                }
++                else Some(p.copy(parent = applied, applied = p.applied + 1))
++              }
++            case Some(pending) if applied.height >= pending.height =>
++              permanentFailure = true
++            case _ =>
++              if (holdOperation.nonEmpty && heldParent.exists(value =>
++                applied.height > value.height || (applied.height == value.height && applied != value))) {
++                permanentFailure = true
++              }
++              if (latestAppliedWatermark.exists(value =>
++                applied.height == value.height && applied.headerId != value.headerId)) {
++                permanentFailure = true
++              }
++          }
++      }
++    }
++
++    def observeRejected(modifierId: String): Unit = synchronized {
++      if (pendingHeader.exists(_.headerId == modifierId)) permanentFailure = true
++    }
++
++    /** A valid request closes submissions once; pending completion is not a receipt. */
++    def pause(ownerNonce: String, operationId: String): Either[String, Option[PauseReceipt]] = synchronized {
++      if (!validOperationId(operationId) || !authenticate(ownerNonce)) {
++        Left("owned mining pause authentication or identity is invalid")
++      } else if (permanentFailure || pausedOperation.nonEmpty) {
++        Left("owned mining pause is failed or already requested")
++      } else {
++        pausedOperation = Some(operationId)
++        completion
++      }
++    }
++
++    def pauseCompletion: Either[String, Option[PauseReceipt]] = synchronized {
++      completion
++    }
++
++    private def completion: Either[String, Option[PauseReceipt]] = {
++      if (permanentFailure) Left("owned mining submission failed permanently")
++      else pausedOperation match {
++        case None => Left("owned mining pause was not requested")
++        case Some(_) if pendingHeader.nonEmpty => Right(None)
++        case Some(operationId) =>
++          Right(Some(PauseReceipt(operationId, latestAppliedWatermark, maximumBlockHeight)))
++      }
++    }
++
++    private def identity(header: Header): Option[Watermark] = {
++      if (header == null || header.height < 1) None
++      else Try(header.id).toOption.filter(isLowerHex).map(id => Watermark(id, header.height))
++    }
++  }
++}
+diff --git a/src/test/scala/org/ergoplatform/http/routes/MiningApiRouteSpec.scala b/src/test/scala/org/ergoplatform/http/routes/MiningApiRouteSpec.scala
+index 2731827bcf33dbf80749ad2fb40c9304f54a7496..894039d9f2f20f2fadb4a40788f71365de0537e0 100644
+--- a/src/test/scala/org/ergoplatform/http/routes/MiningApiRouteSpec.scala
++++ b/src/test/scala/org/ergoplatform/http/routes/MiningApiRouteSpec.scala
+@@ -1,21 +1,40 @@
+ package org.ergoplatform.http.routes
+ 
+-import akka.http.scaladsl.model.StatusCodes
++import akka.actor.{ActorRef, Props}
++import akka.http.scaladsl.model.{HttpEntity, HttpRequest, StatusCodes}
++import akka.http.scaladsl.model.headers.RawHeader
+ import akka.http.scaladsl.server.Route
+ import akka.http.scaladsl.testkit.ScalatestRouteTest
++import akka.pattern.{StatusReply, ask}
++import akka.testkit.TestProbe
+ import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
+ import io.circe.Json
+ import io.circe.syntax._
+ import org.ergoplatform.http.api.MiningApiRoute
+-import org.ergoplatform.mining.AutolykosSolution
++import org.ergoplatform.mining.{AutolykosPowScheme, AutolykosSolution, CandidateGenerator, ErgoMiner, OwnedMiningSubmissionV1}
++import org.ergoplatform.modifiers.ErgoFullBlock
++import org.ergoplatform.modifiers.mempool.{ErgoTransaction, UnconfirmedTransaction, UnsignedErgoTransaction}
++import org.ergoplatform.network.ErgoNodeViewSynchronizerMessages.FullBlockApplied
++import org.ergoplatform.nodeView.ErgoNodeViewHolder.ReceivableMessages.LocallyGeneratedTransaction
++import org.ergoplatform.nodeView.ErgoReadersHolder.{GetReaders, Readers}
++import org.ergoplatform.nodeView.{ErgoNodeViewRef, ErgoReadersHolderRef}
++import org.ergoplatform.nodeView.state.StateType
+ import org.ergoplatform.settings.ErgoSettings
+ import org.ergoplatform.utils.Stubs
+ import org.ergoplatform.utils.generators.ErgoCoreGenerators.genECPoint
+-import org.ergoplatform.{ErgoTreePredef, Pay2SAddress}
++import org.ergoplatform.{ErgoBoxCandidate, ErgoTreePredef, Input, Pay2SAddress}
+ import org.scalatest.flatspec.AnyFlatSpec
+ import org.scalatest.matchers.should.Matchers
++import scorex.crypto.hash.Blake2b256
++import scorex.util.encode.Base16
++import sigma.ast.ErgoTree
+ 
++import scala.concurrent.Await
++import scala.concurrent.duration._
+ import scala.util.Try
++import java.nio.charset.StandardCharsets
++import java.security.MessageDigest
++import java.nio.file.Files
+ 
+ class MiningApiRouteSpec
+   extends AnyFlatSpec
+@@ -56,4 +75,394 @@ class MiningApiRouteSpec
+     }
+   }
+ 
++  it should "leave the owned mining submission endpoint absent when control is omitted" in {
++    val disabled = MiningApiRoute(minerRef, localSetting, None).route
++    Post(prefix + "/ownedSubmissionPauseV1") ~> Route.seal(disabled) ~> check {
++      status shouldBe StatusCodes.NotFound
++    }
++  }
++
++  it should "refuse a foreign owned mining nonce before forwarding any pause" in {
++    val nonce = "ab" * 32
++    val digest = MessageDigest.getInstance("SHA-256").digest(nonce.getBytes(StandardCharsets.UTF_8))
++      .map(byte => f"${byte & 0xff}%02x").mkString
++    val control = OwnedMiningSubmissionV1.fromEnvironment(Map(OwnedMiningSubmissionV1.OwnerNonceSha256Env -> digest)).get
++    val guarded = MiningApiRoute(minerRef, localSetting, Some(control)).route
++    Post(prefix + "/ownedSubmissionPauseV1").withHeaders(
++      RawHeader("X-Ergo-Owned-Mining-Nonce", "ef" * 32),
++      RawHeader("X-Ergo-Owned-Mining-Operation", "cd" * 32)
++    ) ~> Route.seal(guarded) ~> check {
++      status shouldBe StatusCodes.Forbidden
++      control.submissionsClosed shouldBe false
++    }
++  }
++
++  it should "refuse a malformed owned mining operation before forwarding any pause" in {
++    val nonce = "ab" * 32
++    val digest = MessageDigest.getInstance("SHA-256").digest(nonce.getBytes(StandardCharsets.UTF_8))
++      .map(byte => f"${byte & 0xff}%02x").mkString
++    val control = OwnedMiningSubmissionV1.fromEnvironment(Map(OwnedMiningSubmissionV1.OwnerNonceSha256Env -> digest)).get
++    val guarded = MiningApiRoute(minerRef, localSetting, Some(control)).route
++    Post(prefix + "/ownedSubmissionPauseV1").withHeaders(
++      RawHeader("X-Ergo-Owned-Mining-Nonce", nonce),
++      RawHeader("X-Ergo-Owned-Mining-Operation", "malformed")
++    ) ~> Route.seal(guarded) ~> check {
++      status shouldBe StatusCodes.Forbidden
++      control.submissionsClosed shouldBe false
++    }
++  }
++
++  private val ownedNonce = "ab" * 32
++  private val ownedOperation = "cd" * 32
++  private val ownedApiKey = "owned-mining-route-fixture"
++  private val authenticatedSettings = localSetting.copy(
++    scorexSettings = localSetting.scorexSettings.copy(
++      restApi = localSetting.scorexSettings.restApi.copy(
++        apiKeyHash = Some(Base16.encode(Blake2b256(ownedApiKey)))
++      )
++    )
++  )
++
++  private def ownedControl(maximumHeight: Option[String] = None, permits: Boolean = false): OwnedMiningSubmissionV1.Control = {
++    val digest = MessageDigest.getInstance("SHA-256").digest(ownedNonce.getBytes(StandardCharsets.UTF_8))
++      .map(byte => f"${byte & 0xff}%02x").mkString
++    val environment = Map(OwnedMiningSubmissionV1.OwnerNonceSha256Env -> digest) ++
++      maximumHeight.map(OwnedMiningSubmissionV1.MaximumBlockHeightEnv -> _) ++
++      (if (permits) Map(OwnedMiningSubmissionV1.TransactionPermitEnv -> "1") else Map.empty[String, String])
++    OwnedMiningSubmissionV1.fromEnvironment(environment).get
++  }
++
++  it should "refuse a missing API key before forwarding an authenticated owned pause" in {
++    val control = ownedControl()
++    val silentMiner = TestProbe()
++    val guarded = MiningApiRoute(silentMiner.ref, authenticatedSettings, Some(control)).route
++    Post(prefix + "/ownedSubmissionPauseV1").withHeaders(
++      RawHeader("X-Ergo-Owned-Mining-Nonce", ownedNonce),
++      RawHeader("X-Ergo-Owned-Mining-Operation", ownedOperation)
++    ) ~> Route.seal(guarded) ~> check {
++      status shouldBe StatusCodes.Forbidden
++    }
++    silentMiner.expectNoMessage(100.millis)
++    control.submissionsClosed shouldBe false
++    control.pauseCompletion.isLeft shouldBe true
++  }
++
++  it should "refuse an incorrect API key before forwarding an authenticated owned pause" in {
++    val control = ownedControl()
++    val silentMiner = TestProbe()
++    val guarded = MiningApiRoute(silentMiner.ref, authenticatedSettings, Some(control)).route
++    Post(prefix + "/ownedSubmissionPauseV1").withHeaders(
++      RawHeader("api_key", "foreign-mining-route-fixture"),
++      RawHeader("X-Ergo-Owned-Mining-Nonce", ownedNonce),
++      RawHeader("X-Ergo-Owned-Mining-Operation", ownedOperation)
++    ) ~> Route.seal(guarded) ~> check {
++      status shouldBe StatusCodes.Forbidden
++    }
++    silentMiner.expectNoMessage(100.millis)
++    control.submissionsClosed shouldBe false
++    control.pauseCompletion.isLeft shouldBe true
++  }
++
++  it should "fail an authenticated owned pause on actor timeout without changing control" in {
++    val control = ownedControl()
++    val silentMiner = TestProbe()
++    val guarded = MiningApiRoute(silentMiner.ref, authenticatedSettings, Some(control)).route
++    val request = Post(prefix + "/ownedSubmissionPauseV1").withHeaders(
++      RawHeader("api_key", ownedApiKey),
++      RawHeader("X-Ergo-Owned-Mining-Nonce", ownedNonce),
++      RawHeader("X-Ergo-Owned-Mining-Operation", ownedOperation)
++    )
++    // Keep the configured actor ask timeout and the existing bounded actor-test wait.
++    val handler = Route.toFunction(Route.seal(guarded))
++    val response = Await.result(handler(request), defaultAwaitDuration)
++    response.status shouldBe StatusCodes.InternalServerError
++    response.discardEntityBytes()
++    silentMiner.expectMsg(CandidateGenerator.PauseOwnedSubmissionV1(ownedNonce, ownedOperation))
++    silentMiner.expectNoMessage(100.millis)
++    control.submissionsClosed shouldBe false
++    control.pauseCompletion.isLeft shouldBe true
++  }
++
++  // Only bootstrap is supplied by the test. StartMining and started-message forwarding
++  // remain production ErgoMiner behavior; this does not cover process environment wiring.
++  private class OwnedControlInjectedMinerBootstrap(
++    generator: ActorRef,
++    view: ActorRef,
++    miningSettings: ErgoSettings
++  ) extends ErgoMiner(miningSettings, view, utxoReadersRef, None) {
++    override def preStart(): Unit = {
++      context.become(starting(ErgoMiner.MinerState(None, pk, generator)))
++    }
++  }
++
++  it should "return the real generator pause receipt through HTTP and a bootstrap-injected real miner" in {
++    val control = ownedControl(Some("10"))
++    val view = TestProbe()
++    val readiness = TestProbe()
++    val joinSettings = authenticatedSettings.copy(nodeSettings = authenticatedSettings.nodeSettings.copy(
++      stateType = StateType.Utxo,
++      useExternalMiner = true,
++      internalMinersCount = 0
++    ))
++    val generator = CandidateGenerator(pk, utxoReadersRef, view.ref, joinSettings, Some(control))
++    val realMiner = system.actorOf(Props(new OwnedControlInjectedMinerBootstrap(generator, view.ref, joinSettings)))
++    try {
++      // Same-sender ordering establishes StartMining before the readiness response.
++      readiness.send(realMiner, ErgoMiner.StartMining)
++      readiness.send(realMiner, ErgoMiner.ReadMinerPk)
++      readiness.expectMsg(StatusReply.success(pk))
++      val joinedRoute = MiningApiRoute(realMiner, joinSettings, Some(control)).route
++      Post(prefix + "/ownedSubmissionPauseV1").withHeaders(
++        RawHeader("api_key", ownedApiKey),
++        RawHeader("X-Ergo-Owned-Mining-Nonce", ownedNonce),
++        RawHeader("X-Ergo-Owned-Mining-Operation", ownedOperation)
++      ) ~> Route.seal(joinedRoute) ~> check {
++        status shouldBe StatusCodes.OK
++        responseAs[Json] shouldBe Json.obj(
++          "schema" -> Json.fromString("e2s.owned-mining-submission-pause.v1"),
++          "operationId" -> Json.fromString(ownedOperation),
++          "submissionPaused" -> Json.True,
++          "maximumBlockHeight" -> Json.fromInt(10),
++          "latestAppliedBlock" -> Json.Null
++        )
++        responseAs[Json].noSpaces should not include ownedNonce
++      }
++      control.submissionsClosed shouldBe true
++      control.pauseCompletion shouldBe Right(Some(OwnedMiningSubmissionV1.PauseReceipt(
++        ownedOperation, None, Some(10)
++      )))
++    } finally {
++      val stopped = TestProbe()
++      stopped.watch(realMiner)
++      system.stop(realMiner)
++      stopped.expectTerminated(realMiner, 2.seconds)
++      stopped.watch(generator)
++      system.stop(generator)
++      stopped.expectTerminated(generator, 2.seconds)
++    }
++  }
++
++  private val permitPaths = Seq("ownedTransactionHoldV1", "ownedTransactionArmV1", "ownedTransactionStatusV1")
++  private val permitTransaction = "ef" * 32
++  private val permitParent = OwnedMiningSubmissionV1.Watermark("12" * 32, 1)
++
++  private def permitRequest(path: String, operation: String = ownedOperation,
++                            transaction: String = permitTransaction,
++                            parent: OwnedMiningSubmissionV1.Watermark = permitParent): HttpRequest = {
++    val common = Seq(RawHeader("api_key", ownedApiKey),
++      RawHeader("X-Ergo-Owned-Mining-Nonce", ownedNonce),
++      RawHeader("X-Ergo-Owned-Mining-Operation", operation))
++    val binding = if (path == "ownedTransactionHoldV1") Seq.empty else Seq(
++      RawHeader("X-Ergo-Owned-Mining-Transaction", transaction),
++      RawHeader("X-Ergo-Owned-Mining-Parent", parent.headerId),
++      RawHeader("X-Ergo-Owned-Mining-Parent-Height", parent.height.toString))
++    Post(prefix + "/" + path).withHeaders((common ++ binding): _*)
++  }
++
++  private def replaceHeader(request: HttpRequest, name: String, value: Option[String]): HttpRequest =
++    request.withHeaders(request.headers.filterNot(_.is(name)) ++ value.map(RawHeader(name, _)))
++
++  permitPaths.foreach { path =>
++    Seq("omitted control", "omitted permit opt-in").foreach { disabled =>
++      it should s"leave $path absent with $disabled" in {
++        val control = if (disabled == "omitted control") None else Some(ownedControl())
++        val guarded = MiningApiRoute(minerRef, authenticatedSettings, control).route
++        permitRequest(path) ~> Route.seal(guarded) ~> check { status shouldBe StatusCodes.NotFound }
++      }
++    }
++  }
++
++  private val commonPermitFaults: Seq[(String, HttpRequest => HttpRequest)] = Seq(
++    "foreign nonce" -> (request => replaceHeader(request, "x-ergo-owned-mining-nonce", Some("00" * 32))),
++    "missing nonce" -> (request => replaceHeader(request, "x-ergo-owned-mining-nonce", None)),
++    "missing operation" -> (request => replaceHeader(request, "x-ergo-owned-mining-operation", None)),
++    "malformed operation" -> (request => replaceHeader(request, "x-ergo-owned-mining-operation", Some("malformed"))),
++    "duplicate operation" -> (request => request.addHeader(RawHeader("X-Ergo-Owned-Mining-Operation", ownedOperation))),
++    "duplicate nonce" -> (request => request.addHeader(RawHeader("X-Ergo-Owned-Mining-Nonce", ownedNonce))),
++    "missing API key" -> (request => replaceHeader(request, "api_key", None)),
++    "wrong API key" -> (request => replaceHeader(request, "api_key", Some("foreign-route-fixture"))),
++    "unexpected entity" -> (request => request.withEntity(HttpEntity("unexpected"))),
++    "unexpected query" -> (request => request.withUri(request.uri.toString + "?unexpected=1"))
++  )
++
++  private def refusePermitRequest(path: String, mutate: HttpRequest => HttpRequest): Unit = {
++    val control = ownedControl(permits = true)
++    val silentMiner = TestProbe()
++    val guarded = MiningApiRoute(silentMiner.ref, authenticatedSettings, Some(control)).route
++    mutate(permitRequest(path)) ~> Route.seal(guarded) ~> check { status shouldBe StatusCodes.Forbidden }
++    silentMiner.expectNoMessage(100.millis)
++    control.submissionsClosed shouldBe false
++    control.holdCompletion.isLeft shouldBe true
++  }
++
++  permitPaths.foreach { path =>
++    commonPermitFaults.foreach { case (fault, mutate) =>
++      it should s"refuse $fault before forwarding $path" in { refusePermitRequest(path, mutate) }
++    }
++  }
++
++  private val bindingPermitFaults: Seq[(String, HttpRequest => HttpRequest)] = Seq(
++    "missing transaction" -> (request => replaceHeader(request, "x-ergo-owned-mining-transaction", None)),
++    "malformed transaction" -> (request => replaceHeader(request, "x-ergo-owned-mining-transaction", Some("malformed"))),
++    "malformed parent" -> (request => replaceHeader(request, "x-ergo-owned-mining-parent", Some("malformed"))),
++    "missing parent height" -> (request => replaceHeader(request, "x-ergo-owned-mining-parent-height", None)),
++    "noncanonical parent height" -> (request => replaceHeader(request, "x-ergo-owned-mining-parent-height", Some("01"))),
++    "zero parent height" -> (request => replaceHeader(request, "x-ergo-owned-mining-parent-height", Some("0"))),
++    "overflow parent height" -> (request => replaceHeader(request, "x-ergo-owned-mining-parent-height", Some("2147483648"))),
++    "parent lacking the inclusion application" -> (request => replaceHeader(request, "x-ergo-owned-mining-parent-height",
++      Some((Int.MaxValue - OwnedMiningSubmissionV1.TransactionConfirmations).toString))),
++    "duplicate parent" -> (request => request.addHeader(RawHeader("X-Ergo-Owned-Mining-Parent", permitParent.headerId)))
++  )
++
++  permitPaths.tail.foreach { path =>
++    bindingPermitFaults.foreach { case (fault, mutate) =>
++      it should s"refuse $fault before forwarding $path" in { refusePermitRequest(path, mutate) }
++    }
++  }
++
++  it should "refuse an unexpected transaction binding before forwarding the hold" in {
++    refusePermitRequest("ownedTransactionHoldV1", _.addHeader(RawHeader("X-Ergo-Owned-Mining-Transaction", permitTransaction)))
++  }
++
++  permitPaths.foreach { path =>
++    it should s"preserve actor timeout failure for $path without applying an operation" in {
++      val control = ownedControl(permits = true)
++      val silentMiner = TestProbe()
++      val guarded = MiningApiRoute(silentMiner.ref, authenticatedSettings, Some(control)).route
++      val handler = Route.toFunction(Route.seal(guarded))
++      val response = Await.result(handler(permitRequest(path)), defaultAwaitDuration)
++      response.status shouldBe StatusCodes.InternalServerError
++      response.discardEntityBytes()
++      val expected = path match {
++        case "ownedTransactionHoldV1" => CandidateGenerator.HoldOwnedTransactionsV1(ownedNonce, ownedOperation)
++        case "ownedTransactionArmV1" => CandidateGenerator.ArmOwnedTransactionV1(ownedNonce, ownedOperation, permitParent, permitTransaction)
++        case _ => CandidateGenerator.GetOwnedTransactionPermitStatusV1(ownedNonce, ownedOperation, permitTransaction, permitParent)
++      }
++      silentMiner.expectMsg(expected)
++      silentMiner.expectNoMessage(100.millis)
++      control.submissionsClosed shouldBe false
++    }
++  }
++
++  it should "join hold arm and inclusion plus ten successors through HTTP the real miner and a fresh synthetic NodeView" in {
++    import org.ergoplatform.utils.ErgoCoreTestConstants._
++    val control = ownedControl(Some("100"), permits = true)
++    val joinSettings = authenticatedSettings.copy(
++      directory = Files.createTempDirectory("owned-permit-http-").toString,
++      nodeSettings = authenticatedSettings.nodeSettings.copy(stateType = StateType.Utxo,
++        mining = true, useExternalMiner = true, internalMinersCount = 0,
++        offlineGeneration = true, verifyTransactions = true),
++      chainSettings = authenticatedSettings.chainSettings.copy(blockInterval = 1.second,
++        powScheme = new AutolykosPowScheme(settings.chainSettings.powScheme.k, settings.chainSettings.powScheme.n)))
++    val node = ErgoNodeViewRef(joinSettings)
++    val readers = ErgoReadersHolderRef(node)
++    val applied = TestProbe()
++    system.eventStream.subscribe(applied.ref, classOf[FullBlockApplied])
++    val generator = CandidateGenerator(defaultMinerSecret.publicImage, readers, node, joinSettings, Some(control))
++    val realMiner = system.actorOf(Props(new OwnedControlInjectedMinerBootstrap(generator, node, joinSettings)))
++    val stopped = TestProbe()
++    def getCandidate(): CandidateGenerator.Candidate = {
++      val reply = TestProbe()
++      generator.tell(CandidateGenerator.GenerateCandidate(Seq.empty, reply = true, forced = true), reply.ref)
++      reply.expectMsgPF(3.seconds) { case StatusReply.Success(value: CandidateGenerator.Candidate) => value }
++    }
++    def solve(candidate: CandidateGenerator.Candidate): ErgoFullBlock =
++      joinSettings.chainSettings.powScheme.proveCandidate(candidate.candidateBlock, defaultMinerSecret.w, 0, 1000).get
++    try {
++      val readiness = TestProbe()
++      readiness.send(realMiner, ErgoMiner.StartMining)
++      readiness.send(realMiner, ErgoMiner.ReadMinerPk)
++      readiness.expectMsg(StatusReply.success(pk))
++      val joined = MiningApiRoute(realMiner, joinSettings, Some(control)).route
++      def json(request: HttpRequest): Json = {
++        var result = Json.Null
++        request ~> Route.seal(joined) ~> check {
++          status shouldBe StatusCodes.OK
++          result = responseAs[Json]
++          result.noSpaces should not include ownedNonce
++        }
++        result
++      }
++      def applyBlock(block: ErgoFullBlock): Unit = {
++        Post(prefix + "/solution", block.header.powSolution.asJson) ~> Route.seal(joined) ~> check {
++          status shouldBe StatusCodes.OK
++        }
++        applied.expectMsgPF(2.seconds) { case FullBlockApplied(header) => header.id shouldBe block.id }
++      }
++      val anchor = solve(getCandidate())
++      applyBlock(anchor)
++      getCandidate()
++      implicit val readerTimeout: akka.util.Timeout = akka.util.Timeout(3.seconds)
++      val currentReaders = Await.result((readers ? GetReaders).mapTo[Readers], 3.seconds)
++      val rewardBox = anchor.transactions.last.outputs.last
++      val fee = 1000000L
++      fee should be >= joinSettings.nodeSettings.minimalFeeAmount
++      val outputs = IndexedSeq(
++        new ErgoBoxCandidate(rewardBox.value - fee, ErgoTree.fromSigmaBoolean(defaultMinerSecret.publicImage),
++          currentReaders.s.stateContext.currentHeight),
++        new ErgoBoxCandidate(fee, feeProp, currentReaders.s.stateContext.currentHeight))
++      val unsigned = new UnsignedErgoTransaction(IndexedSeq(Input(rewardBox.id, emptyProverResult)), IndexedSeq(), outputs)
++      val signedTransaction = ErgoTransaction(defaultProver.sign(unsigned, IndexedSeq(rewardBox), IndexedSeq(),
++        currentReaders.s.stateContext).get)
++      val transaction = signedTransaction.id
++      val parent = OwnedMiningSubmissionV1.Watermark(anchor.id, anchor.header.height)
++      val hold = json(permitRequest("ownedTransactionHoldV1"))
++      hold.hcursor.get[String]("schema") shouldBe Right("e2s.owned-mining-transaction-hold.v1")
++      hold.hcursor.downField("parent").get[String]("headerId") shouldBe Right(anchor.id)
++      hold.hcursor.downField("parent").get[Int]("height") shouldBe Right(anchor.header.height)
++      control.submissionsClosed shouldBe true
++      val armOperation = "34" * 32
++      val arm = json(permitRequest("ownedTransactionArmV1", armOperation, transaction, parent))
++      arm.hcursor.get[Boolean]("accepted") shouldBe Right(true)
++      arm.hcursor.get[String]("operationId") shouldBe Right(armOperation)
++      arm.hcursor.get[String]("transactionId") shouldBe Right(transaction)
++      val statusRequest = permitRequest("ownedTransactionStatusV1", armOperation, transaction, parent)
++      json(statusRequest).hcursor.get[Boolean]("completed") shouldBe Right(false)
++      val mempool = TestProbe()
++      system.eventStream.subscribe(mempool.ref,
++        classOf[org.ergoplatform.network.ErgoNodeViewSynchronizerMessages.ChangedMempool])
++      node ! LocallyGeneratedTransaction(UnconfirmedTransaction(signedTransaction, None))
++      mempool.fishForMessage(3.seconds) {
++        case org.ergoplatform.network.ErgoNodeViewSynchronizerMessages.ChangedMempool(reader) =>
++          reader.getAllPrioritized.exists(_.id == transaction)
++        case _ => false
++      }
++      var finalBlock = anchor
++      (1 to OwnedMiningSubmissionV1.TransactionApplications).foreach { index =>
++        val candidate = getCandidate()
++        if (index == 1) candidate.candidateBlock.transactions.map(_.id) should contain(transaction)
++        val block = solve(candidate)
++        block.header.parentId shouldBe finalBlock.id
++        applyBlock(block)
++        finalBlock = block
++      }
++      applied.awaitAssert({
++        val completed = json(statusRequest)
++        completed.hcursor.get[String]("schema") shouldBe Right("e2s.owned-mining-transaction-status.v1")
++        completed.hcursor.get[Boolean]("completed") shouldBe Right(true)
++        completed.hcursor.get[String]("operationId") shouldBe Right(armOperation)
++        completed.hcursor.get[String]("transactionId") shouldBe Right(transaction)
++        completed.hcursor.downField("initialParent").get[String]("headerId") shouldBe Right(parent.headerId)
++        completed.hcursor.downField("finalWatermark").get[String]("headerId") shouldBe Right(finalBlock.id)
++        completed.hcursor.downField("finalWatermark").get[Int]("height") shouldBe Right(parent.height + OwnedMiningSubmissionV1.TransactionApplications)
++        completed.hcursor.get[Int]("confirmations") shouldBe Right(10)
++      }, 2.seconds, 20.millis)
++      control.submissionsClosed shouldBe true
++      val repeat = json(statusRequest)
++      repeat.hcursor.get[Boolean]("completed") shouldBe Right(true)
++      Post(prefix + "/ownedSubmissionPauseV1").withHeaders(
++        RawHeader("api_key", ownedApiKey), RawHeader("X-Ergo-Owned-Mining-Nonce", ownedNonce),
++        RawHeader("X-Ergo-Owned-Mining-Operation", "56" * 32)) ~> Route.seal(joined) ~> check {
++        status shouldBe StatusCodes.OK
++      }
++      control.pauseCompletion.isRight shouldBe true
++    } finally {
++      Seq(realMiner, generator, readers, node).foreach { actor =>
++        stopped.watch(actor)
++        system.stop(actor)
++        stopped.expectTerminated(actor, 2.seconds)
++      }
++    }
++  }
++
+ }
+diff --git a/src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala b/src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala
+index 1c394b28174aa12303e67827d9c6a38ea6a38caf..4c09a8e469bb2650a9a9106d634da3ff6de6ea59 100644
+--- a/src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala
++++ b/src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala
+@@ -13,11 +13,12 @@ import org.ergoplatform.network.ErgoNodeViewSynchronizerMessages.FullBlockApplie
+ import org.ergoplatform.nodeView.ErgoNodeViewHolder.ReceivableMessages.LocallyGeneratedTransaction
+ import org.ergoplatform.nodeView.ErgoReadersHolder.{GetReaders, Readers}
+ import org.ergoplatform.nodeView.history.ErgoHistoryReader
+-import org.ergoplatform.nodeView.state.StateType
++import org.ergoplatform.nodeView.state.{ErgoStateContext, StateType}
+ import org.ergoplatform.nodeView.{ErgoNodeViewRef, ErgoReadersHolderRef}
+ import org.ergoplatform.settings.NetworkType.DevNet60
+-import org.ergoplatform.settings.{ErgoSettings, ErgoSettingsReader}
++import org.ergoplatform.settings.{Constants, ErgoSettings, ErgoSettingsReader}
+ import org.ergoplatform.utils.ErgoTestHelpers
++import org.ergoplatform.utils.generators.ChainGenerator
+ import org.ergoplatform.{ErgoBox, ErgoBoxCandidate, ErgoTreePredef, Input}
+ import org.scalatest.concurrent.Eventually
+ import org.scalatest.flatspec.AnyFlatSpec
+@@ -41,6 +42,16 @@ class CandidateGeneratorSpec extends AnyFlatSpec with Matchers with ErgoTestHelp
+   private val candidateGenDelay: FiniteDuration    = 3.seconds
+   private val blockValidationDelay: FiniteDuration = 2.seconds
+ 
++  private def stopMiningActors(actorSystem: ActorSystem, actors: Seq[ActorRef]): Unit = {
++    val terminated = TestProbe()(actorSystem)
++    actors.foreach { actor =>
++      terminated.watch(actor)
++      actorSystem.stop(actor)
++      terminated.expectTerminated(actor, blockValidationDelay)
++    }
++    TestKit.shutdownActorSystem(actorSystem)
++  }
++
+   val defaultSettings: ErgoSettings = {
+     val empty = ErgoSettingsReader.read()
+     val nodeSettings = empty.nodeSettings.copy(
+@@ -56,6 +67,203 @@ class CandidateGeneratorSpec extends AnyFlatSpec with Matchers with ErgoTestHelp
+ 
+   private val defaultSettings60 = defaultSettings.copy(networkType = DevNet60, directory = defaultSettings.directory + "60")
+ 
++  it should "parse configured sidechain extension fields" in {
++    val valueHex = "ab" * 32
++    val candidate = CandidateGenerator.parseSidechainExtensionFields(s"0401:$valueHex")
++
++    candidate.fields.length shouldBe 1
++    Base16.encode(candidate.fields.head._1) shouldBe "0401"
++    Base16.encode(candidate.fields.head._2) shouldBe valueHex
++  }
++
++  it should "reject extension fields outside the sidechain key space" in {
++    val valueHex = "ab" * 32
++
++    intercept[IllegalArgumentException] {
++      CandidateGenerator.parseSidechainExtensionFields(s"0301:$valueHex")
++    }.getMessage should include("0x04 key space")
++  }
++
++  it should "reject duplicate configured sidechain extension fields" in {
++    val valueHex = "ab" * 32
++
++    intercept[IllegalArgumentException] {
++      CandidateGenerator.parseSidechainExtensionFields(s"0401:$valueHex,0401:$valueHex")
++    }.getMessage should include("duplicate keys")
++  }
++
++  it should "parse an exact required mining transaction ID" in {
++    val transactionId = "ab" * 32
++
++    CandidateGenerator.parseRequiredMiningTransactionId(Map(
++      CandidateGenerator.RequiredMiningTransactionIdEnv -> transactionId
++    )) shouldBe Some(transactionId)
++    CandidateGenerator.parseRequiredMiningTransactionId(Map.empty) shouldBe None
++  }
++
++  it should "reject a malformed required mining transaction ID" in {
++    Seq("ab" * 31, "AB" * 32, "gg" * 32).foreach { transactionId =>
++      intercept[IllegalArgumentException] {
++        CandidateGenerator.parseRequiredMiningTransactionId(Map(
++          CandidateGenerator.RequiredMiningTransactionIdEnv -> transactionId
++        ))
++      }.getMessage should include("32-byte lowercase hexadecimal")
++    }
++  }
++
++  it should "require the exact bound transaction in both the mempool and candidate" in {
++    val required = "ab" * 32
++    val foreign = "cd" * 32
++
++    CandidateGenerator.containsRequiredMiningTransaction(None, Seq.empty) shouldBe true
++    CandidateGenerator.containsRequiredMiningTransaction(Some(required), Seq.empty) shouldBe false
++    CandidateGenerator.containsRequiredMiningTransaction(Some(required), Seq(foreign)) shouldBe false
++    CandidateGenerator.containsRequiredMiningTransaction(Some(required), Seq(foreign, required)) shouldBe true
++  }
++
++  it should "release the mining requirement only after the exact local block is applied" in {
++    val required = "ab" * 32
++    val foreign = "cd" * 32
++    val localBlockId = "ef" * 32
++    val foreignBlockId = "12" * 32
++
++    CandidateGenerator.requiredMiningTransactionForCandidate(Some(required), confirmed = false) shouldBe Some(required)
++    CandidateGenerator.requiredMiningTransactionForCandidate(Some(required), confirmed = true) shouldBe None
++    CandidateGenerator.solvedBlockSatisfiesMiningRequirement(
++      Some(required), confirmed = false, Seq(foreign)
++    ) shouldBe false
++    CandidateGenerator.solvedBlockSatisfiesMiningRequirement(
++      Some(required), confirmed = false, Seq(required)
++    ) shouldBe true
++    CandidateGenerator.solvedBlockSatisfiesMiningRequirement(
++      Some(required), confirmed = true, Seq(foreign)
++    ) shouldBe true
++    CandidateGenerator.requiredMiningTransactionConfirmedByAppliedBlock(
++      Some(required), localBlockId, localBlockId, Seq(foreign)
++    ) shouldBe false
++    CandidateGenerator.requiredMiningTransactionConfirmedByAppliedBlock(
++      Some(required), foreignBlockId, localBlockId, Seq(required)
++    ) shouldBe false
++    CandidateGenerator.requiredMiningTransactionConfirmedByAppliedBlock(
++      None, localBlockId, localBlockId, Seq(required)
++    ) shouldBe false
++    CandidateGenerator.requiredMiningTransactionConfirmedByAppliedBlock(
++      Some(required), localBlockId, localBlockId, Seq(foreign, required)
++    ) shouldBe true
++  }
++
++  it should "preserve an empty predecessor window in the candidate execution context" in {
++    val stateContext = ErgoStateContext.empty(chainSettings, parameters)
++    val expected = stateContext.upcoming(
++      defaultMinerPkPoint,
++      defaultTimestamp,
++      defaultNBits,
++      defaultVotes,
++      emptyVSUpdate,
++      Header.InitialVersion
++    )
++    val actual = CandidateGenerator.candidateExecutionContext(
++      stateContext,
++      defaultMinerPkPoint,
++      defaultTimestamp,
++      defaultNBits,
++      defaultVotes,
++      emptyVSUpdate,
++      Header.InitialVersion
++    )
++
++    actual.lastHeaders shouldBe empty
++    actual.lastExtensionOpt shouldBe expected.lastExtensionOpt
++    actual.predictedHeader shouldBe expected.predictedHeader
++    actual.genesisStateDigest shouldBe expected.genesisStateDigest
++    actual.currentParameters shouldBe expected.currentParameters
++    actual.validationSettings shouldBe expected.validationSettings
++    actual.votingData shouldBe expected.votingData
++  }
++
++  it should "preserve non-empty short predecessor windows in the candidate execution context" in {
++    Seq(1, 8).foreach { windowSize =>
++      val headers = ChainGenerator
++        .genHeaderChain(windowSize, diffBitsOpt = None, useRealTs = false)
++        .headers
++        .reverse
++      headers.size shouldBe windowSize
++      val emptyContext = ErgoStateContext.empty(chainSettings, parameters)
++      val stateContext = new ErgoStateContext(
++        headers,
++        None,
++        emptyContext.genesisStateDigest,
++        emptyContext.currentParameters,
++        emptyContext.validationSettings,
++        emptyContext.votingData
++      )(chainSettings)
++      val expected = stateContext.upcoming(
++        defaultMinerPkPoint,
++        defaultTimestamp,
++        defaultNBits,
++        defaultVotes,
++        emptyVSUpdate,
++        Header.InitialVersion
++      )
++      val actual = CandidateGenerator.candidateExecutionContext(
++        stateContext,
++        defaultMinerPkPoint,
++        defaultTimestamp,
++        defaultNBits,
++        defaultVotes,
++        emptyVSUpdate,
++        Header.InitialVersion
++      )
++
++      actual.lastHeaders.map(_.id) shouldBe expected.lastHeaders.map(_.id)
++      actual.sigmaLastHeaders.length shouldBe windowSize
++    }
++  }
++
++  it should "reserve the predicted-header slot in a full candidate execution context" in {
++    val headers = ChainGenerator
++      .genHeaderChain(Constants.LastHeadersInContext, diffBitsOpt = None, useRealTs = false)
++      .headers
++      .reverse
++    headers.size shouldBe Constants.LastHeadersInContext
++    val emptyContext = ErgoStateContext.empty(chainSettings, parameters)
++    val stateContext = new ErgoStateContext(
++      headers,
++      None,
++      emptyContext.genesisStateDigest,
++      emptyContext.currentParameters,
++      emptyContext.validationSettings,
++      emptyContext.votingData
++    )(chainSettings)
++    val expected = stateContext.upcoming(
++      defaultMinerPkPoint,
++      defaultTimestamp,
++      defaultNBits,
++      defaultVotes,
++      emptyVSUpdate,
++      Header.InitialVersion
++    )
++    val actual = CandidateGenerator.candidateExecutionContext(
++      stateContext,
++      defaultMinerPkPoint,
++      defaultTimestamp,
++      defaultNBits,
++      defaultVotes,
++      emptyVSUpdate,
++      Header.InitialVersion
++    )
++
++    expected.lastHeaders.size shouldBe Constants.LastHeadersInContext
++    actual.lastHeaders.map(_.id) shouldBe headers.take(Constants.LastHeadersInContext - 1).map(_.id)
++    actual.sigmaLastHeaders.length shouldBe Constants.LastHeadersInContext - 1
++    actual.lastExtensionOpt shouldBe expected.lastExtensionOpt
++    actual.predictedHeader shouldBe expected.predictedHeader
++    actual.genesisStateDigest shouldBe expected.genesisStateDigest
++    actual.currentParameters shouldBe expected.currentParameters
++    actual.validationSettings shouldBe expected.validationSettings
++    actual.votingData shouldBe expected.votingData
++  }
++
+   it should "provider candidate to internal miner and verify and apply his solution" in new TestKit(
+     ActorSystem()
+   ) {
+@@ -72,12 +280,12 @@ class CandidateGeneratorSpec extends AnyFlatSpec with Matchers with ErgoTestHelp
+         viewHolderRef,
+         defaultSettings
+       )
+-    ErgoMiningThread(defaultSettings, candidateGenerator, defaultMinerSecret.w)
++    val miner = ErgoMiningThread(defaultSettings, candidateGenerator, defaultMinerSecret.w)
+ 
+     // after applying solution from miner
+     testProbe.expectMsgClass(newBlockDelay, newBlockSignal)
+     testProbe.expectMsgClass(newBlockDelay, newBlockSignal)
+-    system.terminate()
++    stopMiningActors(system, Seq(miner, candidateGenerator))
+   }
+ 
+   it should "let multiple miners compete" in new TestKit(ActorSystem()) {
+@@ -118,7 +326,7 @@ class CandidateGeneratorSpec extends AnyFlatSpec with Matchers with ErgoTestHelp
+       testProbe.expectMsgClass(50.millis, classOf[ErgoMiningThread.SolvedBlocksCount])
+ 
+     List(m1Count, m2Count, m3Count).map(_.count).sum should be >= 3
+-    system.terminate()
++    stopMiningActors(system, Seq(m1, m2, m3, candidateGenerator))
+   }
+ 
+   it should "cache candidate until newly mined block is applied" in new TestKit(
+@@ -167,7 +375,7 @@ class CandidateGeneratorSpec extends AnyFlatSpec with Matchers with ErgoTestHelp
+         true
+     }
+ 
+-    system.terminate()
++    stopMiningActors(system, Seq(candidateGenerator))
+   }
+ 
+   it should "regenerate candidate periodically" in new TestKit(
+@@ -257,7 +465,7 @@ class CandidateGeneratorSpec extends AnyFlatSpec with Matchers with ErgoTestHelp
+             )
+         }
+     }
+-    system.terminate()
++    stopMiningActors(system, Seq(candidateGenerator))
+   }
+ 
+   it should "accept solution for previous candidate after regeneration" in new TestKit(ActorSystem()) {
+@@ -368,7 +576,7 @@ class CandidateGeneratorSpec extends AnyFlatSpec with Matchers with ErgoTestHelp
+             true
+         }
+     }
+-    system.terminate()
++    stopMiningActors(system, Seq(candidateGenerator))
+   }
+ 
+   it should "pool transactions should be removed from pool when block is mined" in new TestKit(
+@@ -473,7 +681,7 @@ class CandidateGeneratorSpec extends AnyFlatSpec with Matchers with ErgoTestHelp
+       .filter(_.blockTransactions.transactions.map(_.id).contains(tx.id))
+     val txs: Seq[ErgoTransaction] = blocks.flatMap(_.blockTransactions.transactions)
+     txs should have length 2 // 1 reward and one regular tx, no fee collection tx
+-    system.terminate()
++    stopMiningActors(system, Seq(candidateGenerator))
+   }
+ 
+   it should "6.0 pool transactions should be removed from pool when 5.0 block is mined" in new TestKit(
+@@ -592,7 +800,7 @@ class CandidateGeneratorSpec extends AnyFlatSpec with Matchers with ErgoTestHelp
+     txIds.contains(tx.id) shouldBe true
+     txIds.contains(tx2.id) shouldBe false
+     txs should have length 2 // 1 rewards and one regular tx, no fee collection
+-    system.terminate()
++    stopMiningActors(system, Seq(candidateGenerator))
+   }
+ 
+   it should "6.0 pool transactions should be added to 6.0 block" in new TestKit(
+@@ -710,7 +918,7 @@ class CandidateGeneratorSpec extends AnyFlatSpec with Matchers with ErgoTestHelp
+ 
+     txs should have length 3 // 1 rewards and two regular txs, no fee collection
+ 
+-    system.terminate()
++    stopMiningActors(system, Seq(candidateGenerator))
+   }
+ 
+ }
+diff --git a/src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionActorSpec.scala b/src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionActorSpec.scala
+new file mode 100644
+index 0000000000000000000000000000000000000000..ddad50c8072370bcec0fad59adb4622e3be2a7f9
+--- /dev/null
++++ b/src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionActorSpec.scala
+@@ -0,0 +1,788 @@
++package org.ergoplatform.mining
++
++import akka.actor.{Actor, ActorRef, ActorSystem, Props}
++import akka.pattern.{StatusReply, ask}
++import akka.testkit.{TestKit, TestProbe}
++import akka.util.Timeout
++import org.ergoplatform.mining.CandidateGenerator.{ArmOwnedTransactionV1, Candidate, GenerateCandidate, GetOwnedTransactionPermitStatusV1, HoldOwnedTransactionsV1, PauseOwnedSubmissionV1}
++import org.ergoplatform.modifiers.ErgoFullBlock
++import org.ergoplatform.modifiers.mempool.{ErgoTransaction, UnconfirmedTransaction, UnsignedErgoTransaction}
++import org.ergoplatform.network.ErgoNodeViewSynchronizerMessages.{ChangedHistory, ChangedState, FullBlockApplied, NodeViewChange, SemanticallyFailedModification}
++import org.ergoplatform.nodeView.{ErgoNodeViewRef, ErgoReadersHolderRef, LocallyGeneratedModifier}
++import org.ergoplatform.nodeView.ErgoNodeViewHolder.ReceivableMessages.LocallyGeneratedTransaction
++import org.ergoplatform.nodeView.ErgoReadersHolder.{GetReaders, Readers}
++import org.ergoplatform.nodeView.history.ErgoHistoryReader
++import org.ergoplatform.nodeView.history.extra.IndexedErgoTransaction
++import org.ergoplatform.nodeView.state.{StateType, UtxoStateReader}
++import org.ergoplatform.settings.ErgoSettings
++import org.ergoplatform.utils.ErgoTestHelpers
++import org.ergoplatform.{ErgoBoxCandidate, Input}
++import org.scalatest.flatspec.AnyFlatSpec
++import org.scalatest.matchers.should.Matchers
++import sigma.ast.ErgoTree
++
++import java.lang.reflect.{InvocationHandler, Method, Proxy}
++import java.nio.charset.StandardCharsets
++import java.nio.file.Files
++import java.security.MessageDigest
++import scala.concurrent.duration._
++
++/** Real actors and a fresh NodeView; only forwarding the submitted sections is held. */
++class OwnedMiningSubmissionActorSpec extends AnyFlatSpec with Matchers with ErgoTestHelpers {
++  import org.ergoplatform.utils.ErgoNodeTestConstants._
++  import org.ergoplatform.utils.ErgoCoreTestConstants._
++  import OwnedMiningSubmissionV1._
++
++  implicit private val timeout: Timeout = defaultTimeout
++  private val nonce = "ab" * 32
++  private val operation = "cd" * 32
++  private val digest = MessageDigest.getInstance("SHA-256")
++    .digest(nonce.getBytes(StandardCharsets.UTF_8)).map(byte => f"${byte & 0xff}%02x").mkString
++
++  private case object ReleaseSubmission
++  private final class HeldForwarder(destination: ActorRef, observed: ActorRef) extends Actor {
++    private var held = Vector.empty[LocallyGeneratedModifier]
++    override def receive: Receive = {
++      case modifier: LocallyGeneratedModifier =>
++        held :+= modifier
++        observed ! modifier
++      case ReleaseSubmission =>
++        held.foreach(destination ! _)
++        held = Vector.empty
++    }
++  }
++
++  private final class Fixture(val system: ActorSystem, var generator: ActorRef, val readers: ActorRef,
++                              val forwarder: ActorRef, val submissions: TestProbe, val applied: TestProbe,
++                              val control: Control, val nodeSettings: ErgoSettings, val node: ActorRef) {
++    def liveReaders(): Readers = await((readers ? GetReaders).mapTo[Readers])
++    def barrier(): Unit = {
++      val reply = TestProbe()(system)
++      generator.tell(ArmOwnedTransactionV1("00" * 32, "12" * 32, Watermark("00" * 32, 1), "34" * 32), reply.ref)
++      reply.expectMsgPF(3.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++    }
++    def detachReaderEvents(): Unit = {
++      system.eventStream.unsubscribe(generator, classOf[NodeViewChange])
++      system.eventStream.unsubscribe(generator, classOf[FullBlockApplied])
++      barrier()
++    }
++    def setReaders(history: ErgoHistoryReader, state: UtxoStateReader): Unit = {
++      generator ! ChangedHistory(history)
++      generator ! ChangedState(state)
++      barrier()
++    }
++    def candidate(): Candidate = {
++      val reply = TestProbe()(system)
++      generator.tell(GenerateCandidate(Seq.empty, reply = true, forced = true), reply.ref)
++      reply.expectMsgPF(3.seconds) { case StatusReply.Success(value: Candidate) => value }
++    }
++    def solve(candidate: Candidate): ErgoFullBlock =
++      nodeSettings.chainSettings.powScheme.proveCandidate(candidate.candidateBlock, defaultMinerSecret.w, 0, 1000).get
++    def submit(block: ErgoFullBlock): Unit = {
++      val reply = TestProbe()(system)
++      generator.tell(block.header.powSolution, reply.ref)
++      reply.expectMsg(2.seconds, StatusReply.success(()))
++      val sections = Vector(block.header) ++ block.mandatoryBlockSections
++      sections.foreach(section => submissions.expectMsgPF(2.seconds) {
++        case LocallyGeneratedModifier(observed) => observed.id shouldBe section.id
++      })
++    }
++    def applySubmitted(block: ErgoFullBlock): Unit = {
++      forwarder ! ReleaseSubmission
++      applied.expectMsgPF(2.seconds) { case FullBlockApplied(header) => header.id shouldBe block.id }
++    }
++    def hold(): HoldReceipt = {
++      val reply = TestProbe()(system)
++      generator.tell(HoldOwnedTransactionsV1(nonce, operation), reply.ref)
++      reply.expectMsgPF(3.seconds) { case StatusReply.Success(value: HoldReceipt) => value }
++    }
++    def arm(parent: Watermark, transactionId: String, id: String = "ef" * 32): Unit = {
++      val reply = TestProbe()(system)
++      generator.tell(ArmOwnedTransactionV1(nonce, id, parent, transactionId), reply.ref)
++      reply.expectMsg(2.seconds, StatusReply.success(()))
++    }
++    def status(parent: Watermark, transactionId: String, id: String = "ef" * 32): TransactionPermitStatus = {
++      val reply = TestProbe()(system)
++      generator.tell(GetOwnedTransactionPermitStatusV1(nonce, id, transactionId, parent), reply.ref)
++      reply.expectMsgPF(2.seconds) { case StatusReply.Success(value: TransactionPermitStatus) => value }
++    }
++    def replaceActor(): Unit = {
++      val terminated = TestProbe()(system)
++      terminated.watch(generator)
++      system.stop(generator)
++      terminated.expectTerminated(generator, 2.seconds)
++      generator = CandidateGenerator(defaultMinerSecret.publicImage, readers, forwarder,
++        nodeSettings, Some(control))(system)
++    }
++  }
++
++  // Delegate real fixture readers except for their immutable observed tip. This
++  // exposes event ordering without manufacturing a different accepted chain.
++  private def freezeReader[A <: AnyRef](api: Class[A], underlying: A, field: String, value: AnyRef): A =
++    controlledReader(api, underlying, field, () => value)
++
++  private def controlledReader[A <: AnyRef](api: Class[A], underlying: A, field: String, value: () => AnyRef): A =
++    api.cast(Proxy.newProxyInstance(api.getClassLoader, Array[Class[_]](api), new InvocationHandler {
++      override def invoke(proxy: Any, method: Method, arguments: Array[AnyRef]): AnyRef =
++        if (method.getName == field) value()
++        else method.invoke(underlying, Option(arguments).getOrElse(Array.empty[AnyRef]): _*)
++    }))
++
++  private def frozenReaders(fixture: Fixture): (ErgoHistoryReader, UtxoStateReader) = {
++    val readers = fixture.liveReaders()
++    val state = readers.s.asInstanceOf[UtxoStateReader]
++    (freezeReader(classOf[ErgoHistoryReader], readers.h, "bestFullBlockOpt", readers.h.bestFullBlockOpt),
++      freezeReader(classOf[UtxoStateReader], state, "stateContext", state.stateContext))
++  }
++
++  private def minePermit(fixture: Fixture, first: ErgoFullBlock, count: Int = TransactionApplications): ErgoFullBlock = {
++    var last = first
++    fixture.submit(first)
++    fixture.applySubmitted(first)
++    for (_ <- 1 until count) {
++      last = fixture.solve(fixture.candidate())
++      fixture.submit(last)
++      fixture.applySubmitted(last)
++    }
++    last
++  }
++
++  private def withFixture(maximum: Option[Int] = None, permits: Boolean = false)(run: Fixture => Unit): Unit = {
++    implicit val system: ActorSystem = ActorSystem()
++    var fixture: Option[Fixture] = None
++    try {
++      val control = fromEnvironment(Map(OwnerNonceSha256Env -> digest) ++
++        maximum.map(value => MaximumBlockHeightEnv -> value.toString) ++
++        (if (permits) Map(TransactionPermitEnv -> "1") else Map.empty[String, String])).get
++      val nodeSettings = settings.copy(
++        directory = Files.createTempDirectory("owned-mining-actor-").toString,
++        nodeSettings = settings.nodeSettings.copy(mining = true, stateType = StateType.Utxo,
++          internalMinerPollingInterval = 1.second, offlineGeneration = true, verifyTransactions = true),
++        chainSettings = settings.chainSettings.copy(blockInterval = 1.second,
++          powScheme = new AutolykosPowScheme(settings.chainSettings.powScheme.k, settings.chainSettings.powScheme.n))
++      )
++      val node = ErgoNodeViewRef(nodeSettings)
++      val readers = ErgoReadersHolderRef(node)
++      val submissions = TestProbe()
++      val applied = TestProbe()
++      system.eventStream.subscribe(applied.ref, classOf[FullBlockApplied])
++      val forwarder = system.actorOf(Props(new HeldForwarder(node, submissions.ref)))
++      val generator = CandidateGenerator(defaultMinerSecret.publicImage, readers, forwarder, nodeSettings, Some(control))
++      val current = new Fixture(system, generator, readers, forwarder, submissions, applied, control, nodeSettings, node)
++      fixture = Some(current)
++      run(current)
++    } finally {
++      try fixture.foreach { current =>
++        val terminated = TestProbe()
++        terminated.watch(current.generator)
++        system.stop(current.generator)
++        terminated.expectTerminated(current.generator, 2.seconds)
++      } finally TestKit.shutdownActorSystem(system)
++    }
++  }
++
++  it should "drain owned mining before acknowledgement and reject late cached solutions across actor replacement" in {
++    withFixture() { fixture =>
++      val previous = fixture.solve(fixture.candidate())
++      val current = fixture.solve(fixture.candidate())
++      fixture.submit(current)
++      val pause = TestProbe()(fixture.system)
++      fixture.generator.tell(PauseOwnedSubmissionV1(nonce, operation), pause.ref)
++      pause.expectNoMessage(200.millis)
++      val late = TestProbe()(fixture.system)
++      fixture.generator.tell(previous.header.powSolution, late.ref)
++      late.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.generator.tell(current.header.powSolution, late.ref)
++      late.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.generator.tell(GenerateCandidate(Seq.empty, reply = true, forced = true), late.ref)
++      late.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.submissions.expectNoMessage(200.millis)
++      await((fixture.readers ? GetReaders).mapTo[Readers]).h.bestFullBlockOpt shouldBe None
++      fixture.forwarder ! ReleaseSubmission
++      fixture.applied.expectMsgPF(2.seconds) { case FullBlockApplied(header) => header.id shouldBe current.id }
++      pause.expectMsgPF(2.seconds) { case StatusReply.Success(receipt: PauseReceipt) =>
++        receipt shouldBe PauseReceipt(operation, Some(Watermark(current.id, current.header.height)), None)
++      }
++      val terminated = TestProbe()(fixture.system)
++      terminated.watch(fixture.generator)
++      fixture.system.stop(fixture.generator)
++      terminated.expectTerminated(fixture.generator, 2.seconds)
++      val replacement = CandidateGenerator(defaultMinerSecret.publicImage, fixture.readers, fixture.forwarder,
++        fixture.nodeSettings, Some(fixture.control))(fixture.system)
++      fixture.generator = replacement
++      replacement.tell(GenerateCandidate(Seq.empty, reply = true, forced = true), late.ref)
++      late.expectMsgPF(3.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      replacement.tell(current.header.powSolution, late.ref)
++      late.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.submissions.expectNoMessage(200.millis)
++    }
++  }
++
++  it should "retain an owned mining failure on semantic rejection of a pending submission" in {
++    withFixture() { fixture =>
++      val block = fixture.solve(fixture.candidate())
++      fixture.submit(block)
++      val pause = TestProbe()(fixture.system)
++      fixture.generator.tell(PauseOwnedSubmissionV1(nonce, operation), pause.ref)
++      pause.expectNoMessage(200.millis)
++      fixture.generator ! SemanticallyFailedModification(ErgoFullBlock.modifierTypeId, block.id, new Exception("synthetic rejection"))
++      pause.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.control.submissionsClosed shouldBe true
++      fixture.control.pauseCompletion.isLeft shouldBe true
++      fixture.submissions.expectNoMessage(200.millis)
++    }
++  }
++
++  it should "refuse owned mining above the immutable completed block ceiling before sending any section" in {
++    withFixture(Some(0)) { fixture =>
++      val block = fixture.solve(fixture.candidate())
++      val reply = TestProbe()(fixture.system)
++      fixture.generator.tell(block.header.powSolution, reply.ref)
++      reply.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.submissions.expectNoMessage(200.millis)
++    }
++  }
++
++  it should "admit owned mining at the immutable completed block ceiling" in {
++    withFixture(Some(1)) { fixture =>
++      val block = fixture.solve(fixture.candidate())
++      block.header.height shouldBe 1
++      fixture.submit(block)
++    }
++  }
++
++  it should "refuse a valid previous-candidate solution above the immutable completed block ceiling" in {
++    withFixture(Some(0)) { fixture =>
++      val previous = fixture.solve(fixture.candidate())
++      val current = fixture.candidate()
++      previous.header.version shouldBe 1
++      fixture.nodeSettings.chainSettings.powScheme.validate(previous.header).isSuccess shouldBe true
++      val mismatchedCurrent = CandidateGenerator.completeBlock(current.candidateBlock, previous.header.powSolution)
++      fixture.nodeSettings.chainSettings.powScheme.validate(mismatchedCurrent.header).isFailure shouldBe true
++      val reply = TestProbe()(fixture.system)
++      fixture.generator.tell(previous.header.powSolution, reply.ref)
++      reply.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.submissions.expectNoMessage(200.millis)
++      fixture.control.submissionsClosed shouldBe false
++    }
++  }
++
++  it should "hold cached solutions and mine inclusion plus ten successors matching actual indexed confirmations" in {
++    withFixture(permits = true) { fixture =>
++      val anchor = fixture.solve(fixture.candidate())
++      fixture.submit(anchor)
++      fixture.applySubmitted(anchor)
++      val first = fixture.solve(fixture.candidate())
++      val receipt = fixture.hold()
++      receipt.watermark shouldBe Watermark(anchor.id, anchor.header.height)
++      val reply = TestProbe()(fixture.system)
++      for (_ <- 0 until 101) {
++        fixture.generator.tell(first.header.powSolution, reply.ref)
++        reply.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      }
++      fixture.generator.tell(GenerateCandidate(Seq.empty, reply = true, forced = true), reply.ref)
++      reply.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.submissions.expectNoMessage(200.millis)
++      // The real emission transaction supplies an exact transaction identity;
++      // this actor fixture does not claim a bridge/user transaction admission.
++      fixture.arm(receipt.watermark, first.transactions.head.id)
++      fixture.generator.tell(GenerateCandidate(Seq.empty, reply = true, forced = false), reply.ref)
++      reply.expectMsgPF(2.seconds) { case StatusReply.Success(value: Candidate) =>
++        value.candidateBlock.transactions.map(_.id) should contain(first.transactions.head.id)
++      }
++      fixture.submit(first)
++      fixture.generator.tell(first.header.powSolution, reply.ref)
++      reply.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.submissions.expectNoMessage(200.millis)
++      fixture.applySubmitted(first)
++      var last = first
++      for (index <- 1 until TransactionApplications) {
++        val next = fixture.solve(fixture.candidate())
++        next.header.parentId shouldBe last.id
++        next.header.height shouldBe last.header.height + 1
++        fixture.submit(next)
++        fixture.applySubmitted(next)
++        last = next
++        if (index == TransactionConfirmations - 1) {
++          // Ten total applications have only nine confirmations in the actual node index API.
++          val indexed = IndexedErgoTransaction.fromTx(first.transactions.head, 0, first.header.height,
++            0L, Array.empty[Long], Array.empty[Long]).retrieveBody(fixture.liveReaders().h)
++          indexed.inclusionHeight shouldBe first.header.height
++          indexed.numConfirmations shouldBe TransactionConfirmations - 1
++          fixture.applied.awaitAssert({
++            fixture.status(receipt.watermark, first.transactions.head.id).completed shouldBe false
++            fixture.control.submissionsClosed shouldBe false
++          }, 2.seconds, 20.millis)
++        }
++      }
++      last.header.height shouldBe anchor.header.height + TransactionApplications
++      val indexed = IndexedErgoTransaction.fromTx(first.transactions.head, 0, first.header.height,
++        0L, Array.empty[Long], Array.empty[Long]).retrieveBody(fixture.liveReaders().h)
++      indexed.numConfirmations shouldBe TransactionConfirmations
++      fixture.applied.awaitAssert({
++        fixture.status(receipt.watermark, first.transactions.head.id).completed shouldBe true
++      }, 2.seconds, 20.millis)
++      // A twelfth candidate/application is outside this permit, even after status reads.
++      fixture.generator.tell(GenerateCandidate(Seq.empty, reply = true, forced = true), reply.ref)
++      reply.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.generator.tell(last.header.powSolution, reply.ref)
++      reply.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.submissions.expectNoMessage(200.millis)
++      fixture.control.holdCompletion shouldBe Right(Some(HoldReceipt(operation, Watermark(last.id, last.header.height))))
++      fixture.replaceActor()
++      fixture.generator.tell(GenerateCandidate(Seq.empty, reply = true, forced = true), reply.ref)
++      reply.expectMsgPF(3.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.submissions.expectNoMessage(200.millis)
++    }
++  }
++
++  it should "reject current and valid previous cached solutions omitting the permitted transaction" in {
++    withFixture(permits = true) { fixture =>
++      val anchor = fixture.solve(fixture.candidate())
++      fixture.submit(anchor)
++      fixture.applySubmitted(anchor)
++      val previous = fixture.solve(fixture.candidate())
++      val current = fixture.candidate()
++      fixture.nodeSettings.chainSettings.powScheme.validate(previous.header).isSuccess shouldBe true
++      fixture.nodeSettings.chainSettings.powScheme.validate(
++        CandidateGenerator.completeBlock(current.candidateBlock, previous.header.powSolution).header).isFailure shouldBe true
++      val receipt = fixture.hold()
++      fixture.arm(receipt.watermark, "12" * 32)
++      val reply = TestProbe()(fixture.system)
++      fixture.generator.tell(previous.header.powSolution, reply.ref)
++      reply.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.generator.tell(fixture.solve(current).header.powSolution, reply.ref)
++      reply.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.submissions.expectNoMessage(200.millis)
++    }
++  }
++
++  it should "drain a pre-hold submission without clearing it and keep the drained parent" in {
++    withFixture(permits = true) { fixture =>
++      val anchor = fixture.solve(fixture.candidate())
++      fixture.submit(anchor)
++      fixture.applySubmitted(anchor)
++      val pending = fixture.solve(fixture.candidate())
++      fixture.submit(pending)
++      val reply = TestProbe()(fixture.system)
++      fixture.generator.tell(HoldOwnedTransactionsV1(nonce, operation), reply.ref)
++      reply.expectNoMessage(200.millis)
++      fixture.generator.tell(pending.header.powSolution, fixture.submissions.ref)
++      fixture.submissions.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.applySubmitted(pending)
++      reply.expectMsgPF(2.seconds) { case StatusReply.Success(value: HoldReceipt) =>
++        value.watermark shouldBe Watermark(pending.id, pending.header.height)
++      }
++      fixture.submissions.expectNoMessage(200.millis)
++    }
++  }
++
++  it should "retain an unresolved permit across actor replacement and unlock only its exact application" in {
++    withFixture(permits = true) { fixture =>
++      val anchor = fixture.solve(fixture.candidate())
++      fixture.submit(anchor)
++      fixture.applySubmitted(anchor)
++      val first = fixture.solve(fixture.candidate())
++      fixture.arm(fixture.hold().watermark, first.transactions.head.id)
++      fixture.submit(first)
++      fixture.replaceActor()
++      val reply = TestProbe()(fixture.system)
++      fixture.generator.tell(GenerateCandidate(Seq.empty, reply = true, forced = true), reply.ref)
++      reply.expectMsgPF(3.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.submissions.expectNoMessage(200.millis)
++      fixture.applySubmitted(first)
++      val next = fixture.solve(fixture.candidate())
++      next.header.parentId shouldBe first.id
++      fixture.submit(next)
++      fixture.applySubmitted(next)
++      fixture.control.requiredPermitTransaction shouldBe None
++    }
++  }
++
++  it should "close a valid hold through reader skew without letting invalid authentication close mining" in {
++    withFixture(permits = true) { fixture =>
++      fixture.candidate()
++      val initial = frozenReaders(fixture)
++      val anchor = fixture.solve(fixture.candidate())
++      fixture.submit(anchor)
++      fixture.applySubmitted(anchor)
++      fixture.candidate()
++      val current = frozenReaders(fixture)
++      fixture.detachReaderEvents()
++      fixture.setReaders(current._1, initial._2)
++      val invalid = TestProbe()(fixture.system)
++      fixture.generator.tell(HoldOwnedTransactionsV1("00" * 32, operation), invalid.ref)
++      invalid.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.control.submissionsClosed shouldBe false
++      val hold = TestProbe()(fixture.system)
++      fixture.generator.tell(HoldOwnedTransactionsV1(nonce, operation), hold.ref)
++      fixture.barrier()
++      fixture.control.submissionsClosed shouldBe true
++      hold.expectNoMessage(200.millis)
++      fixture.generator.tell(GenerateCandidate(Seq.empty, reply = true, forced = true), invalid.ref)
++      invalid.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.submissions.expectNoMessage(200.millis)
++      fixture.generator ! ChangedState(current._2)
++      hold.expectMsg(StatusReply.success(HoldReceipt(operation, Watermark(anchor.id, anchor.header.height))))
++    }
++  }
++
++  Seq("history first", "state first").foreach { order =>
++    it should s"wait for both readers after the exact pending application with $order" in {
++      withFixture(permits = true) { fixture =>
++        val anchor = fixture.solve(fixture.candidate())
++        fixture.submit(anchor)
++        fixture.applySubmitted(anchor)
++        val pending = fixture.solve(fixture.candidate())
++        val previous = frozenReaders(fixture)
++        fixture.detachReaderEvents()
++        fixture.setReaders(previous._1, previous._2)
++        fixture.submit(pending)
++        val hold = TestProbe()(fixture.system)
++        fixture.generator.tell(HoldOwnedTransactionsV1(nonce, operation), hold.ref)
++        fixture.barrier()
++        hold.expectNoMessage(200.millis)
++        fixture.applySubmitted(pending)
++        val current = frozenReaders(fixture)
++        fixture.generator ! FullBlockApplied(pending.header)
++        fixture.barrier()
++        fixture.control.holdCompletion shouldBe Right(None)
++        hold.expectNoMessage(200.millis)
++        if (order == "history first") fixture.generator ! ChangedHistory(current._1)
++        else fixture.generator ! ChangedState(current._2)
++        fixture.barrier()
++        fixture.control.holdCompletion shouldBe Right(None)
++        hold.expectNoMessage(200.millis)
++        if (order == "history first") fixture.generator ! ChangedState(current._2)
++        else fixture.generator ! ChangedHistory(current._1)
++        hold.expectMsg(2.seconds, StatusReply.success(HoldReceipt(operation,
++          Watermark(pending.id, pending.header.height))))
++        fixture.control.submissionsClosed shouldBe true
++        fixture.submissions.expectNoMessage(200.millis)
++      }
++    }
++  }
++
++  it should "retain an unacknowledged hold across actor replacement until the pending application joins readers" in {
++    withFixture(permits = true) { fixture =>
++      val anchor = fixture.solve(fixture.candidate())
++      fixture.submit(anchor)
++      fixture.applySubmitted(anchor)
++      val pending = fixture.solve(fixture.candidate())
++      fixture.submit(pending)
++      val hold = TestProbe()(fixture.system)
++      fixture.generator.tell(HoldOwnedTransactionsV1(nonce, operation), hold.ref)
++      fixture.barrier()
++      fixture.replaceActor()
++      fixture.barrier()
++      fixture.control.submissionsClosed shouldBe true
++      fixture.control.holdCompletion shouldBe Right(None)
++      fixture.applySubmitted(pending)
++      // Reinstall immutable current readers after the exact event to make the
++      // barrier deterministic; the lost original reply is never replayed.
++      val current = frozenReaders(fixture)
++      fixture.generator ! FullBlockApplied(pending.header)
++      fixture.setReaders(current._1, current._2)
++      fixture.control.holdCompletion shouldBe Right(Some(HoldReceipt(operation,
++        Watermark(pending.id, pending.header.height))))
++      hold.expectNoMessage(200.millis)
++      fixture.control.submissionsClosed shouldBe true
++      fixture.submissions.expectNoMessage(200.millis)
++    }
++  }
++
++  Seq("advanced reader", "same-height reader", "terminal pause").foreach { fault =>
++    it should s"keep a pending reader hold closed after $fault" in {
++      withFixture(permits = true) { fixture =>
++        fixture.candidate()
++        val initial = frozenReaders(fixture)
++        val anchor = fixture.solve(fixture.candidate())
++        fixture.submit(anchor)
++        fixture.applySubmitted(anchor)
++        val next = fixture.solve(fixture.candidate())
++        val current = frozenReaders(fixture)
++        fixture.detachReaderEvents()
++        fixture.setReaders(current._1, initial._2)
++        val hold = TestProbe()(fixture.system)
++        fixture.generator.tell(HoldOwnedTransactionsV1(nonce, operation), hold.ref)
++        fixture.barrier()
++        hold.expectNoMessage(200.millis)
++        if (fault == "terminal pause") {
++          val pause = TestProbe()(fixture.system)
++          fixture.generator.tell(PauseOwnedSubmissionV1(nonce, "34" * 32), pause.ref)
++          pause.expectMsgPF(2.seconds) { case StatusReply.Success(value: PauseReceipt) =>
++            value.watermark shouldBe Some(Watermark(anchor.id, anchor.header.height))
++          }
++        } else {
++          // Deliberately inconsistent reader events are a fail-closed actor
++          // fixture, not evidence that the synthetic alternative was applied.
++          val conflict = if (fault == "advanced reader") next
++          else anchor.copy(header = anchor.header.copy(timestamp = anchor.header.timestamp + 1))
++          fixture.generator ! ChangedHistory(freezeReader(classOf[ErgoHistoryReader], current._1,
++            "bestFullBlockOpt", Some(conflict)))
++        }
++        hold.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++        fixture.setReaders(current._1, current._2)
++        fixture.control.holdCompletion.isLeft shouldBe true
++        fixture.control.submissionsClosed shouldBe true
++        fixture.submissions.expectNoMessage(200.millis)
++      }
++    }
++  }
++
++  it should "poison a replay with the wrong parent before an active permit can emit" in {
++    withFixture(permits = true) { fixture =>
++      val anchor = fixture.solve(fixture.candidate())
++      fixture.submit(anchor)
++      fixture.applySubmitted(anchor)
++      val first = fixture.solve(fixture.candidate())
++      val receipt = fixture.hold()
++      fixture.arm(receipt.watermark, first.transactions.head.id)
++      fixture.control.submissionsClosed shouldBe false
++      val reply = TestProbe()(fixture.system)
++      fixture.generator.tell(ArmOwnedTransactionV1(nonce, "ef" * 32,
++        receipt.watermark.copy(height = receipt.watermark.height + 1), first.transactions.head.id), reply.ref)
++      reply.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.generator.tell(first.header.powSolution, reply.ref)
++      reply.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.control.submissionsClosed shouldBe true
++      fixture.submissions.expectNoMessage(200.millis)
++    }
++  }
++
++  it should "generate the first permitted candidate from an actual signed mempool transaction" in {
++    withFixture(permits = true) { fixture =>
++      val anchor = fixture.solve(fixture.candidate())
++      fixture.submit(anchor)
++      fixture.applySubmitted(anchor)
++      fixture.candidate()
++      val readers = fixture.liveReaders()
++      val rewardBox = anchor.transactions.last.outputs.last
++      val fee = 1000000L
++      fee should be >= fixture.nodeSettings.nodeSettings.minimalFeeAmount
++      val outputs = IndexedSeq(
++        new ErgoBoxCandidate(rewardBox.value - fee, ErgoTree.fromSigmaBoolean(defaultMinerSecret.publicImage),
++          readers.s.stateContext.currentHeight),
++        new ErgoBoxCandidate(fee, feeProp, readers.s.stateContext.currentHeight))
++      val unsigned = new UnsignedErgoTransaction(IndexedSeq(Input(rewardBox.id, emptyProverResult)), IndexedSeq(), outputs)
++      val transaction = ErgoTransaction(defaultProver.sign(unsigned, IndexedSeq(rewardBox), IndexedSeq(),
++        readers.s.stateContext).get)
++      val receipt = fixture.hold()
++      fixture.arm(receipt.watermark, transaction.id)
++      val mempool = TestProbe()(fixture.system)
++      fixture.system.eventStream.subscribe(mempool.ref,
++        classOf[org.ergoplatform.network.ErgoNodeViewSynchronizerMessages.ChangedMempool])
++      fixture.node ! LocallyGeneratedTransaction(UnconfirmedTransaction(transaction, None))
++      mempool.fishForMessage(3.seconds) {
++        case org.ergoplatform.network.ErgoNodeViewSynchronizerMessages.ChangedMempool(reader) =>
++          reader.getAllPrioritized.exists(_.id == transaction.id)
++        case _ => false
++      }
++      val candidate = fixture.candidate()
++      candidate.candidateBlock.transactions.map(_.id) should contain(transaction.id)
++      val block = fixture.solve(candidate)
++      block.header.parentId shouldBe anchor.id
++      fixture.submit(block)
++      fixture.applySubmitted(block)
++      val pause = TestProbe()(fixture.system)
++      fixture.generator.tell(PauseOwnedSubmissionV1(nonce, "34" * 32), pause.ref)
++      pause.expectMsgPF(2.seconds) { case StatusReply.Success(value: PauseReceipt) =>
++        value.watermark shouldBe Some(Watermark(block.id, block.header.height))
++      }
++      fixture.control.requiredPermitTransaction shouldBe None
++      fixture.control.submissionsClosed shouldBe true
++    }
++  }
++
++  Seq("history first", "state first").foreach { order =>
++    it should s"bind status to the eleventh application and fresh final readers with $order" in {
++      withFixture(permits = true) { fixture =>
++        val anchor = fixture.solve(fixture.candidate())
++        fixture.submit(anchor)
++        fixture.applySubmitted(anchor)
++        val first = fixture.solve(fixture.candidate())
++        val parent = fixture.hold().watermark
++        val transaction = first.transactions.head.id
++        fixture.arm(parent, transaction)
++        minePermit(fixture, first, TransactionApplications - 1)
++        val eleventh = fixture.solve(fixture.candidate())
++        val previous = frozenReaders(fixture)
++        fixture.detachReaderEvents()
++        fixture.setReaders(previous._1, previous._2)
++        fixture.submit(eleventh)
++        fixture.applySubmitted(eleventh)
++        val current = frozenReaders(fixture)
++        fixture.setReaders(current._1, current._2)
++        // Indexed/current readers ahead of the actor's FBA cannot complete it.
++        val pending: TransactionPermitStatus = TransactionPermitStatus("ef" * 32, transaction, parent, completed = false, finalWatermark = None)
++        fixture.status(parent, transaction) shouldBe pending
++        fixture.setReaders(previous._1, previous._2)
++        fixture.generator ! FullBlockApplied(eleventh.header)
++        fixture.barrier()
++        fixture.status(parent, transaction) shouldBe pending
++        if (order == "history first") fixture.generator ! ChangedHistory(current._1)
++        else fixture.generator ! ChangedState(current._2)
++        fixture.status(parent, transaction) shouldBe pending
++        if (order == "history first") fixture.generator ! ChangedState(current._2)
++        else fixture.generator ! ChangedHistory(current._1)
++        val completed = pending.copy(completed = true,
++          finalWatermark = Some(Watermark(eleventh.id, parent.height + TransactionApplications)))
++        for (_ <- 0 until 3) fixture.status(parent, transaction) shouldBe completed
++        fixture.replaceActor()
++        fixture.status(parent, transaction) shouldBe completed
++        fixture.detachReaderEvents()
++        fixture.setReaders(current._1, previous._2)
++        fixture.status(parent, transaction) shouldBe pending
++        fixture.setReaders(current._1, current._2)
++        fixture.status(parent, transaction) shouldBe completed
++        val nextParent = completed.finalWatermark.get
++        fixture.arm(nextParent, transaction, "34" * 32)
++        val stale = TestProbe()(fixture.system)
++        fixture.generator.tell(GetOwnedTransactionPermitStatusV1(nonce, "ef" * 32, transaction, parent), stale.ref)
++        stale.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++        fixture.status(nextParent, transaction, "34" * 32) shouldBe
++          TransactionPermitStatus("34" * 32, transaction, nextParent, completed = false, finalWatermark = None)
++        fixture.control.submissionsClosed shouldBe false
++        fixture.submissions.expectNoMessage(200.millis)
++      }
++    }
++  }
++
++  Seq("advanced", "same-height conflict").foreach { fault =>
++    it should s"refuse completed status on a freshly read $fault without a reader event" in {
++      withFixture(permits = true) { fixture =>
++        val anchor = fixture.solve(fixture.candidate())
++        fixture.submit(anchor)
++        fixture.applySubmitted(anchor)
++        val first = fixture.solve(fixture.candidate())
++        val parent = fixture.hold().watermark
++        val transaction = first.transactions.head.id
++        fixture.arm(parent, transaction)
++        val last = minePermit(fixture, first)
++        fixture.status(parent, transaction).completed shouldBe true
++        val current = frozenReaders(fixture)
++        fixture.detachReaderEvents()
++        val observed = new java.util.concurrent.atomic.AtomicReference[Option[ErgoFullBlock]](Some(last))
++        fixture.setReaders(controlledReader(classOf[ErgoHistoryReader], current._1,
++          "bestFullBlockOpt", () => observed.get()), current._2)
++        fixture.status(parent, transaction).completed shouldBe true
++        val changed = if (fault == "advanced") last.header.copy(height = last.height + 1)
++          else last.header.copy(timestamp = last.header.timestamp + 1)
++        observed.set(Some(last.copy(header = changed)))
++        val reply = TestProbe()(fixture.system)
++        fixture.generator.tell(GetOwnedTransactionPermitStatusV1(nonce, "ef" * 32, transaction, parent), reply.ref)
++        reply.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++        observed.set(Some(last))
++        fixture.generator.tell(GetOwnedTransactionPermitStatusV1(nonce, "ef" * 32, transaction, parent), reply.ref)
++        reply.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++        fixture.control.submissionsClosed shouldBe true
++        fixture.submissions.expectNoMessage(200.millis)
++      }
++    }
++  }
++
++  it should "refuse foreign malformed and stale status before any actor reader access" in {
++    withFixture(permits = true) { fixture =>
++      val anchor = fixture.solve(fixture.candidate())
++      fixture.submit(anchor)
++      fixture.applySubmitted(anchor)
++      val first = fixture.solve(fixture.candidate())
++      val parent = fixture.hold().watermark
++      val transaction = first.transactions.head.id
++      fixture.arm(parent, transaction)
++      val last = minePermit(fixture, first)
++      fixture.status(parent, transaction).completed shouldBe true
++      val current = frozenReaders(fixture)
++      fixture.detachReaderEvents()
++      val reads = new java.util.concurrent.atomic.AtomicInteger(0)
++      fixture.setReaders(controlledReader(classOf[ErgoHistoryReader], current._1, "bestFullBlockOpt", () => {
++        reads.incrementAndGet()
++        Some(last)
++      }), current._2)
++      val before = reads.get()
++      val reply = TestProbe()(fixture.system)
++      Seq(
++        GetOwnedTransactionPermitStatusV1("00" * 32, "ef" * 32, transaction, parent),
++        GetOwnedTransactionPermitStatusV1(nonce, "ef" * 32 + "\n", transaction, parent),
++        GetOwnedTransactionPermitStatusV1(nonce, "34" * 32, transaction, parent),
++        GetOwnedTransactionPermitStatusV1(nonce, "ef" * 32, "34" * 32, parent),
++        GetOwnedTransactionPermitStatusV1(nonce, "ef" * 32, transaction, parent.copy(height = parent.height + 1))
++      ).foreach { request =>
++        fixture.generator.tell(request, reply.ref)
++        reply.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++        reads.get() shouldBe before
++      }
++      fixture.status(parent, transaction).completed shouldBe true
++      reads.get() shouldBe before + 1
++      fixture.submissions.expectNoMessage(200.millis)
++    }
++  }
++
++  Seq("status pause", "status rejection").foreach { fault =>
++    it should s"retain $fault refusal across replacement with a pending submission" in {
++      withFixture(permits = true) { fixture =>
++        val anchor = fixture.solve(fixture.candidate())
++        fixture.submit(anchor)
++        fixture.applySubmitted(anchor)
++        val first = fixture.solve(fixture.candidate())
++        val parent = fixture.hold().watermark
++        val transaction = first.transactions.head.id
++        fixture.arm(parent, transaction)
++        fixture.submit(first)
++        fixture.replaceActor()
++        fixture.status(parent, transaction).completed shouldBe false
++        val reply = TestProbe()(fixture.system)
++        if (fault == "status pause") fixture.generator.tell(PauseOwnedSubmissionV1(nonce, "34" * 32), reply.ref)
++        else fixture.generator ! SemanticallyFailedModification(ErgoFullBlock.modifierTypeId,
++          first.id, new Exception("synthetic rejection"))
++        fixture.barrier()
++        fixture.generator.tell(GetOwnedTransactionPermitStatusV1(nonce, "ef" * 32, transaction, parent), reply.ref)
++        reply.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++        fixture.control.submissionsClosed shouldBe true
++        fixture.submissions.expectNoMessage(200.millis)
++      }
++    }
++  }
++
++  Seq("rejection", "competing parent", "terminal pause", "replay").foreach { failure =>
++    it should s"keep $failure closed through the real permit actor" in {
++      withFixture(permits = true) { fixture =>
++        val anchor = fixture.solve(fixture.candidate())
++        fixture.submit(anchor)
++        fixture.applySubmitted(anchor)
++        val first = fixture.solve(fixture.candidate())
++        val receipt = fixture.hold()
++        fixture.arm(receipt.watermark, first.transactions.head.id)
++        fixture.submit(first)
++        val reply = TestProbe()(fixture.system)
++        failure match {
++          case "rejection" => fixture.generator.tell(SemanticallyFailedModification(
++            ErgoFullBlock.modifierTypeId, first.id, new Exception("synthetic rejection")), fixture.submissions.ref)
++          case "competing parent" => fixture.generator.tell(
++            FullBlockApplied(first.header.copy(timestamp = first.header.timestamp + 1)), fixture.submissions.ref)
++          case "terminal pause" => fixture.generator.tell(PauseOwnedSubmissionV1(nonce, "34" * 32), reply.ref)
++          case "replay" =>
++            fixture.generator.tell(ArmOwnedTransactionV1(nonce, "ef" * 32, receipt.watermark, first.transactions.head.id), reply.ref)
++            reply.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++          case _ => fail("unknown fixture")
++        }
++        // Mailbox barrier follows the fault; no extra submitted section may escape.
++        fixture.generator.tell(GenerateCandidate(Seq.empty, reply = true, forced = true), fixture.submissions.ref)
++        fixture.submissions.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++        fixture.generator.tell(first.header.powSolution, fixture.submissions.ref)
++        fixture.submissions.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++        fixture.submissions.expectNoMessage(200.millis)
++        if (failure == "terminal pause") {
++          fixture.applySubmitted(first)
++          reply.expectMsgPF(2.seconds) { case StatusReply.Success(value: PauseReceipt) =>
++            value.watermark shouldBe Some(Watermark(first.id, first.header.height))
++          }
++          fixture.control.submissionsClosed shouldBe true
++          fixture.generator.tell(GenerateCandidate(Seq.empty, reply = true, forced = true), fixture.submissions.ref)
++          fixture.submissions.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++          fixture.submissions.expectNoMessage(200.millis)
++        }
++      }
++    }
++  }
++}
+diff --git a/src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1Spec.scala b/src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1Spec.scala
+new file mode 100644
+index 0000000000000000000000000000000000000000..801652f2da58bd53f9a49d64c4aeb8518db8dabf
+--- /dev/null
++++ b/src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1Spec.scala
+@@ -0,0 +1,664 @@
++package org.ergoplatform.mining
++
++import org.ergoplatform.modifiers.history.header.Header
++import org.scalatest.flatspec.AnyFlatSpec
++import org.scalatest.matchers.should.Matchers
++import scorex.crypto.authds.ADDigest
++import scorex.crypto.hash.Digest32
++import scorex.util.bytesToId
++
++import java.nio.charset.StandardCharsets
++import java.security.MessageDigest
++import java.util.concurrent.{Callable, CountDownLatch, Executors, TimeUnit}
++
++/** Pure control transitions with serialized Header identities, not actor or node evidence. */
++class OwnedMiningSubmissionV1Spec extends AnyFlatSpec with Matchers {
++  import OwnedMiningSubmissionV1._
++
++  private val nonce = "ab" * 32
++  private val operation = "cd" * 32
++  private val digest = MessageDigest.getInstance("SHA-256")
++    .digest(nonce.getBytes(StandardCharsets.UTF_8)).map(byte => f"${byte & 0xff}%02x").mkString
++
++  private def control(maximum: Option[String] = None): Control =
++    fromEnvironment(Map(OwnerNonceSha256Env -> digest) ++ maximum.map(MaximumBlockHeightEnv -> _)).get
++
++  private val transactionId = "12" * 32
++  private val permitOperation = "ef" * 32
++  private def permitControl(maximum: Option[String] = None): Control =
++    fromEnvironment(Map(OwnerNonceSha256Env -> digest, TransactionPermitEnv -> "1") ++
++      maximum.map(MaximumBlockHeightEnv -> _)).get
++
++  private def held(owned: Control, parent: Header): Watermark = {
++    val watermark = Watermark(parent.id, parent.height)
++    owned.hold(nonce, operation) shouldBe Right(())
++    owned.observeReaders(Some(parent), Some(parent))
++    owned.holdCompletion shouldBe Right(Some(HoldReceipt(operation, watermark)))
++    owned.submissionsClosed shouldBe true
++    watermark
++  }
++
++  // Existing permit-policy cases supply an explicitly joined reader parent.
++  // Ordering and skew are exercised separately with the five-argument API.
++  private implicit class JoinedReaderRequest(owned: Control) {
++    def arm(owner: String, id: String, parent: Watermark, transaction: String): Either[String, Unit] =
++      owned.arm(owner, id, parent, transaction, Some(parent))
++  }
++
++  private def applyPermit(owned: Control, initial: Header, count: Int = TransactionApplications): Header = {
++    var parent = initial
++    for (_ <- 0 until count) {
++      val next = header(parent.height + 1).copy(parentId = parent.id)
++      owned.admitSubmission(next, Seq(transactionId)) shouldBe Right(())
++      owned.observeApplied(next)
++      parent = next
++    }
++    parent
++  }
++
++  // These headers exercise only identity/height binding; they are not accepted PoW blocks.
++  private def header(height: Int, timestamp: Long = 1L): Header = Header(
++    version = 2.toByte,
++    parentId = bytesToId(Array.fill(32)(0.toByte)),
++    ADProofsRoot = Digest32 @@ Array.fill(32)(0.toByte),
++    stateRoot = ADDigest @@ Array.fill(33)(0.toByte),
++    transactionsRoot = Digest32 @@ Array.fill(32)(0.toByte),
++    timestamp = timestamp,
++    nBits = 0L,
++    height = height,
++    extensionRoot = Digest32 @@ Array.fill(32)(0.toByte),
++    powSolution = AutolykosSolution(AutolykosSolution.pkForV2, AutolykosSolution.wForV2,
++      Array.fill(8)(0.toByte), AutolykosSolution.dForV2),
++    votes = Array.fill(3)(0.toByte),
++    unparsedBytes = Array.emptyByteArray
++  )
++
++  it should "leave omitted owned controls unchanged for legacy environments" in {
++    fromEnvironment(Map.empty) shouldBe None
++    fromEnvironment(Map("PATH" -> "unused", "ERGO_SIDECHAIN_EXTENSION_FIELDS" -> "unused")) shouldBe None
++  }
++
++  it should "require owner opt-in for a height limit" in {
++    val error = intercept[IllegalArgumentException] {
++      fromEnvironment(Map(MaximumBlockHeightEnv -> "10"))
++    }
++    error.getMessage shouldBe "owned mining submission configuration is invalid"
++  }
++
++  Seq("", "a" * 63, "A" * 64, "g" * 64, " " + digest).zipWithIndex.foreach { case (invalid, index) =>
++    it should s"reject malformed owner digest $index without exposing it" in {
++      val error = intercept[IllegalArgumentException] {
++        fromEnvironment(Map(OwnerNonceSha256Env -> invalid))
++      }
++      error.getMessage shouldBe "owned mining submission configuration is invalid"
++    }
++  }
++
++  Seq("", "01", "+1", "-1", "1.0", " 1", "2147483648").zipWithIndex.foreach { case (invalid, index) =>
++    it should s"reject malformed height limit $index" in {
++      intercept[IllegalArgumentException] {
++        control(Some(invalid))
++      }.getMessage shouldBe "owned mining submission configuration is invalid"
++    }
++  }
++
++  it should "accept canonical zero and maximum Int policy without wrapping" in {
++    control(Some("0")).maximumBlockHeight shouldBe Some(0)
++    control(Some(Int.MaxValue.toString)).maximumBlockHeight shouldBe Some(Int.MaxValue)
++    control().maximumBlockHeight shouldBe None
++  }
++
++  it should "authenticate only the exact canonical nonce" in {
++    val owned = control()
++    owned.authenticate(nonce) shouldBe true
++    Seq(null, "", nonce.toUpperCase, "aa" * 32, nonce + "00").foreach(value =>
++      owned.authenticate(value) shouldBe false)
++    owned.submissionsClosed shouldBe false
++  }
++
++  it should "expose the canonical public operation identity field and validator" in {
++    OperationIdField shouldBe "operationId"
++    validOperationId(operation) shouldBe true
++  }
++
++  Seq(null, "", "c" * 63, operation.toUpperCase, "g" * 64, " " + operation, operation + "00")
++    .zipWithIndex.foreach { case (invalid, index) =>
++      it should s"reject malformed operation identity $index before pause effects" in {
++        val owned = control()
++        validOperationId(invalid) shouldBe false
++        owned.pause(nonce, invalid).isLeft shouldBe true
++        owned.submissionsClosed shouldBe false
++        owned.admitSubmission(header(1)) shouldBe Right(())
++      }
++    }
++
++  it should "reject unauthorized or malformed pause requests before latching" in {
++    val owned = control()
++    owned.pause("aa" * 32, operation).isLeft shouldBe true
++    owned.pause(nonce, operation.toUpperCase).isLeft shouldBe true
++    owned.pause(nonce, null).isLeft shouldBe true
++    owned.submissionsClosed shouldBe false
++    owned.admitSubmission(header(1)) shouldBe Right(())
++  }
++
++  it should "return an immutable receipt for an empty pending slot and never resume" in {
++    val owned = control(Some("10"))
++    val receipt = PauseReceipt(operation, None, Some(10))
++    owned.pause(nonce, operation) shouldBe Right(Some(receipt))
++    owned.pauseCompletion shouldBe Right(Some(receipt))
++    owned.submissionsClosed shouldBe true
++    owned.pause(nonce, operation).isLeft shouldBe true
++    owned.pause(nonce, "ef" * 32).isLeft shouldBe true
++    owned.admitSubmission(header(1)).isLeft shouldBe true
++    receipt.productIterator.toSeq shouldBe Seq(operation, None, Some(10))
++  }
++
++  it should "reject a completion query before any pause was requested" in {
++    val owned = control()
++    owned.pauseCompletion.isLeft shouldBe true
++    owned.submissionsClosed shouldBe false
++  }
++
++  it should "admit at the cap and reject above it without reserving a slot" in {
++    val owned = control(Some("10"))
++    owned.admitSubmission(header(11)).isLeft shouldBe true
++    owned.admitSubmission(header(10)) shouldBe Right(())
++    owned.admitSubmission(header(9)).isLeft shouldBe true
++  }
++
++  it should "reject zero negative and null headers before reserving a slot" in {
++    val owned = control()
++    Seq(header(0), header(-1), null).foreach(value => owned.admitSubmission(value).isLeft shouldBe true)
++    owned.admitSubmission(header(1)) shouldBe Right(())
++    control(Some("0")).admitSubmission(header(1)).isLeft shouldBe true
++  }
++
++  it should "keep a pause pending until the exact local header is applied" in {
++    val owned = control()
++    val submitted = header(10)
++    owned.admitSubmission(submitted) shouldBe Right(())
++    owned.pause(nonce, operation) shouldBe Right(None)
++    owned.observeApplied(header(9))
++    owned.pauseCompletion shouldBe Right(None)
++    owned.observeRejected(header(9).id)
++    owned.pauseCompletion shouldBe Right(None)
++    owned.observeApplied(submitted)
++    owned.pauseCompletion shouldBe Right(Some(PauseReceipt(operation,
++      Some(Watermark(submitted.id, submitted.height)), None)))
++    owned.admitSubmission(header(11)).isLeft shouldBe true
++  }
++
++  it should "retain the applied watermark even after its pending slot was cleared" in {
++    val owned = control()
++    val first = header(10)
++    owned.admitSubmission(first) shouldBe Right(())
++    owned.observeApplied(first)
++    owned.pause(nonce, operation) shouldBe Right(Some(PauseReceipt(operation,
++      Some(Watermark(first.id, 10)), None)))
++  }
++
++  it should "advance the retained watermark only through a new exact pending header" in {
++    val owned = control()
++    val first = header(10)
++    val second = header(11)
++    owned.admitSubmission(first) shouldBe Right(())
++    owned.observeApplied(first)
++    owned.admitSubmission(first).isLeft shouldBe true
++    owned.admitSubmission(second) shouldBe Right(())
++    owned.observeApplied(second)
++    owned.pause(nonce, operation) shouldBe Right(Some(PauseReceipt(operation,
++      Some(Watermark(second.id, 11)), None)))
++  }
++
++  it should "fail permanently on an unrelated applied header at the pending height" in {
++    val owned = control()
++    val submitted = header(10)
++    owned.admitSubmission(submitted) shouldBe Right(())
++    owned.pause(nonce, operation) shouldBe Right(None)
++    owned.observeApplied(header(10, timestamp = 2L))
++    owned.submissionsClosed shouldBe true
++    owned.pauseCompletion.isLeft shouldBe true
++    owned.observeApplied(submitted)
++    owned.pauseCompletion.isLeft shouldBe true
++    owned.admitSubmission(header(11)).isLeft shouldBe true
++  }
++
++  it should "fail permanently if an unrelated application overtakes the pending height" in {
++    val owned = control()
++    owned.admitSubmission(header(10)) shouldBe Right(())
++    owned.observeApplied(header(11))
++    owned.submissionsClosed shouldBe true
++    owned.pause(nonce, operation).isLeft shouldBe true
++  }
++
++  it should "fail permanently on rejection of the exact pending submission" in {
++    val owned = control()
++    val submitted = header(10)
++    owned.admitSubmission(submitted) shouldBe Right(())
++    owned.observeRejected(submitted.id)
++    owned.submissionsClosed shouldBe true
++    owned.pause(nonce, operation).isLeft shouldBe true
++    owned.observeApplied(submitted)
++    owned.admitSubmission(header(11)).isLeft shouldBe true
++  }
++
++  it should "fail closed if an applied watermark is displaced at its own height" in {
++    val owned = control()
++    owned.admitSubmission(header(10)) shouldBe Right(())
++    owned.observeApplied(header(10))
++    owned.observeApplied(header(10, timestamp = 2L))
++    owned.submissionsClosed shouldBe true
++    owned.pause(nonce, operation).isLeft shouldBe true
++  }
++
++  it should "retain zero mining time for an empty header history" in {
++    CandidateGenerator.getBlockMiningTimeAvg(Vector.empty).toMillis shouldBe 0L
++  }
++
++  it should "initialize mining time from a single applied header without a partial pair" in {
++    CandidateGenerator.getBlockMiningTimeAvg(Vector(1000L)).toMillis shouldBe 0L
++  }
++
++  it should "retain the mining time average for complete sorted header pairs" in {
++    CandidateGenerator.getBlockMiningTimeAvg(Vector(4000L, 1000L, 2000L)).toMillis shouldBe 1500L
++  }
++
++  it should "share pending reservation across concurrent simulated owners" in {
++    val owned = control()
++    val firstOwner = owned
++    val secondOwner = owned
++    val start = new CountDownLatch(1)
++    val pool = Executors.newFixedThreadPool(2)
++    try {
++      val requests = Seq(firstOwner -> header(10), secondOwner -> header(10, timestamp = 2L)).map {
++        case (owner, candidate) => pool.submit(new Callable[Either[String, Unit]] {
++          override def call(): Either[String, Unit] = {
++            if (!start.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("test synchronization failed")
++            owner.admitSubmission(candidate)
++          }
++        })
++      }
++      start.countDown()
++      val results = requests.map(_.get(5, TimeUnit.SECONDS))
++      results.count(_.isRight) shouldBe 1
++      results.count(_.isLeft) shouldBe 1
++      secondOwner.pause(nonce, operation) shouldBe Right(None)
++      firstOwner.submissionsClosed shouldBe true
++      firstOwner.pause(nonce, operation).isLeft shouldBe true
++    } finally {
++      pool.shutdownNow()
++      pool.awaitTermination(5, TimeUnit.SECONDS) shouldBe true
++    }
++  }
++
++  Seq("", "0", "true", "1\n").zipWithIndex.foreach { case (value, index) =>
++    it should s"refuse malformed transaction permit opt-in $index" in {
++      intercept[IllegalArgumentException] {
++        fromEnvironment(Map(OwnerNonceSha256Env -> digest, TransactionPermitEnv -> value))
++      }
++    }
++  }
++
++  it should "require an owner for transaction permits and leave ordinary controls unable to arm" in {
++    intercept[IllegalArgumentException] { fromEnvironment(Map(TransactionPermitEnv -> "1")) }
++    val owned = control()
++    owned.hold(nonce, operation).isLeft shouldBe true
++    owned.submissionsClosed shouldBe false
++  }
++
++  it should "admit inclusion plus ten contiguous successors then hold without changing the terminal pause" in {
++    val owned = permitControl()
++    var parent = header(10)
++    owned.arm(nonce, permitOperation, held(owned, parent), transactionId) shouldBe Right(())
++    for (index <- 0 until TransactionApplications) {
++      owned.requiredPermitTransaction shouldBe (if (index == 0) Some(transactionId) else None)
++      val next = header(parent.height + 1).copy(parentId = parent.id)
++      owned.admitSubmission(next, if (index == 0) Seq(transactionId) else Seq.empty) shouldBe Right(())
++      owned.submissionsClosed shouldBe true
++      owned.admitSubmission(next, Seq(transactionId)).isLeft shouldBe true
++      owned.observeApplied(next)
++      parent = next
++    }
++    owned.submissionsClosed shouldBe true
++    owned.observeReaders(Some(parent), Some(parent))
++    owned.holdCompletion shouldBe Right(Some(HoldReceipt(operation, Watermark(parent.id, parent.height))))
++    owned.admitSubmission(header(22).copy(parentId = parent.id), Seq(transactionId)).isLeft shouldBe true
++    owned.pause(nonce, "34" * 32).isRight shouldBe true
++    owned.arm(nonce, "56" * 32, Watermark(parent.id, parent.height), transactionId).isLeft shouldBe true
++  }
++
++  it should "remain pending at ten applications complete at eleven and refuse twelve" in {
++    TransactionConfirmations shouldBe 10
++    TransactionApplications shouldBe 11
++    val owned = permitControl()
++    val initial = header(10)
++    val parent = held(owned, initial)
++    owned.arm(nonce, permitOperation, parent, transactionId) shouldBe Right(())
++    val tenth = applyPermit(owned, initial, 10)
++    val pending = owned.transactionPermitStatus(nonce, permitOperation, transactionId, parent,
++      (Some(tenth), Some(tenth))).toOption.get
++    pending.completed shouldBe false
++    pending.finalWatermark shouldBe None
++    owned.submissionsClosed shouldBe false
++    val eleventh = applyPermit(owned, tenth, 1)
++    owned.transactionPermitStatus(nonce, permitOperation, transactionId, parent,
++      (Some(eleventh), Some(eleventh))) shouldBe Right(pending.copy(completed = true,
++      finalWatermark = Some(Watermark(eleventh.id, initial.height + 11))))
++    owned.submissionsClosed shouldBe true
++    val twelfth = header(eleventh.height + 1).copy(parentId = eleventh.id)
++    owned.admitSubmission(twelfth, Seq(transactionId)).isLeft shouldBe true
++  }
++
++  it should "keep an earlier pending header while a hold drains" in {
++    val owned = permitControl()
++    val parent = header(10)
++    val pending = header(11).copy(parentId = parent.id)
++    owned.admitSubmission(pending) shouldBe Right(())
++    owned.hold(nonce, operation) shouldBe Right(())
++    owned.observeReaders(Some(parent), Some(parent))
++    owned.holdCompletion shouldBe Right(None)
++    owned.admitSubmission(header(12), Seq(transactionId)).isLeft shouldBe true
++    owned.observeApplied(pending)
++    owned.holdCompletion shouldBe Right(None)
++    owned.observeReaders(Some(pending), Some(parent))
++    owned.holdCompletion shouldBe Right(None)
++    owned.observeReaders(Some(pending), Some(pending))
++    owned.holdCompletion shouldBe Right(Some(HoldReceipt(operation, Watermark(pending.id, 11))))
++  }
++
++  it should "refuse wrong first transaction parent and height without consuming the permit" in {
++    val owned = permitControl()
++    val parent = header(10)
++    owned.arm(nonce, permitOperation, held(owned, parent), transactionId) shouldBe Right(())
++    val next = header(11).copy(parentId = parent.id)
++    owned.admitSubmission(next, Seq("34" * 32)).isLeft shouldBe true
++    owned.admitSubmission(header(11), Seq(transactionId)).isLeft shouldBe true
++    owned.admitSubmission(header(12).copy(parentId = parent.id), Seq(transactionId)).isLeft shouldBe true
++    owned.admitSubmission(next, Seq(transactionId)) shouldBe Right(())
++    owned.requiredPermitTransaction shouldBe Some(transactionId)
++    owned.observeApplied(next)
++    owned.requiredPermitTransaction shouldBe None
++  }
++
++  it should "refuse a permit crossing the immutable ceiling before its first emission" in {
++    val owned = permitControl(Some("20"))
++    owned.arm(nonce, permitOperation, held(owned, header(10)), transactionId).isLeft shouldBe true
++    owned.submissionsClosed shouldBe true
++  }
++
++  it should "accept exactly the ceiling and refuse overflow in a permit endpoint" in {
++    val owned = permitControl(Some("21"))
++    owned.arm(nonce, permitOperation, held(owned, header(10)), transactionId).isRight shouldBe true
++    val overflow = permitControl()
++    overflow.arm(nonce, permitOperation, held(overflow, header(Int.MaxValue - TransactionConfirmations)), transactionId).isLeft shouldBe true
++    val exactMaximum = permitControl(Some(Int.MaxValue.toString))
++    exactMaximum.arm(nonce, permitOperation, held(exactMaximum, header(Int.MaxValue - TransactionApplications)), transactionId).isRight shouldBe true
++  }
++
++  it should "retain operation replay rejection across aliases of the process control" in {
++    val owned = permitControl()
++    val parent = held(owned, header(10))
++    owned.arm(nonce, permitOperation, parent, transactionId).isRight shouldBe true
++    val replacement = owned
++    replacement.arm(nonce, permitOperation, parent, transactionId).isLeft shouldBe true
++    owned.submissionsClosed shouldBe true
++  }
++
++  it should "reject an authenticated conflicting permit and never reopen the first" in {
++    val owned = permitControl()
++    val parent = held(owned, header(10))
++    owned.arm(nonce, permitOperation, parent, transactionId).isRight shouldBe true
++    owned.arm(nonce, "34" * 32, parent, transactionId).isLeft shouldBe true
++    owned.submissionsClosed shouldBe true
++  }
++
++  it should "reject foreign authentication without poisoning the legitimate held owner" in {
++    val owned = permitControl()
++    val parent = held(owned, header(10))
++    owned.arm("00" * 32, permitOperation, parent, transactionId).isLeft shouldBe true
++    owned.arm(nonce, permitOperation, parent, transactionId).isRight shouldBe true
++  }
++
++  it should "fail closed on competing application during either held or permitted state" in {
++    for (armed <- Seq(false, true)) {
++      val owned = permitControl()
++      val parent = header(10)
++      val watermark = held(owned, parent)
++      if (armed) owned.arm(nonce, permitOperation, watermark, transactionId).isRight shouldBe true
++      owned.observeApplied(header(11).copy(parentId = parent.id))
++      owned.submissionsClosed shouldBe true
++      owned.holdCompletion.isLeft shouldBe true
++    }
++  }
++
++  it should "keep semantic rejection and terminal pause dominant over pending permit application" in {
++    for (reject <- Seq(false, true)) {
++      val owned = permitControl()
++      val parent = header(10)
++      owned.arm(nonce, permitOperation, held(owned, parent), transactionId).isRight shouldBe true
++      val pending = header(11).copy(parentId = parent.id)
++      owned.admitSubmission(pending, Seq(transactionId)).isRight shouldBe true
++      if (reject) owned.observeRejected(pending.id)
++      else owned.pause(nonce, "34" * 32) shouldBe Right(None)
++      owned.observeApplied(pending)
++      owned.submissionsClosed shouldBe true
++      owned.arm(nonce, "56" * 32, Watermark(pending.id, 11), transactionId).isLeft shouldBe true
++    }
++  }
++
++  Seq("absent hold", "wrong parent", "wrong height", "malformed transaction", "second hold").foreach { fault =>
++    it should s"refuse the isolated permit request fault $fault without reopening submissions" in {
++      val owned = permitControl()
++      val parent = header(10)
++      val watermark = Watermark(parent.id, parent.height)
++      if (fault != "absent hold") held(owned, parent)
++      val outcome = fault match {
++        case "wrong parent" => owned.arm(nonce, permitOperation, watermark.copy(headerId = "34" * 32), transactionId)
++        case "wrong height" => owned.arm(nonce, permitOperation, watermark.copy(height = 11), transactionId)
++        case "malformed transaction" => owned.arm(nonce, permitOperation, watermark, transactionId + "\n")
++        case "second hold" => owned.hold(nonce, permitOperation)
++        case _ => owned.arm(nonce, permitOperation, watermark, transactionId)
++      }
++      outcome.isLeft shouldBe true
++      owned.submissionsClosed shouldBe true
++      owned.admitSubmission(header(11).copy(parentId = parent.id), Seq(transactionId)).isLeft shouldBe true
++    }
++  }
++
++  it should "wait for a stale reader parent at hold without clearing the applied watermark" in {
++    val owned = permitControl()
++    val parent = header(10)
++    owned.admitSubmission(parent).isRight shouldBe true
++    owned.observeApplied(parent)
++    owned.hold(nonce, operation) shouldBe Right(())
++    owned.observeReaders(Some(header(9)), Some(header(9)))
++    owned.holdCompletion shouldBe Right(None)
++    owned.submissionsClosed shouldBe true
++    owned.observeReaders(Some(parent), Some(parent))
++    owned.holdCompletion shouldBe Right(Some(HoldReceipt(operation, Watermark(parent.id, 10))))
++  }
++
++  it should "bound process-lifetime request identity storage and never reopen after exhaustion" in {
++    val owned = permitControl()
++    var parent = header(10)
++    held(owned, parent)
++    for (request <- 1 until 64) {
++      val requestId = f"$request%064x"
++      owned.arm(nonce, requestId, Watermark(parent.id, parent.height), transactionId).isRight shouldBe true
++      for (_ <- 0 until TransactionApplications) {
++        val next = header(parent.height + 1).copy(parentId = parent.id)
++        owned.admitSubmission(next, Seq(transactionId)).isRight shouldBe true
++        owned.observeApplied(next)
++        parent = next
++      }
++      owned.submissionsClosed shouldBe true
++      owned.observeReaders(Some(parent), Some(parent))
++    }
++    owned.arm(nonce, "56" * 32, Watermark(parent.id, parent.height), transactionId).isLeft shouldBe true
++    owned.holdCompletion.isLeft shouldBe true
++  }
++
++  it should "close an authenticated hold before skewed readers converge" in {
++    val owned = permitControl()
++    val parent = header(10)
++    owned.hold("00" * 32, operation).isLeft shouldBe true
++    owned.submissionsClosed shouldBe false
++    owned.hold(nonce, operation) shouldBe Right(())
++    owned.observeReaders(Some(parent), Some(header(9)))
++    owned.submissionsClosed shouldBe true
++    owned.holdCompletion shouldBe Right(None)
++    owned.admitSubmission(header(11).copy(parentId = parent.id), Seq(transactionId)).isLeft shouldBe true
++    owned.observeReaders(Some(parent), Some(parent))
++    owned.holdCompletion shouldBe Right(Some(HoldReceipt(operation, Watermark(parent.id, 10))))
++  }
++
++  Seq("same height", "advanced").foreach { fault =>
++    it should s"fail closed on $fault reader conflict after hold" in {
++      val owned = permitControl()
++      val parent = header(10)
++      held(owned, parent)
++      val conflict = if (fault == "advanced") header(11) else header(10, 2L)
++      owned.observeReaders(Some(conflict), Some(parent))
++      owned.holdCompletion.isLeft shouldBe true
++      owned.observeReaders(Some(parent), Some(parent))
++      owned.holdCompletion.isLeft shouldBe true
++      owned.submissionsClosed shouldBe true
++    }
++  }
++
++  it should "claim authentication and replay before consulting arm reader bindings" in {
++    val owned = permitControl()
++    val parent = held(owned, header(10))
++    var reads = 0
++    def current: Option[Watermark] = { reads += 1; Some(parent) }
++    owned.arm("00" * 32, permitOperation, parent, transactionId, current).isLeft shouldBe true
++    reads shouldBe 0
++    owned.arm(nonce, permitOperation, parent, transactionId, current) shouldBe Right(())
++    reads shouldBe 1
++    owned.arm(nonce, permitOperation, parent.copy(height = 11), transactionId, current).isLeft shouldBe true
++    reads shouldBe 1
++    owned.submissionsClosed shouldBe true
++  }
++
++  it should "refuse an authenticated arm whose current readers no longer match the held parent" in {
++    val owned = permitControl()
++    val parent = held(owned, header(10))
++    owned.arm(nonce, permitOperation, parent, transactionId, None).isLeft shouldBe true
++    owned.submissionsClosed shouldBe true
++    owned.arm(nonce, "34" * 32, parent, transactionId, Some(parent)).isLeft shouldBe true
++  }
++
++  it should "keep status pending without reading ahead of the eleventh registered application" in {
++    val owned = permitControl()
++    val initial = header(10)
++    val parent = held(owned, initial)
++    owned.arm(nonce, permitOperation, parent, transactionId).isRight shouldBe true
++    val tenth = applyPermit(owned, initial, TransactionApplications - 1)
++    val eleventh = header(21).copy(parentId = tenth.id)
++    var reads = 0
++    def readers: (Option[Header], Option[Header]) = { reads += 1; (Some(eleventh), Some(eleventh)) }
++    val pending = TransactionPermitStatus(permitOperation, transactionId, parent, completed = false, finalWatermark = None)
++    owned.transactionPermitStatus(nonce, permitOperation, transactionId, parent, readers) shouldBe Right(pending)
++    owned.admitSubmission(eleventh, Seq.empty) shouldBe Right(())
++    for (_ <- 0 until 101) {
++      owned.transactionPermitStatus(nonce, permitOperation, transactionId, parent, readers) shouldBe Right(pending)
++    }
++    reads shouldBe 0
++    owned.observeApplied(eleventh)
++    owned.transactionPermitStatus(nonce, permitOperation, transactionId, parent, readers) shouldBe
++      Right(pending.copy(completed = true, finalWatermark = Some(Watermark(eleventh.id, 21))))
++    reads shouldBe 1
++    owned.submissionsClosed shouldBe true
++  }
++
++  it should "reread completed status and replace only the current identity on the next arm" in {
++    val owned = permitControl()
++    val initial = header(10)
++    val parent = held(owned, initial)
++    owned.arm(nonce, permitOperation, parent, transactionId).isRight shouldBe true
++    val last = applyPermit(owned, initial)
++    var reads = 0
++    def readers: (Option[Header], Option[Header]) = { reads += 1; (Some(last), Some(last)) }
++    for (_ <- 0 until 101) {
++      owned.transactionPermitStatus(nonce, permitOperation, transactionId, parent, readers).toOption.get.completed shouldBe true
++    }
++    reads shouldBe 101
++    val lag = owned.transactionPermitStatus(nonce, permitOperation, transactionId, parent, (Some(last), Some(initial)))
++    lag.toOption.get.completed shouldBe false
++    lag.toOption.get.finalWatermark shouldBe None
++    owned.transactionPermitStatus(nonce, permitOperation, transactionId, parent, readers).toOption.get.completed shouldBe true
++    val nextParent = Watermark(last.id, last.height)
++    owned.arm(nonce, "34" * 32, nextParent, transactionId).isRight shouldBe true
++    val before = reads
++    owned.transactionPermitStatus(nonce, permitOperation, transactionId, parent, readers).isLeft shouldBe true
++    reads shouldBe before
++    owned.transactionPermitStatus(nonce, "34" * 32, transactionId, nextParent, readers).toOption.get.completed shouldBe false
++    reads shouldBe before
++    owned.submissionsClosed shouldBe false
++  }
++
++  Seq("foreign nonce", "malformed operation", "stale operation", "wrong transaction", "malformed transaction",
++    "wrong parent id", "wrong parent height", "null parent").foreach { fault =>
++    it should s"refuse $fault status without reader access or changing completion" in {
++      val owned = permitControl()
++      val initial = header(10)
++      val parent = held(owned, initial)
++      owned.arm(nonce, permitOperation, parent, transactionId).isRight shouldBe true
++      val last = applyPermit(owned, initial)
++      var reads = 0
++      def readers: (Option[Header], Option[Header]) = { reads += 1; (Some(last), Some(last)) }
++      val suppliedParent = fault match {
++        case "wrong parent id" => parent.copy(headerId = "34" * 32)
++        case "wrong parent height" => parent.copy(height = parent.height + 1)
++        case "null parent" => null
++        case _ => parent
++      }
++      val suppliedOperation = if (fault == "malformed operation") permitOperation + "\n"
++        else if (fault == "stale operation") "34" * 32 else permitOperation
++      val suppliedTransaction = if (fault == "malformed transaction") transactionId + "\n"
++        else if (fault == "wrong transaction") "34" * 32 else transactionId
++      owned.transactionPermitStatus(if (fault == "foreign nonce") "00" * 32 else nonce,
++        suppliedOperation, suppliedTransaction, suppliedParent, readers).isLeft shouldBe true
++      reads shouldBe 0
++      owned.transactionPermitStatus(nonce, permitOperation, transactionId, parent, readers).toOption.get.completed shouldBe true
++      reads shouldBe 1
++    }
++  }
++
++  Seq("advanced", "conflicting", "reader failure").foreach { fault =>
++    it should s"fail completed status permanently on $fault readers" in {
++      val owned = permitControl()
++      val initial = header(10)
++      val parent = held(owned, initial)
++      owned.arm(nonce, permitOperation, parent, transactionId).isRight shouldBe true
++      val last = applyPermit(owned, initial)
++      def readers: (Option[Header], Option[Header]) = fault match {
++        case "reader failure" => throw new IllegalStateException("synthetic reader failure")
++        case "advanced" => (Some(header(last.height + 1)), Some(last))
++        case _ => (Some(last), Some(header(last.height, 2L)))
++      }
++      owned.transactionPermitStatus(nonce, permitOperation, transactionId, parent, readers).isLeft shouldBe true
++      owned.transactionPermitStatus(nonce, permitOperation, transactionId, parent,
++        (Some(last), Some(last))).isLeft shouldBe true
++      owned.submissionsClosed shouldBe true
++    }
++  }
++
++  Seq("pause", "rejection").foreach { fault =>
++    it should s"keep $fault dominant over status without reading readers" in {
++      val owned = permitControl()
++      val initial = header(10)
++      val parent = held(owned, initial)
++      owned.arm(nonce, permitOperation, parent, transactionId).isRight shouldBe true
++      val pending = header(11).copy(parentId = initial.id)
++      owned.admitSubmission(pending, Seq(transactionId)).isRight shouldBe true
++      if (fault == "pause") owned.pause(nonce, "34" * 32) shouldBe Right(None)
++      else owned.observeRejected(pending.id)
++      var reads = 0
++      def readers: (Option[Header], Option[Header]) = { reads += 1; (Some(pending), Some(pending)) }
++      owned.transactionPermitStatus(nonce, permitOperation, transactionId, parent, readers).isLeft shouldBe true
++      reads shouldBe 0
++      owned.submissionsClosed shouldBe true
++    }
++  }
++}

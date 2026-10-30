@@ -115,6 +115,13 @@ export const STORAGE_RENT_SURFACE_INVENTORY = Object.freeze([
     'every successor binds a federation-authorized checkpoint and tracker transition',
   ),
   surface(
+    'substrate-federated-spv-tracker-v2',
+    'SPVTrackerSubstrateFederatedV2.es',
+    'candidate',
+    'semantic-transition-only',
+    'every successor binds a federation-authorized checkpoint and absolute-height anchor admission',
+  ),
+  surface(
     'double-unlock-prevention-v1',
     'DoubleUnlockPrevention.es',
     'active-compatibility',
@@ -323,6 +330,13 @@ export const STORAGE_RENT_SURFACE_INVENTORY = Object.freeze([
     'preactivation',
     'value-transition-only',
     'ordinary spends change V6 reserve value through a deposit or payout transition',
+  ),
+  surface(
+    'main-chain-pooled-reserve-validity-application-v7',
+    'MainChainPooledReserveValidityApplicationV7.es',
+    'preactivation',
+    'value-transition-only',
+    'ordinary spends change V7 reserve value through a deposit or payout transition',
   ),
 ] as const);
 

@@ -114,7 +114,6 @@ describe('authority-safe devnet acceptance CLI history mode', () => {
     const outputInsideWorktree = join(
       process.cwd(),
       '..',
-      '..',
       'fed6g1d-history-output',
     );
 

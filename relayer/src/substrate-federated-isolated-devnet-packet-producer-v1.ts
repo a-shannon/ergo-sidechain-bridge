@@ -1,10 +1,4 @@
-import {
-  createHash,
-  createPublicKey,
-  generateKeyPairSync,
-  sign,
-  type KeyObject,
-} from 'node:crypto';
+import { createHash } from 'node:crypto';
 import {
   lstatSync,
   readFileSync,
@@ -13,6 +7,13 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 
+import {
+  createSubstrateFederatedIsolatedDevnetPacketProductionFailureV1,
+  type SubstrateFederatedIsolatedDevnetPacketProductionPhaseV1,
+} from './relayer-core/substrate-federated-isolated-devnet-packet-production-phase-v1.js';
+import {
+  decodePegInSourceIntentV2Hex,
+} from './peg-in-causal-admission-v2.js';
 import {
   buildSubstrateFederatedCheckpointProfileV1,
 } from './profiles/substrate-federated-v1/checkpoint-statement.js';
@@ -26,30 +27,63 @@ import {
 } from './substrate-federated-authority-safe-devnet-history-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetContractArtifactsV1Provenance,
+  assertSubstrateFederatedIsolatedDevnetContractArtifactsV2Provenance,
   collectSubstrateFederatedIsolatedDevnetContractArtifactsV1,
+  collectSubstrateFederatedIsolatedDevnetContractArtifactsV2,
 } from './substrate-federated-isolated-devnet-contract-artifacts-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1Provenance,
+  assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2Provenance,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_HISTORY_ARTIFACTS_V1_SCHEMA,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_HISTORY_ARTIFACTS_V2_SCHEMA,
   type SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1,
+  type SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2,
 } from './substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js';
 import {
   buildSubstrateFederatedIsolatedDevnetErgoHistoryV1,
   buildSubstrateFederatedIsolatedDevnetLaunchBaselineV1,
+  buildSubstrateFederatedIsolatedDevnetLaunchBaselineV2,
   buildSubstrateFederatedIsolatedDevnetLaunchStatementV1,
+  buildSubstrateFederatedIsolatedDevnetLaunchStatementV2,
   buildSubstrateFederatedIsolatedDevnetRelayerClosureV1,
   deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1,
-  type SubstrateFederatedIsolatedDevnetLaunchSignatureV1,
+  deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV2,
+  type SubstrateFederatedIsolatedDevnetLaunchStatementV1,
+  type SubstrateFederatedIsolatedDevnetLaunchStatementV2,
 } from './substrate-federated-isolated-devnet-launch-v1.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
+  assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2,
+} from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
+import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ATTESTATION_PACKET_V1_SCHEMA,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ATTESTATION_PACKET_V2_SCHEMA,
   replaySubstrateFederatedIsolatedDevnetPortableV1,
+  replaySubstrateFederatedIsolatedDevnetPortableV2,
   type ReplaySubstrateFederatedIsolatedDevnetPortableV1Input,
   type SubstrateFederatedIsolatedDevnetPortableReplayV1,
+  type SubstrateFederatedIsolatedDevnetPortableReplayV2,
 } from './substrate-federated-isolated-devnet-portable-replay-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance,
   type SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2,
-} from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
+} from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
+import {
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_KEY_COUNT_V1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_THRESHOLD_V1,
+  assertSubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1Provenance,
+  assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2Provenance,
+  assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1Provenance,
+  assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2Provenance,
+  createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1,
+  createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
+  type ProduceSubstrateFederatedIsolatedDevnetCheckpointAttestationV1Input,
+  type ProduceSubstrateFederatedIsolatedDevnetMintSourceProofV2Input,
+  type SubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1,
+  type SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2,
+  type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV1,
+  type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
+} from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
 import {
   produceSubstrateFederatedIsolatedDevnetRelayerArtifactsV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_RELAYER_ARTIFACT_FILES_V1,
@@ -60,21 +94,50 @@ import {
   compileSubstrateFederatedSettlementFamilyWithPinnedJvmV1,
 } from './substrate-federated-settlement-family-jvm-compiler-v1.js';
 import {
+  SUBSTRATE_FEDERATED_SETTLEMENT_FAMILY_V1_SCHEMA,
+  decodeSubstrateFederatedSettlementFamilyV1Profile,
+  type SubstrateFederatedSettlementFamilyV1Profile,
+} from './substrate-federated-settlement-family-v1.js';
+import {
   compileSubstrateFederatedTrackerWithPinnedJvmV1,
 } from './substrate-federated-tracker-jvm-compiler-v1.js';
 import {
   buildSubstrateFederatedTrackerCompilerRequestV1,
 } from './substrate-federated-tracker-compiler-v1.js';
+import { compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2 }
+  from './substrate-federated-settlement-family-jvm-compiler-v2.js';
+import { compileSubstrateFederatedTrackerWithPinnedJvmV2 }
+  from './substrate-federated-tracker-jvm-compiler-v2.js';
+import { buildSubstrateFederatedTrackerCompilerRequestV2 }
+  from './substrate-federated-tracker-compiler-v2.js';
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-packet-producer.v1' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V2_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-packet-producer.v2' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V3_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-packet-producer.v3' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_MINT_SOURCE_PROOF_V2_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-packet-mint-source-proof.v2' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_CHECKPOINT_ATTESTATION_V3_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-packet-checkpoint-attestation.v3' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_RELAYER_LINEAGE_V1_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-packet-relayer-lineage.v1' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_KEY_COUNT =
-  3 as const;
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_KEY_COUNT_V1;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_THRESHOLD =
-  2 as const;
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_THRESHOLD_V1;
 
 const RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V1';
+const RECEIPT_V2_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V2';
+const RECEIPT_V3_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V3';
+const PACKET_MINT_SOURCE_PROOF_V2_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_MINT_SOURCE_PROOF_V2';
+const PACKET_CHECKPOINT_ATTESTATION_V3_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_CHECKPOINT_ATTESTATION_V3';
 const SOURCE_NETWORK_ID_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_NETWORK_ID_V1';
 const SIDECHAIN_ID_DOMAIN =
@@ -83,6 +146,8 @@ const RUNTIME_PROFILE_ID_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_RUNTIME_PROFILE_ID_V1';
 const SETTLEMENT_PROFILE_ID_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETTLEMENT_PROFILE_ID_V1';
+const SETTLEMENT_PROFILE_ID_V2_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETTLEMENT_PROFILE_ID_V2';
 const ACTIVATION_GENERATION_ID_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ACTIVATION_GENERATION_ID_V1';
 const ARTIFACT_SET_DIGEST_DOMAIN =
@@ -92,11 +157,41 @@ const MAX_ADMISSION_VALIDITY_BLOCKS = '64';
 const ERGO_ADMISSION_THRESHOLD = 1 as const;
 const MAX_ARTIFACT_BYTES = 16 * 1024 * 1024;
 const RESULTS = new WeakSet<object>();
+const RESULTS_V2 = new WeakSet<object>();
+const RESULTS_V3 = new WeakSet<object>();
+const PACKET_MINT_SOURCE_PROOF_V2_RECEIPTS = new WeakSet<object>();
+const PACKET_CHECKPOINT_ATTESTATION_V3_RECEIPTS = new WeakMap<
+  object,
+  Readonly<{
+    readonly packet: RetainedPacket;
+    readonly mintSourceProof:
+      Readonly<SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2>;
+    readonly checkpointAttestation:
+      Readonly<SubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1>;
+  }>
+>();
+const MINT_CONTINUATION_BINDINGS = new WeakMap<
+  object,
+  Readonly<PacketMintContinuationBindingV1>
+>();
+const PACKET_RELAYER_LINEAGES = new WeakMap<
+  object,
+  Readonly<SubstrateFederatedIsolatedDevnetPacketRelayerLineageV1>
+>();
+const RELAYER_LINEAGE_PACKETS = new WeakMap<object, object>();
+const CLAIMED_RELAYER_LINEAGE_PACKETS = new WeakSet<object>();
+const CONSUMED_PACKET_RELAYER_LINEAGES = new WeakSet<object>();
 
-type SourceSigner = Readonly<{
-  readonly privateKey: KeyObject;
-  readonly publicKeyHex: string;
-}>;
+interface PacketMintContinuationBindingV1 {
+  readonly targetDescriptorDigestHex: string;
+  readonly settlementFamilyProfile:
+    Readonly<SubstrateFederatedSettlementFamilyV1Profile>;
+  readonly sourceNetworkIdHex: string;
+  readonly sidechainIdHex: string;
+  readonly bridgeAddressHex: string;
+  readonly tokenAddressHex: string;
+  readonly settlementProfileIdHex: string;
+}
 
 interface ByteArtifactV1 {
   readonly sizeBytes: number;
@@ -107,7 +202,10 @@ export interface ProduceSubstrateFederatedIsolatedDevnetPacketV1Input {
   readonly sourceHistory:
     Readonly<SubstrateFederatedAuthoritySafeDevnetHistoryV1>;
   readonly ergoHistory:
-    Readonly<SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1>;
+    Readonly<
+      | SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1
+      | SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2
+    >;
   readonly expectedProfilePins: Readonly<{
     readonly federationProfileIdHex: string;
     readonly sourceAttestationKeySetDigestHex: string;
@@ -185,6 +283,15 @@ export interface SubstrateFederatedIsolatedDevnetPacketV1 {
     Readonly<SubstrateFederatedIsolatedDevnetPortableReplayV1>;
 }
 
+export interface SubstrateFederatedIsolatedDevnetPacketRelayerLineageV1 {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_RELAYER_LINEAGE_V1_SCHEMA;
+  readonly version: 1;
+  readonly headCommitSha1Hex: string;
+  readonly relayerArtifactSetDigestHex: string;
+  readonly packetReceiptDigestHex: string;
+}
+
 export interface SubstrateFederatedIsolatedDevnetPacketSessionV1 {
   readonly signer:
     Readonly<SubstrateFederatedIsolatedDevnetPacketSignerBindingV1>;
@@ -193,6 +300,174 @@ export interface SubstrateFederatedIsolatedDevnetPacketSessionV1 {
     input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>,
   ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetPacketV1>>;
 }
+
+export type SubstrateFederatedIsolatedDevnetPacketV2 = Readonly<
+  Omit<SubstrateFederatedIsolatedDevnetPacketV1, 'receipt'> & {
+    readonly receipt: Readonly<
+      Omit<
+        SubstrateFederatedIsolatedDevnetPacketV1['receipt'],
+        'schema' | 'version' | 'boundaries'
+      > & {
+        readonly schema:
+          typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V2_SCHEMA;
+        readonly version: 2;
+        readonly boundaries: Readonly<
+          Omit<
+            SubstrateFederatedIsolatedDevnetPacketV1['receipt']['boundaries'],
+            'sourceAttestationPrivateKeysRetainedAfterPacket'
+          > & {
+            readonly sourceAttestationPrivateKeysRetainedAfterPacket: true;
+          }
+        >;
+      }
+    >;
+  }
+>;
+
+export interface SubstrateFederatedIsolatedDevnetPacketV3
+  extends Omit<SubstrateFederatedIsolatedDevnetPacketV2, 'receipt' | 'replay'> {
+  readonly receipt: Readonly<Omit<SubstrateFederatedIsolatedDevnetPacketV2['receipt'], 'schema' | 'version'> & {
+    readonly schema: typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V3_SCHEMA;
+    readonly version: 3;
+  }>;
+  readonly replay: Readonly<SubstrateFederatedIsolatedDevnetPortableReplayV2>;
+}
+
+type RetainedPacket = Readonly<SubstrateFederatedIsolatedDevnetPacketV2 | SubstrateFederatedIsolatedDevnetPacketV3>;
+
+export interface SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2 {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_MINT_SOURCE_PROOF_V2_SCHEMA;
+  readonly version: 2;
+  readonly status: 'packet_bound_collected_federated_source_proof_produced';
+  readonly packetReceiptDigestHex: string;
+  readonly targetDescriptorDigestHex: string;
+  readonly sourceProofReceiptDigestHex: string;
+  readonly sourceProof:
+    Readonly<SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2>;
+  readonly checks: Readonly<{
+    readonly exactPacketObjectBound: true;
+    readonly packetProvenanceRevalidatedImmediatelyBeforeSigning: true;
+    readonly exactTargetDescriptorBound: true;
+    readonly exactSourceProofReceiptBound: true;
+    readonly exactSourceEvidenceReceiptBound: true;
+    readonly callerSuppliedTargetOrRuntimeAuthorityAccepted: false;
+    readonly oneShotContinuationConsumed: true;
+  }>;
+  readonly receiptDigestHex: string;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPacketContinuationSessionV2 {
+  readonly signer:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketSignerBindingV1>;
+  readonly dispose: () => void;
+  readonly produce: (
+    input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetPacketV2>>;
+  readonly produceMintSourceProof: (
+    packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+    input: Readonly<
+      ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input
+    >,
+  ) => Readonly<
+    SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2
+  >;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3 {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_CHECKPOINT_ATTESTATION_V3_SCHEMA;
+  readonly version: 3;
+  readonly status: 'packet_mint_bound_synthetic_federated_checkpoint_attested';
+  readonly packetReceiptDigestHex: string;
+  readonly mintSourceProofReceiptDigestHex: string;
+  readonly sourceProofReceiptDigestHex: string;
+  readonly targetDescriptorDigestHex: string;
+  readonly checkpointAttestation:
+    Readonly<SubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1>;
+  readonly checks: Readonly<{
+    readonly exactPacketObjectBound: true;
+    readonly exactMintSourceProofReceiptObjectBound: true;
+    readonly packetAndMintProvenanceRevalidatedImmediatelyBeforeCheckpoint: true;
+    readonly exactTargetDescriptorBound: true;
+    readonly packetThenMintThenCheckpointOrderingEstablished: true;
+    readonly exactCheckpointAttestationReceiptBound: true;
+    readonly oneShotContinuationConsumed: true;
+  }>;
+  readonly boundary: Readonly<{
+    readonly processOwnedSyntheticCustodyOnly: true;
+    readonly thresholdSourceAttestationVerified: true;
+    readonly independentAttestorCustodyEstablished: false;
+    readonly packetMintBeforeCheckpointLifecycleEstablished: true;
+    readonly applicationBurnReceiptBound: false;
+    readonly sourceConsensusIndependentlyVerified: false;
+    readonly deterministicSourceFinalityEstablished: false;
+    readonly ergoAnchorEstablished: false;
+    readonly trackerAdmissionEstablished: false;
+    readonly replayInsertionEstablished: false;
+    readonly payoutAuthorized: false;
+    readonly ergoTransactionSigningAuthorized: false;
+    readonly submissionAuthorized: false;
+    readonly broadcastAuthorized: false;
+    readonly fundsAuthorityEstablished: false;
+    readonly gate5Closed: false;
+    readonly trustlessStatusEstablished: false;
+    readonly productionReadinessEstablished: false;
+  }>;
+  readonly limitations: readonly string[];
+  readonly receiptDigestHex: string;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3 {
+  readonly signer:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketSignerBindingV1>;
+  readonly dispose: () => void;
+  readonly produce: (
+    input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetPacketV2>>;
+  readonly produceMintSourceProof: (
+    packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+    input: Readonly<
+      ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input
+    >,
+  ) => Readonly<
+    SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2
+  >;
+  readonly produceCheckpointAttestation: (
+    packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+    mintSourceProof: Readonly<
+      SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2
+    >,
+    input: Readonly<
+      ProduceSubstrateFederatedIsolatedDevnetCheckpointAttestationV1Input
+    >,
+  ) => Readonly<
+    SubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3
+  >;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV4 {
+  readonly signer: Readonly<SubstrateFederatedIsolatedDevnetPacketSignerBindingV1>;
+  readonly dispose: () => void;
+  readonly produce: (input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>) =>
+    Promise<Readonly<SubstrateFederatedIsolatedDevnetPacketV3>>;
+  readonly produceMintSourceProof: (packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV3>,
+    input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input>) =>
+    Readonly<SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2>;
+  readonly produceCheckpointAttestation: (packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV3>,
+    mintSourceProof: Readonly<SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2>,
+    input: Readonly<ProduceSubstrateFederatedIsolatedDevnetCheckpointAttestationV1Input>) =>
+    Readonly<SubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3>;
+}
+
+export type ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input =
+  Pick<
+    ProduceSubstrateFederatedIsolatedDevnetMintSourceProofV2Input,
+    | 'draft'
+    | 'evidenceReceipt'
+    | 'issuedAtNativeHeight'
+    | 'expiresAtNativeHeight'
+  >;
 
 /** Creates a one-use 2-of-3 source-attestation capability for one exact packet. */
 export function createSubstrateFederatedIsolatedDevnetPacketSessionV1(
@@ -203,18 +478,16 @@ export function createSubstrateFederatedIsolatedDevnetPacketSessionV1(
   assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
     ergoAdmissionSigner,
   );
-  let signers = Array.from(
-    { length: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_KEY_COUNT },
-    sourceSigner,
-  ).sort((left, right) => compareStrings(
-    left.publicKeyHex,
-    right.publicKeyHex,
-  ));
+  const sourceAttestation =
+    createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1({
+      ergoAdmissionThreshold: ERGO_ADMISSION_THRESHOLD,
+      ergoAdmissionPublicKeysHex: [ergoAdmissionSigner.publicKeyHex],
+    });
   const signer = deepFreeze({
     sourceAttestationThreshold:
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_THRESHOLD,
+      sourceAttestation.binding.sourceAttestationThreshold,
     sourceAttestationPublicKeysHex:
-      signers.map(value => value.publicKeyHex),
+      sourceAttestation.binding.sourceAttestationPublicKeysHex,
     ergoAdmissionThreshold: ERGO_ADMISSION_THRESHOLD,
     ergoAdmissionPublicKeysHex: [ergoAdmissionSigner.publicKeyHex],
   });
@@ -226,7 +499,7 @@ export function createSubstrateFederatedIsolatedDevnetPacketSessionV1(
         throw new Error('isolated packet session is running');
       }
       if (state === 'open') {
-        signers = [];
+        sourceAttestation.dispose();
         state = 'closed';
       }
     },
@@ -241,13 +514,480 @@ export function createSubstrateFederatedIsolatedDevnetPacketSessionV1(
         assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
           ergoAdmissionSigner,
         );
-        return await producePacket(input, signers, signer);
+        assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1Provenance(
+          sourceAttestation,
+        );
+        return await producePacketV1(input, sourceAttestation, signer);
       } finally {
-        signers = [];
+        sourceAttestation.dispose();
         state = 'closed';
       }
     },
   });
+}
+
+export function createSubstrateFederatedIsolatedDevnetPacketContinuationSessionV2(
+  ergoAdmissionSigner: Readonly<
+    SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2
+  >,
+): Readonly<SubstrateFederatedIsolatedDevnetPacketContinuationSessionV2> {
+  assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
+    ergoAdmissionSigner,
+  );
+  const sourceAttestation =
+    createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2({
+      ergoAdmissionThreshold: ERGO_ADMISSION_THRESHOLD,
+      ergoAdmissionPublicKeysHex: [ergoAdmissionSigner.publicKeyHex],
+    });
+  const signer = deepFreeze({
+    sourceAttestationThreshold:
+      sourceAttestation.binding.sourceAttestationThreshold,
+    sourceAttestationPublicKeysHex:
+      sourceAttestation.binding.sourceAttestationPublicKeysHex,
+    ergoAdmissionThreshold: ERGO_ADMISSION_THRESHOLD,
+    ergoAdmissionPublicKeysHex: [ergoAdmissionSigner.publicKeyHex],
+  });
+  let state:
+    | 'fresh'
+    | 'packet_running'
+    | 'packet_ready'
+    | 'proof_running'
+    | 'closed' = 'fresh';
+  let completedPacket:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketV2> | undefined;
+  let completedPacketBinding:
+    Readonly<PacketMintContinuationBindingV1> | undefined;
+  return Object.freeze({
+    signer,
+    dispose: () => {
+      if (state === 'packet_running' || state === 'proof_running') {
+        throw new Error('isolated packet continuation session is running');
+      }
+      if (state !== 'closed') {
+        sourceAttestation.dispose();
+        completedPacket = undefined;
+        completedPacketBinding = undefined;
+        state = 'closed';
+      }
+    },
+    produce: async (
+      input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>,
+    ) => {
+      if (state !== 'fresh') {
+        throw new Error(
+          'isolated packet continuation session is already consumed or disposed',
+        );
+      }
+      state = 'packet_running';
+      try {
+        assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
+          ergoAdmissionSigner,
+        );
+        assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2Provenance(
+          sourceAttestation,
+        );
+        const packet = await producePacketV2(
+          input,
+          sourceAttestation,
+          signer,
+        );
+        const mintContinuationBinding = MINT_CONTINUATION_BINDINGS.get(packet);
+        if (mintContinuationBinding === undefined) {
+          throw new Error('isolated packet mint-continuation binding is missing');
+        }
+        completedPacket = packet;
+        completedPacketBinding = mintContinuationBinding;
+        state = 'packet_ready';
+        return packet;
+      } catch (error) {
+        sourceAttestation.dispose();
+        state = 'closed';
+        throw error;
+      }
+    },
+    produceMintSourceProof: (
+      packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+      input: Readonly<
+        ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input
+      >,
+    ) => {
+      if (state !== 'packet_ready') {
+        throw new Error(
+          'isolated packet mint source-proof requires one completed packet and is already consumed or disposed',
+        );
+      }
+      state = 'proof_running';
+      try {
+        return producePacketBoundMintSourceProofV2({
+          packet,
+          completedPacket,
+          completedPacketBinding,
+          input,
+          ergoAdmissionSigner,
+          sourceAttestation,
+        });
+      } finally {
+        sourceAttestation.dispose();
+        completedPacket = undefined;
+        completedPacketBinding = undefined;
+        state = 'closed';
+      }
+    },
+  });
+}
+
+export function createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3(
+  ergoAdmissionSigner: Readonly<
+    SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2
+  >,
+): Readonly<
+  SubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3
+> {
+  return createCheckpointContinuationSession(ergoAdmissionSigner, 1) as
+    Readonly<SubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3>;
+}
+
+export function createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV4(
+  ergoAdmissionSigner: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2>,
+): Readonly<SubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV4> {
+  return createCheckpointContinuationSession(ergoAdmissionSigner, 2) as
+    Readonly<SubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV4>;
+}
+
+function createCheckpointContinuationSession(
+  ergoAdmissionSigner: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2>,
+  launchVersion: 1 | 2,
+) {
+  assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
+    ergoAdmissionSigner,
+  );
+  const sourceAttestation =
+    createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2({
+      ergoAdmissionThreshold: ERGO_ADMISSION_THRESHOLD,
+      ergoAdmissionPublicKeysHex: [ergoAdmissionSigner.publicKeyHex],
+    });
+  const signer = deepFreeze({
+    sourceAttestationThreshold:
+      sourceAttestation.binding.sourceAttestationThreshold,
+    sourceAttestationPublicKeysHex:
+      sourceAttestation.binding.sourceAttestationPublicKeysHex,
+    ergoAdmissionThreshold: ERGO_ADMISSION_THRESHOLD,
+    ergoAdmissionPublicKeysHex: [ergoAdmissionSigner.publicKeyHex],
+  });
+  let state:
+    | 'fresh'
+    | 'packet_running'
+    | 'packet_ready'
+    | 'proof_running'
+    | 'mint_ready'
+    | 'checkpoint_running'
+    | 'closed' = 'fresh';
+  let completedPacket: RetainedPacket | undefined;
+  let completedPacketBinding:
+    Readonly<PacketMintContinuationBindingV1> | undefined;
+  let completedMintSourceProof:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2>
+    | undefined;
+  const clear = (): void => {
+    completedPacket = undefined;
+    completedPacketBinding = undefined;
+    completedMintSourceProof = undefined;
+  };
+  return Object.freeze({
+    signer,
+    dispose: () => {
+      if (
+        state === 'packet_running'
+        || state === 'proof_running'
+        || state === 'checkpoint_running'
+      ) {
+        throw new Error('isolated packet checkpoint session is running');
+      }
+      if (state !== 'closed') {
+        sourceAttestation.dispose();
+        clear();
+        state = 'closed';
+      }
+    },
+    produce: async (
+      input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>,
+    ) => {
+      if (state !== 'fresh') {
+        throw new Error(
+          'isolated packet checkpoint session is already consumed or disposed',
+        );
+      }
+      state = 'packet_running';
+      try {
+        assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
+          ergoAdmissionSigner,
+        );
+        assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2Provenance(
+          sourceAttestation,
+        );
+        const packet = launchVersion === 1
+          ? await producePacketV2(input, sourceAttestation, signer)
+          : await producePacket(input, sourceAttestation, signer, 'v3');
+        const mintContinuationBinding = MINT_CONTINUATION_BINDINGS.get(packet);
+        if (mintContinuationBinding === undefined) {
+          throw new Error('isolated packet mint-continuation binding is missing');
+        }
+        completedPacket = packet;
+        completedPacketBinding = mintContinuationBinding;
+        state = 'packet_ready';
+        return packet;
+      } catch (error) {
+        sourceAttestation.dispose();
+        clear();
+        state = 'closed';
+        throw error;
+      }
+    },
+    produceMintSourceProof: (
+      packet: RetainedPacket,
+      input: Readonly<
+        ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input
+      >,
+    ) => {
+      if (state !== 'packet_ready') {
+        throw new Error(
+          'isolated packet mint source-proof requires one completed packet and is already consumed or disposed',
+        );
+      }
+      state = 'proof_running';
+      try {
+        const receipt = producePacketBoundMintSourceProofV2({
+          packet,
+          completedPacket,
+          completedPacketBinding,
+          input,
+          ergoAdmissionSigner,
+          sourceAttestation,
+        });
+        completedMintSourceProof = receipt;
+        state = 'mint_ready';
+        return receipt;
+      } catch (error) {
+        sourceAttestation.dispose();
+        clear();
+        state = 'closed';
+        throw error;
+      }
+    },
+    produceCheckpointAttestation: (
+      packet: RetainedPacket,
+      mintSourceProof: Readonly<
+        SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2
+      >,
+      input: Readonly<
+        ProduceSubstrateFederatedIsolatedDevnetCheckpointAttestationV1Input
+      >,
+    ) => {
+      if (state !== 'mint_ready') {
+        throw new Error(
+          'isolated packet checkpoint attestation requires one completed mint source-proof and is already consumed or disposed',
+        );
+      }
+      state = 'checkpoint_running';
+      try {
+        if (
+          packet !== completedPacket
+          || mintSourceProof !== completedMintSourceProof
+          || completedPacketBinding === undefined
+        ) {
+          throw new Error(
+            'isolated packet checkpoint attestation targets a different packet or mint source-proof',
+          );
+        }
+        assertRetainedPacket(packet);
+        assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
+          mintSourceProof,
+        );
+        assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
+          ergoAdmissionSigner,
+        );
+        assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2Provenance(
+          sourceAttestation,
+        );
+        if (
+          mintSourceProof.packetReceiptDigestHex
+            !== packet.receipt.receiptDigestHex
+          || mintSourceProof.targetDescriptorDigestHex
+            !== packet.receipt.targetDescriptorDigestHex
+          || mintSourceProof.targetDescriptorDigestHex
+            !== completedPacketBinding.targetDescriptorDigestHex
+        ) {
+          throw new Error(
+            'isolated packet checkpoint attestation packet or target binding drifted',
+          );
+        }
+        const checkpointAttestation =
+          sourceAttestation.produceCheckpointAttestation(input);
+        assertSubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1Provenance(
+          checkpointAttestation,
+        );
+        if (
+          checkpointAttestation.targetDescriptorDigestHex
+            !== packet.receipt.targetDescriptorDigestHex
+        ) {
+          throw new Error(
+            'isolated packet checkpoint attestation target binding drifted',
+          );
+        }
+        const body = deepFreeze({
+          schema:
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_CHECKPOINT_ATTESTATION_V3_SCHEMA,
+          version: 3 as const,
+          status:
+            'packet_mint_bound_synthetic_federated_checkpoint_attested' as const,
+          packetReceiptDigestHex: packet.receipt.receiptDigestHex,
+          mintSourceProofReceiptDigestHex: mintSourceProof.receiptDigestHex,
+          sourceProofReceiptDigestHex:
+            mintSourceProof.sourceProofReceiptDigestHex,
+          targetDescriptorDigestHex:
+            packet.receipt.targetDescriptorDigestHex,
+          checkpointAttestation,
+          checks: {
+            exactPacketObjectBound: true as const,
+            exactMintSourceProofReceiptObjectBound: true as const,
+            packetAndMintProvenanceRevalidatedImmediatelyBeforeCheckpoint:
+              true as const,
+            exactTargetDescriptorBound: true as const,
+            packetThenMintThenCheckpointOrderingEstablished: true as const,
+            exactCheckpointAttestationReceiptBound: true as const,
+            oneShotContinuationConsumed: true as const,
+          },
+          boundary: {
+            processOwnedSyntheticCustodyOnly: true as const,
+            thresholdSourceAttestationVerified: true as const,
+            independentAttestorCustodyEstablished: false as const,
+            packetMintBeforeCheckpointLifecycleEstablished: true as const,
+            applicationBurnReceiptBound: false as const,
+            sourceConsensusIndependentlyVerified: false as const,
+            deterministicSourceFinalityEstablished: false as const,
+            ergoAnchorEstablished: false as const,
+            trackerAdmissionEstablished: false as const,
+            replayInsertionEstablished: false as const,
+            payoutAuthorized: false as const,
+            ergoTransactionSigningAuthorized: false as const,
+            submissionAuthorized: false as const,
+            broadcastAuthorized: false as const,
+            fundsAuthorityEstablished: false as const,
+            gate5Closed: false as const,
+            trustlessStatusEstablished: false as const,
+            productionReadinessEstablished: false as const,
+          },
+          limitations: [
+            'The packet and mint proof precede this checkpoint under one synthetic process-owned session, but no application-burn receipt is bound yet.',
+            'The checkpoint attestation is a disclosed federated policy decision, not independently verified source consensus or deterministic finality.',
+            'Ergo anchoring, tracker admission, global replay insertion and payout remain separate joins.',
+            'No signing, submission, broadcast, funds authority, Gate 5 closure, trustless status or production readiness follows.',
+          ] as const,
+        });
+        const receipt = deepFreeze({
+          ...body,
+          receiptDigestHex: sha256CanonicalJson(
+            body,
+            PACKET_CHECKPOINT_ATTESTATION_V3_DIGEST_DOMAIN,
+          ),
+        });
+        PACKET_CHECKPOINT_ATTESTATION_V3_RECEIPTS.set(receipt, Object.freeze({
+          packet,
+          mintSourceProof,
+          checkpointAttestation,
+        }));
+        return receipt;
+      } finally {
+        sourceAttestation.dispose();
+        clear();
+        state = 'closed';
+      }
+    },
+  });
+}
+
+function producePacketBoundMintSourceProofV2(input: Readonly<{
+  packet: RetainedPacket;
+  completedPacket: RetainedPacket | undefined;
+  completedPacketBinding:
+    Readonly<PacketMintContinuationBindingV1> | undefined;
+  input: Readonly<
+    ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input
+  >;
+  ergoAdmissionSigner: Readonly<
+    SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2
+  >;
+  sourceAttestation: Readonly<
+    SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
+  >;
+}>): Readonly<
+  SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2
+> {
+  if (
+    input.packet !== input.completedPacket
+    || input.completedPacketBinding === undefined
+  ) {
+    throw new Error(
+      'isolated packet mint source-proof targets a different completed packet',
+    );
+  }
+  assertRetainedPacket(input.packet);
+  assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
+    input.ergoAdmissionSigner,
+  );
+  assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2Provenance(
+    input.sourceAttestation,
+  );
+  const sourceProof =
+    input.sourceAttestation.produceSettlementFamilyMintSourceProof(
+      buildMintSourceProofInputForPacket(
+        input.input,
+        input.completedPacketBinding,
+        input.packet.receipt.version,
+      ),
+    );
+  assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2Provenance(
+    sourceProof,
+  );
+  if (
+    sourceProof.targetDescriptorDigestHex
+      !== input.packet.receipt.targetDescriptorDigestHex
+    || sourceProof.targetDescriptorDigestHex
+      !== input.completedPacketBinding.targetDescriptorDigestHex
+  ) {
+    throw new Error(
+      'isolated packet mint source-proof target binding drifted',
+    );
+  }
+  const body = deepFreeze({
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_MINT_SOURCE_PROOF_V2_SCHEMA,
+    version: 2 as const,
+    status: 'packet_bound_collected_federated_source_proof_produced' as const,
+    packetReceiptDigestHex: input.packet.receipt.receiptDigestHex,
+    targetDescriptorDigestHex:
+      input.packet.receipt.targetDescriptorDigestHex,
+    sourceProofReceiptDigestHex: sourceProof.receiptDigestHex,
+    sourceProof,
+    checks: {
+      exactPacketObjectBound: true as const,
+      packetProvenanceRevalidatedImmediatelyBeforeSigning: true as const,
+      exactTargetDescriptorBound: true as const,
+      exactSourceProofReceiptBound: true as const,
+      exactSourceEvidenceReceiptBound: true as const,
+      callerSuppliedTargetOrRuntimeAuthorityAccepted: false as const,
+      oneShotContinuationConsumed: true as const,
+    },
+  });
+  const receipt = deepFreeze({
+    ...body,
+    receiptDigestHex: sha256CanonicalJson(
+      body,
+      PACKET_MINT_SOURCE_PROOF_V2_DIGEST_DOMAIN,
+    ),
+  });
+  PACKET_MINT_SOURCE_PROOF_V2_RECEIPTS.add(receipt);
+  return receipt;
 }
 
 export function assertSubstrateFederatedIsolatedDevnetPacketV1Provenance(
@@ -279,29 +1019,356 @@ export function assertSubstrateFederatedIsolatedDevnetPacketV1Provenance(
   }
 }
 
-async function producePacket(
+export function assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(
+  value: unknown,
+): asserts value is Readonly<SubstrateFederatedIsolatedDevnetPacketV2> {
+  assertRetainedPacketVersion(value, 2);
+}
+
+export function assertSubstrateFederatedIsolatedDevnetPacketV3Provenance(
+  value: unknown,
+): asserts value is Readonly<SubstrateFederatedIsolatedDevnetPacketV3> {
+  assertRetainedPacketVersion(value, 3);
+}
+
+function assertRetainedPacket(value: unknown): asserts value is RetainedPacket {
+  if (value !== null && typeof value === 'object' && RESULTS_V3.has(value)) {
+    assertSubstrateFederatedIsolatedDevnetPacketV3Provenance(value);
+  } else assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(value);
+}
+
+function assertRetainedPacketVersion(value: unknown, version: 2 | 3): asserts value is RetainedPacket {
+  if (value === null || typeof value !== 'object' || !(version === 2 ? RESULTS_V2 : RESULTS_V3).has(value)) {
+    throw new Error(`isolated portable packet V${version} lacks process provenance`);
+  }
+  const result = value as RetainedPacket;
+  const { receiptDigestHex, ...body } = result.receipt;
+  if (
+    sha256CanonicalJson(body, version === 2 ? RECEIPT_V2_DIGEST_DOMAIN : RECEIPT_V3_DIGEST_DOMAIN)
+      !== receiptDigestHex
+  ) {
+    throw new Error(`isolated portable packet V${version} receipt drifted`);
+  }
+  const actualArtifacts = artifactBindings(
+    result.portableReplayInput.artifacts as Readonly<Record<string, Uint8Array>>,
+  );
+  if (
+    canonicalJson(actualArtifacts) !== canonicalJson(result.receipt.artifacts)
+    || sha256CanonicalJson(actualArtifacts, ARTIFACT_SET_DIGEST_DOMAIN)
+      !== result.receipt.packetArtifactSetDigestHex
+    || result.portableReplayInput.trustPins.expectedTargetDescriptorDigestHex
+      !== result.receipt.targetDescriptorDigestHex
+    || result.portableReplayInput.trustPins
+      .expectedSourceAttestationKeySetDigestHex
+      !== result.receipt.sourceAttestationKeySetDigestHex
+    || result.replay.reportDigestHex !== result.receipt.replayReportDigestHex
+  ) {
+    throw new Error(`isolated portable packet V${version} content drifted`);
+  }
+}
+
+export function claimSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1(
+  packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+): Readonly<SubstrateFederatedIsolatedDevnetPacketRelayerLineageV1> {
+  assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+  return claimRelayerLineage(packet);
+}
+
+export function claimSubstrateFederatedIsolatedDevnetPacketRelayerLineageV2(
+  packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV3>,
+): Readonly<SubstrateFederatedIsolatedDevnetPacketRelayerLineageV1> {
+  assertSubstrateFederatedIsolatedDevnetPacketV3Provenance(packet);
+  return claimRelayerLineage(packet);
+}
+
+function claimRelayerLineage(packet: RetainedPacket): Readonly<SubstrateFederatedIsolatedDevnetPacketRelayerLineageV1> {
+  if (CLAIMED_RELAYER_LINEAGE_PACKETS.has(packet)) {
+    throw new Error('isolated packet relayer lineage is already claimed');
+  }
+  const lineage = PACKET_RELAYER_LINEAGES.get(packet);
+  if (lineage === undefined) {
+    throw new Error('isolated packet relayer lineage is missing');
+  }
+  CLAIMED_RELAYER_LINEAGE_PACKETS.add(packet);
+  return lineage;
+}
+
+export function assertSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1(
+  value: unknown,
+): asserts value is Readonly<
+  SubstrateFederatedIsolatedDevnetPacketRelayerLineageV1
+> {
+  if (value === null || typeof value !== 'object' || !Object.isFrozen(value)) {
+    throw new Error('isolated packet relayer lineage lacks process provenance');
+  }
+  const packet = RELAYER_LINEAGE_PACKETS.get(value);
+  const lineage = value as Readonly<
+    SubstrateFederatedIsolatedDevnetPacketRelayerLineageV1
+  >;
+  if (
+    packet === undefined
+    || !CLAIMED_RELAYER_LINEAGE_PACKETS.has(packet)
+    || PACKET_RELAYER_LINEAGES.get(packet) !== value
+    || lineage.schema
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_RELAYER_LINEAGE_V1_SCHEMA
+    || lineage.version !== 1
+    || !/^[0-9a-f]{40}$/u.test(lineage.headCommitSha1Hex)
+    || !/^[0-9a-f]{64}$/u.test(lineage.relayerArtifactSetDigestHex)
+    || !/^[0-9a-f]{64}$/u.test(lineage.packetReceiptDigestHex)
+  ) {
+    throw new Error('isolated packet relayer lineage lacks process provenance');
+  }
+  assertRetainedPacket(packet);
+  const exactPacket = packet;
+  if (
+    lineage.relayerArtifactSetDigestHex
+      !== exactPacket.receipt.relayerArtifactSetDigestHex
+    || lineage.packetReceiptDigestHex
+      !== exactPacket.receipt.receiptDigestHex
+  ) {
+    throw new Error('isolated packet relayer lineage changed');
+  }
+}
+
+export function consumeSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1(
+  lineage:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketRelayerLineageV1>,
+): Readonly<SubstrateFederatedIsolatedDevnetPacketRelayerLineageV1> {
+  assertSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1(lineage);
+  if (CONSUMED_PACKET_RELAYER_LINEAGES.has(lineage)) {
+    throw new Error('isolated packet relayer lineage is already consumed');
+  }
+  CONSUMED_PACKET_RELAYER_LINEAGES.add(lineage);
+  return lineage;
+}
+
+export function assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
+  value: unknown,
+): asserts value is Readonly<
+  SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2
+> {
+  if (
+    value === null
+    || typeof value !== 'object'
+    || !PACKET_MINT_SOURCE_PROOF_V2_RECEIPTS.has(value)
+  ) {
+    throw new Error(
+      'isolated packet mint source-proof receipt lacks process provenance',
+    );
+  }
+  const { receiptDigestHex, ...body } = value as Readonly<
+    SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2
+  >;
+  if (
+    sha256CanonicalJson(body, PACKET_MINT_SOURCE_PROOF_V2_DIGEST_DOMAIN)
+      !== receiptDigestHex
+  ) {
+    throw new Error('isolated packet mint source-proof receipt drifted');
+  }
+  assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2Provenance(
+    body.sourceProof,
+  );
+  if (
+    body.sourceProof.receiptDigestHex !== body.sourceProofReceiptDigestHex
+    || body.sourceProof.targetDescriptorDigestHex
+      !== body.targetDescriptorDigestHex
+  ) {
+    throw new Error('isolated packet mint source-proof content drifted');
+  }
+}
+
+export function assertSubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3Provenance(
+  value: unknown,
+): asserts value is Readonly<
+  SubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3
+> {
+  if (value === null || typeof value !== 'object') {
+    throw new Error(
+      'isolated packet checkpoint-attestation receipt lacks process provenance',
+    );
+  }
+  const material = PACKET_CHECKPOINT_ATTESTATION_V3_RECEIPTS.get(value);
+  if (material === undefined) {
+    throw new Error(
+      'isolated packet checkpoint-attestation receipt lacks process provenance',
+    );
+  }
+  const receipt = value as Readonly<
+    SubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3
+  >;
+  if (
+    receipt.checkpointAttestation !== material.checkpointAttestation
+    || receipt.packetReceiptDigestHex
+      !== material.packet.receipt.receiptDigestHex
+    || receipt.mintSourceProofReceiptDigestHex
+      !== material.mintSourceProof.receiptDigestHex
+    || receipt.sourceProofReceiptDigestHex
+      !== material.mintSourceProof.sourceProofReceiptDigestHex
+    || receipt.targetDescriptorDigestHex
+      !== material.packet.receipt.targetDescriptorDigestHex
+    || receipt.targetDescriptorDigestHex
+      !== material.mintSourceProof.targetDescriptorDigestHex
+    || receipt.targetDescriptorDigestHex
+      !== material.checkpointAttestation.targetDescriptorDigestHex
+  ) {
+    throw new Error('isolated packet checkpoint-attestation binding changed');
+  }
+  assertRetainedPacket(material.packet);
+  assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
+    material.mintSourceProof,
+  );
+  assertSubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1Provenance(
+    material.checkpointAttestation,
+  );
+  const { receiptDigestHex, ...body } = receipt;
+  if (
+    sha256CanonicalJson(body, PACKET_CHECKPOINT_ATTESTATION_V3_DIGEST_DOMAIN)
+      !== receiptDigestHex
+  ) {
+    throw new Error('isolated packet checkpoint-attestation receipt drifted');
+  }
+}
+
+function assertAcceptedErgoHistoryProvenance(
+  value: Readonly<
+    | SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1
+    | SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2
+  >,
+): void {
+  if (
+    value.receipt.schema
+      === SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_HISTORY_ARTIFACTS_V1_SCHEMA
+  ) {
+    assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1Provenance(
+      value,
+    );
+    return;
+  }
+  if (
+    value.receipt.schema
+      === SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_HISTORY_ARTIFACTS_V2_SCHEMA
+  ) {
+    assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2Provenance(
+      value,
+    );
+    return;
+  }
+  throw new Error('isolated Ergo history schema is unsupported');
+}
+
+async function producePacketV1(
   input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>,
-  signers: readonly SourceSigner[],
+  sourceAttestation: Readonly<
+    SubstrateFederatedIsolatedDevnetSourceAttestationSessionV1
+  >,
   signerBinding:
     Readonly<SubstrateFederatedIsolatedDevnetPacketSignerBindingV1>,
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetPacketV1>> {
+  return producePacket(input, sourceAttestation, signerBinding, 'v1');
+}
+
+async function producePacketV2(
+  input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>,
+  sourceAttestation: Readonly<
+    SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
+  >,
+  signerBinding:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketSignerBindingV1>,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPacketV2>> {
+  return producePacket(input, sourceAttestation, signerBinding, 'v2');
+}
+
+function producePacket(
+  input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>,
+  sourceAttestation: Readonly<
+    SubstrateFederatedIsolatedDevnetSourceAttestationSessionV1
+  >,
+  signerBinding:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketSignerBindingV1>,
+  mode: 'v1',
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPacketV1>>;
+function producePacket(
+  input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>,
+  sourceAttestation: Readonly<
+    SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
+  >,
+  signerBinding:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketSignerBindingV1>,
+  mode: 'v2',
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPacketV2>>;
+function producePacket(
+  input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>,
+  sourceAttestation: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>,
+  signerBinding: Readonly<SubstrateFederatedIsolatedDevnetPacketSignerBindingV1>,
+  mode: 'v3',
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPacketV3>>;
+async function producePacket(
+  input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>,
+  sourceAttestation: Readonly<
+    | SubstrateFederatedIsolatedDevnetSourceAttestationSessionV1
+    | SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
+  >,
+  signerBinding:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketSignerBindingV1>,
+  mode: 'v1' | 'v2' | 'v3',
+): Promise<Readonly<
+  | SubstrateFederatedIsolatedDevnetPacketV1
+  | SubstrateFederatedIsolatedDevnetPacketV2
+  | SubstrateFederatedIsolatedDevnetPacketV3
+>> {
+  let phase: SubstrateFederatedIsolatedDevnetPacketProductionPhaseV1 =
+    'packet input and contract binding';
+  try {
+    return await producePacketWithPhaseV1(
+      input,
+      sourceAttestation,
+      signerBinding,
+      mode,
+      nextPhase => {
+        phase = nextPhase;
+      },
+    );
+  } catch (error) {
+    throw createSubstrateFederatedIsolatedDevnetPacketProductionFailureV1(
+      phase,
+      error,
+    );
+  }
+}
+
+async function producePacketWithPhaseV1(
+  input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>,
+  sourceAttestation: Readonly<
+    | SubstrateFederatedIsolatedDevnetSourceAttestationSessionV1
+    | SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
+  >,
+  signerBinding:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketSignerBindingV1>,
+  mode: 'v1' | 'v2' | 'v3',
+  setPhase: (
+    phase: SubstrateFederatedIsolatedDevnetPacketProductionPhaseV1,
+  ) => void,
+): Promise<Readonly<
+  | SubstrateFederatedIsolatedDevnetPacketV1
+  | SubstrateFederatedIsolatedDevnetPacketV2
+  | SubstrateFederatedIsolatedDevnetPacketV3
+>> {
+  const launchVersion = mode === 'v3' ? 2 : 1;
   const captured = captureInput(input);
   assertSubstrateFederatedAuthoritySafeDevnetHistoryV1Provenance(
     captured.sourceHistory,
   );
-  assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1Provenance(
-    captured.ergoHistory,
-  );
+  assertAcceptedErgoHistoryProvenance(captured.ergoHistory);
   const sourceArtifacts = snapshotSourceHistory(captured.sourceHistory);
   const ergoArtifacts = snapshotErgoHistory(captured.ergoHistory);
   const sourceReceipt = captured.sourceHistory.receipt;
   const ergoReceipt = captured.ergoHistory.receipt;
 
-  const contracts =
-    collectSubstrateFederatedIsolatedDevnetContractArtifactsV1();
-  assertSubstrateFederatedIsolatedDevnetContractArtifactsV1Provenance(
-    contracts,
-  );
+  const contracts = launchVersion === 1
+    ? collectSubstrateFederatedIsolatedDevnetContractArtifactsV1()
+    : collectSubstrateFederatedIsolatedDevnetContractArtifactsV2();
+  if (launchVersion === 1) assertSubstrateFederatedIsolatedDevnetContractArtifactsV1Provenance(contracts);
+  else assertSubstrateFederatedIsolatedDevnetContractArtifactsV2Provenance(contracts);
   const profile = buildSubstrateFederatedCheckpointProfileV1({
     federationEpoch: FEDERATION_EPOCH,
     maxAdmissionValidityBlocks: MAX_ADMISSION_VALIDITY_BLOCKS,
@@ -313,8 +1380,8 @@ async function producePacket(
     ergoAdmissionPublicKeysHex: signerBinding.ergoAdmissionPublicKeysHex,
   });
   assertExpectedProfilePins(profile, captured.expectedProfilePins);
-  const application = deriveApplicationBinding(sourceReceipt.target);
-  const trackerRequest = buildSubstrateFederatedTrackerCompilerRequestV1({
+  const application = deriveApplicationBinding(sourceReceipt.target, launchVersion);
+  const trackerInput = {
     template: {
       relativePath: contracts.receipt.artifacts.tracker.relativePath,
       source: contracts.templates.tracker,
@@ -322,9 +1389,16 @@ async function producePacket(
     trackerGenesisInputBoxIdHex: ergoReceipt.genesisBoxIds.tracker,
     profile,
     application,
-  });
-  const trackerReceipt =
-    await compileSubstrateFederatedTrackerWithPinnedJvmV1(trackerRequest);
+  };
+  const trackerRequest = launchVersion === 1 ? buildSubstrateFederatedTrackerCompilerRequestV1(trackerInput)
+    : buildSubstrateFederatedTrackerCompilerRequestV2(trackerInput);
+  setPhase('packet tracker compilation');
+  const trackerReceipt = launchVersion === 1
+    ? await compileSubstrateFederatedTrackerWithPinnedJvmV1(
+      trackerRequest as Parameters<typeof compileSubstrateFederatedTrackerWithPinnedJvmV1>[0])
+    : await compileSubstrateFederatedTrackerWithPinnedJvmV2(
+      trackerRequest as Parameters<typeof compileSubstrateFederatedTrackerWithPinnedJvmV2>[0]);
+  setPhase('packet input and contract binding');
   const familyTemplates = {
     duplicatePrevention: {
       relativePath:
@@ -340,8 +1414,8 @@ async function producePacket(
       source: contracts.templates.pooledReserve,
     },
   };
-  const familyReceipt =
-    await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV1({
+  setPhase('packet settlement compilation');
+  const familyInput = {
       trackerRequest,
       trackerReceipt,
       templates: familyTemplates,
@@ -349,7 +1423,13 @@ async function producePacket(
         ergoReceipt.genesisBoxIds.duplicatePrevention,
       pooledReserveGenesisInputBoxIdHex:
         ergoReceipt.genesisBoxIds.pooledReserve,
-    });
+    };
+  const familyReceipt = launchVersion === 1
+    ? await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV1(
+      familyInput as Parameters<typeof compileSubstrateFederatedSettlementFamilyWithPinnedJvmV1>[0])
+    : await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2(
+      familyInput as Parameters<typeof compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2>[0]);
+  setPhase('packet input and contract binding');
   const historyBundle = {
     acceptanceReport: sourceArtifacts.acceptanceReport,
     reportedFinalizedBlocks: sourceArtifacts.reportedFinalizedBlocks,
@@ -357,7 +1437,7 @@ async function producePacket(
     applicationHistory: sourceArtifacts.applicationHistory,
     historyReceipt: sourceArtifacts.historyReceipt,
   };
-  const target = deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1({
+  const compilerInput = {
     trackerRequest,
     trackerReceipt,
     familyTemplates,
@@ -387,7 +1467,12 @@ async function producePacket(
       expectedSourceAttestationThreshold:
         profile.sourceAttestationThreshold,
     },
-  });
+  };
+  const target = launchVersion === 1
+    ? deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1(
+      compilerInput as Parameters<typeof deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1>[0])
+    : deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV2(
+      compilerInput as Parameters<typeof deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV2>[0]);
   assertGenesisInputsMatch(target.lineages, ergoReceipt.genesisBoxIds);
   const ergoHistory = buildSubstrateFederatedIsolatedDevnetErgoHistoryV1({
     target,
@@ -400,6 +1485,7 @@ async function producePacket(
     utxoTransitionsManifest: ergoArtifacts.utxoTransitions,
   });
 
+  setPhase('packet relayer artifact production');
   const relayerReceipt =
     await produceSubstrateFederatedIsolatedDevnetRelayerArtifactsV1(
       captured.relayerArtifacts,
@@ -415,6 +1501,7 @@ async function producePacket(
     captured.relayerArtifacts.destinationDirectory,
     relayerReceipt.artifacts,
   );
+  setPhase('packet launch and portable replay');
   const relayerClosure = buildSubstrateFederatedIsolatedDevnetRelayerClosureV1({
     target,
     gitCommitSha1Hex: relayerReceipt.headCommitSha1Hex,
@@ -429,24 +1516,34 @@ async function producePacket(
     ergoHistoryDigestHex: ergoHistory.historyDigestHex,
     relayerClosureDigestHex: relayerClosure.closureDigestHex,
   }, ACTIVATION_GENERATION_ID_DOMAIN);
-  const statement = buildSubstrateFederatedIsolatedDevnetLaunchStatementV1({
+  const statementInput = {
     activationGenerationIdHex,
     target,
     ergoHistory,
     relayerClosure,
-  });
-  const signatures = signExactThreshold(
-    signers,
-    statement.attestationDigestHex,
-  );
-  const baseline = buildSubstrateFederatedIsolatedDevnetLaunchBaselineV1({
-    statement,
-    signatures,
-  });
+  };
+  const statement = launchVersion === 1
+    ? buildSubstrateFederatedIsolatedDevnetLaunchStatementV1(
+      statementInput as Parameters<typeof buildSubstrateFederatedIsolatedDevnetLaunchStatementV1>[0])
+    : buildSubstrateFederatedIsolatedDevnetLaunchStatementV2(
+      statementInput as Parameters<typeof buildSubstrateFederatedIsolatedDevnetLaunchStatementV2>[0]);
+  let signatures;
+  if (launchVersion === 1) signatures = sourceAttestation.signLaunchStatement(
+    statement as SubstrateFederatedIsolatedDevnetLaunchStatementV1);
+  else {
+    assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2Provenance(sourceAttestation);
+    signatures = sourceAttestation.signLaunchStatement(statement as SubstrateFederatedIsolatedDevnetLaunchStatementV2);
+  }
+  const baseline = launchVersion === 1
+    ? buildSubstrateFederatedIsolatedDevnetLaunchBaselineV1({
+      statement: statement as SubstrateFederatedIsolatedDevnetLaunchStatementV1, signatures })
+    : buildSubstrateFederatedIsolatedDevnetLaunchBaselineV2({
+      statement: statement as SubstrateFederatedIsolatedDevnetLaunchStatementV2, signatures });
   const attestationPacket = Buffer.from(`${canonicalJson({
     schema:
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ATTESTATION_PACKET_V1_SCHEMA,
-    version: 1,
+      launchVersion === 1 ? SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ATTESTATION_PACKET_V1_SCHEMA
+        : SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ATTESTATION_PACKET_V2_SCHEMA,
+    version: launchVersion,
     statement,
     signatures,
   })}\n`, 'utf8');
@@ -477,9 +1574,9 @@ async function producePacket(
     attestationPacket,
   });
   const portableReplayInput = Object.freeze({ artifacts, trustPins });
-  const replay = await replaySubstrateFederatedIsolatedDevnetPortableV1(
-    portableReplayInput,
-  );
+  const replay = launchVersion === 1
+    ? await replaySubstrateFederatedIsolatedDevnetPortableV1(portableReplayInput)
+    : await replaySubstrateFederatedIsolatedDevnetPortableV2(portableReplayInput);
   if (
     replay.launch.targetDescriptorDigestHex !== target.descriptorDigestHex
     || replay.launch.statementDigestHex !== statement.statementDigestHex
@@ -490,9 +1587,7 @@ async function producePacket(
     throw new Error('isolated portable replay differs from the produced packet');
   }
   const artifactIdentities = artifactBindings(artifacts);
-  const body = {
-    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V1_SCHEMA,
-    version: 1 as const,
+  const commonBody = {
     status: 'process_owned_portable_packet_replayed' as const,
     targetDescriptorDigestHex: target.descriptorDigestHex,
     sourceAttestationKeySetDigestHex:
@@ -524,15 +1619,170 @@ async function producePacket(
       trustPinsDerivedBeforePacketSerialization: true as const,
       portableReplayConsumerCompleted: true as const,
     },
-    boundaries: falseBoundaries(),
+  };
+  if (mode === 'v1') {
+    const body = {
+      schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V1_SCHEMA,
+      version: 1 as const,
+      ...commonBody,
+      boundaries: falseBoundaries(false),
+    };
+    const receipt = deepFreeze({
+      ...body,
+      receiptDigestHex: sha256CanonicalJson(body, RECEIPT_DIGEST_DOMAIN),
+    });
+    const result = Object.freeze({ receipt, portableReplayInput, replay });
+    RESULTS.add(result);
+    return result as SubstrateFederatedIsolatedDevnetPacketV1;
+  }
+  const body = {
+    schema: mode === 'v2' ? SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V2_SCHEMA
+      : SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V3_SCHEMA,
+    version: mode === 'v2' ? 2 as const : 3 as const,
+    ...commonBody,
+    boundaries: falseBoundaries(true),
   };
   const receipt = deepFreeze({
     ...body,
-    receiptDigestHex: sha256CanonicalJson(body, RECEIPT_DIGEST_DOMAIN),
+    receiptDigestHex: sha256CanonicalJson(body, mode === 'v2' ? RECEIPT_V2_DIGEST_DOMAIN : RECEIPT_V3_DIGEST_DOMAIN),
   });
   const result = Object.freeze({ receipt, portableReplayInput, replay });
-  RESULTS.add(result);
-  return result;
+  (mode === 'v2' ? RESULTS_V2 : RESULTS_V3).add(result);
+  MINT_CONTINUATION_BINDINGS.set(
+    result,
+    buildPacketMintContinuationBinding(target),
+  );
+  const relayerLineage = deepFreeze({
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_RELAYER_LINEAGE_V1_SCHEMA,
+    version: 1 as const,
+    headCommitSha1Hex: relayerReceipt.headCommitSha1Hex,
+    relayerArtifactSetDigestHex,
+    packetReceiptDigestHex: receipt.receiptDigestHex,
+  });
+  PACKET_RELAYER_LINEAGES.set(result, relayerLineage);
+  RELAYER_LINEAGE_PACKETS.set(relayerLineage, result);
+  return result as RetainedPacket;
+}
+
+function buildPacketMintContinuationBinding(
+  target: Readonly<{
+    readonly descriptorDigestHex: string;
+    readonly profile: Readonly<{
+      readonly familyIdHex: string;
+      readonly encodedProfileHex: string;
+      readonly settlementProfileIdHex: string;
+    }>;
+    readonly sourceRuntime: Readonly<{
+      readonly sourceNetworkIdHex: string;
+      readonly sidechainIdHex: string;
+      readonly bridgeAddressHex: string;
+      readonly tokenAddressHex: string;
+      readonly bridgeRuntimeCodeSha256Hex: string;
+      readonly bridgeRuntimeCodeBytes: number;
+      readonly tokenRuntimeCodeSha256Hex: string;
+      readonly tokenRuntimeCodeBytes: number;
+    }>;
+    readonly lineages: Readonly<{
+      readonly duplicatePrevention: Readonly<{
+        readonly singletonTokenIdHex: string;
+      }>;
+      readonly pooledReserve: Readonly<{
+        readonly singletonTokenIdHex: string;
+      }>;
+    }>;
+  }>,
+): Readonly<PacketMintContinuationBindingV1> {
+  const settlementFamilyProfile = deepFreeze({
+    schema: SUBSTRATE_FEDERATED_SETTLEMENT_FAMILY_V1_SCHEMA,
+    version: 1 as const,
+    encodedProfileHex: target.profile.encodedProfileHex,
+    familyIdHex: target.profile.familyIdHex,
+    duplicatePreventionNftIdHex:
+      target.lineages.duplicatePrevention.singletonTokenIdHex,
+    pooledReserveNftIdHex:
+      target.lineages.pooledReserve.singletonTokenIdHex,
+  });
+  decodeSubstrateFederatedSettlementFamilyV1Profile(
+    settlementFamilyProfile,
+  );
+  return deepFreeze({
+    targetDescriptorDigestHex: target.descriptorDigestHex,
+    settlementFamilyProfile,
+    sourceNetworkIdHex: target.sourceRuntime.sourceNetworkIdHex,
+    sidechainIdHex: target.sourceRuntime.sidechainIdHex,
+    bridgeAddressHex: target.sourceRuntime.bridgeAddressHex,
+    tokenAddressHex: target.sourceRuntime.tokenAddressHex,
+    settlementProfileIdHex: target.profile.settlementProfileIdHex,
+  });
+}
+
+function buildMintSourceProofInputForPacket(
+  input: Readonly<
+    ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input
+  >,
+  binding: Readonly<PacketMintContinuationBindingV1>,
+  packetVersion: 2 | 3,
+): Readonly<ProduceSubstrateFederatedIsolatedDevnetMintSourceProofV2Input> {
+  const inputRecord = exactDataRecord(input, [
+    'draft',
+    'evidenceReceipt',
+    'expiresAtNativeHeight',
+    'issuedAtNativeHeight',
+  ], 'isolated packet mint source-proof input');
+  const draft = inputRecord.draft;
+  if (packetVersion === 3) {
+    assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2(draft);
+  } else {
+    assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1(draft);
+  }
+  const sourceIntent = decodePegInSourceIntentV2Hex(
+    draft.statement.sourceIntentHex,
+  );
+  const exactHexBindings = [
+    [draft.statement.lineageProfileIdHex,
+      binding.settlementFamilyProfile.familyIdHex, 32,
+      'settlement-family ID'],
+    [sourceIntent.admissionProfileIdHex,
+      binding.settlementFamilyProfile.familyIdHex, 32,
+      'source-intent admission profile ID'],
+    [sourceIntent.sourceNetworkIdHex, binding.sourceNetworkIdHex, 32,
+      'source network ID'],
+    [sourceIntent.sidechainIdHex, binding.sidechainIdHex, 32,
+      'sidechain ID'],
+    [sourceIntent.bridgeAddressHex, binding.bridgeAddressHex, 20,
+      'bridge address'],
+    [sourceIntent.tokenAddressHex, binding.tokenAddressHex, 20,
+      'token address'],
+    [sourceIntent.settlementProfileIdHex, binding.settlementProfileIdHex, 32,
+      'settlement profile ID'],
+  ] as const;
+  for (const [actual, expected, bytes, label] of exactHexBindings) {
+    if (normalizedHex(actual, bytes, label) !== normalizedHex(expected, bytes, label)) {
+      throw new Error(`isolated packet mint source-proof ${label} differs`);
+    }
+  }
+  return deepFreeze({
+    draft,
+    evidenceReceipt: inputRecord.evidenceReceipt,
+    issuedAtNativeHeight: inputRecord.issuedAtNativeHeight,
+    expiresAtNativeHeight: inputRecord.expiresAtNativeHeight,
+  } as ProduceSubstrateFederatedIsolatedDevnetMintSourceProofV2Input);
+}
+
+function normalizedHex(
+  value: unknown,
+  bytes: number,
+  label: string,
+): string {
+  if (typeof value !== 'string') {
+    throw new Error(`${label} must be ${bytes} canonical bytes`);
+  }
+  const normalized = value.toLowerCase().replace(/^0x/u, '');
+  if (!new RegExp(`^[0-9a-f]{${bytes * 2}}$`, 'u').test(normalized)) {
+    throw new Error(`${label} must be ${bytes} canonical bytes`);
+  }
+  return normalized;
 }
 
 function captureInput(
@@ -561,7 +1811,8 @@ function captureInput(
       SubstrateFederatedAuthoritySafeDevnetHistoryV1
     >,
     ergoHistory: record.ergoHistory as Readonly<
-      SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1
+      | SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1
+      | SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2
     >,
     expectedProfilePins: Object.freeze({
       federationProfileIdHex:
@@ -598,8 +1849,10 @@ function snapshotSourceHistory(
 }
 
 function snapshotErgoHistory(
-  history:
-    Readonly<SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1>,
+  history: Readonly<
+    | SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1
+    | SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2
+  >,
 ) {
   return Object.freeze({
     greatestWorkHeaders:
@@ -612,6 +1865,7 @@ function snapshotErgoHistory(
 
 function deriveApplicationBinding(
   target: Readonly<SubstrateFederatedAuthoritySafeDevnetHistoryV1['receipt']['target']>,
+  launchVersion: 1 | 2,
 ) {
   const sourceNetworkIdHex = sha256CanonicalJson({
     sourceNetworkScope: 'isolated-devnet',
@@ -634,12 +1888,12 @@ function deriveApplicationBinding(
     tokenRuntimeCodeBytes: target.tokenRuntimeCodeBytes,
   }, RUNTIME_PROFILE_ID_DOMAIN);
   const settlementProfileIdHex = sha256CanonicalJson({
-    settlementNetworkId: 'ergo-testnet',
+    settlementNetworkId: launchVersion === 1 ? 'ergo-testnet' : 'ergo-local-devnet',
     sourceNetworkIdHex,
     sidechainIdHex,
     settlementFamily: 'substrate-federated-v1',
     settlementAsset: 'native-erg-v1',
-  }, SETTLEMENT_PROFILE_ID_DOMAIN);
+  }, launchVersion === 1 ? SETTLEMENT_PROFILE_ID_DOMAIN : SETTLEMENT_PROFILE_ID_V2_DOMAIN);
   return Object.freeze({
     sourceNetworkIdHex,
     sidechainIdHex,
@@ -704,41 +1958,6 @@ function assertExpectedProfilePins(
       throw new Error(`isolated portable packet ${label} pin differs`);
     }
   }
-}
-
-function signExactThreshold(
-  signers: readonly SourceSigner[],
-  digestHex: string,
-): readonly Readonly<SubstrateFederatedIsolatedDevnetLaunchSignatureV1>[] {
-  if (
-    signers.length
-      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_KEY_COUNT
-  ) {
-    throw new Error('isolated packet source-attestation capability is unavailable');
-  }
-  return deepFreeze(signers.slice(
-    0,
-    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_THRESHOLD,
-  ).map(value => ({
-    signerPublicKeyHex: value.publicKeyHex,
-    signatureHex: sign(
-      null,
-      Buffer.from(digestHex, 'hex'),
-      value.privateKey,
-    ).toString('hex'),
-  })));
-}
-
-function sourceSigner(): SourceSigner {
-  const { privateKey } = generateKeyPairSync('ed25519');
-  const publicKeyDer = createPublicKey(privateKey).export({
-    format: 'der',
-    type: 'spki',
-  });
-  return Object.freeze({
-    privateKey,
-    publicKeyHex: Buffer.from(publicKeyDer).subarray(-32).toString('hex'),
-  });
 }
 
 function readRelayerArtifacts(
@@ -862,10 +2081,12 @@ function sameStableFile(left: BigIntStats, right: BigIntStats): boolean {
     && left.ctimeNs === right.ctimeNs;
 }
 
-function falseBoundaries() {
+function falseBoundaries<const T extends boolean>(
+  sourceAttestationPrivateKeysRetainedAfterPacket: T,
+) {
   return Object.freeze({
     sourceAttestationKeysShareOneProcessCustody: true as const,
-    sourceAttestationPrivateKeysRetainedAfterPacket: false as const,
+    sourceAttestationPrivateKeysRetainedAfterPacket,
     operationalSourceAttestationCapabilityEstablished: false as const,
     packetEligibleForActivation: false as const,
     independentAttestorCustodyEstablished: false as const,

@@ -4,7 +4,7 @@
   "solidityBuild": {
     "schema": "ergo-sidechain-bridge/solidity-build-closure/v1",
     "manifestPath": "solidity/compiled/build-manifest.json",
-    "manifestSha256": "16ea523a63f6b0249510a38403701b8172e596740063272bbb9f0a05df04bb45",
+    "manifestSha256": "312eb0fee01f3ca8ae4da4bc84dafcb5fee381b691143c44ec9f27f6a0199c43",
     "checkCommand": "npm --prefix solidity run check",
     "compiler": "solc@0.8.35",
     "dependency": "@openzeppelin/contracts@5.6.1",
@@ -19,12 +19,12 @@
     "submoduleName": "ergo-sidechain-bridge/substrate-node",
     "commit": "75329a2df49e2cc7981485392c31160929d1bd48",
     "ref": "stable2412",
-    "cargoLockBlob": "9eab961342156e1c8d8538f80416d2afa6779307",
+    "cargoLockBlob": "c9432f90358b47a2f1a26a17aa455a7f1e05cff6",
     "rustToolchainBlob": "ab41c50970600e50ee7bf33cd44fe538b2ca0771",
-    "nodeManifestBlob": "e0ff835ed5d91ad09c9c155033beb376745010ee",
+    "nodeManifestBlob": "82dc5f4e72862643bcd3779f667340db2a82f4a7",
     "runtimeManifestBlob": "5e21a2017e4656113ec5cfc383ab4a2371652351",
     "patchPath": "sources/frontier/0001-bridge-runtime-commitment.patch",
-    "patchSha256": "e75150b4c7a078cfa73446da904c8d33bfb8a304c396dda09a4fb9e3031ec36b",
+    "patchSha256": "bd8500696af4dd7b67dd99c9446f5ef2f23803e58f6669a5e80d8548124d7634",
     "bridgeAtomicityFixtures": [
       {
         "artifactPath": "solidity/compiled/SERG.bin",
@@ -52,13 +52,13 @@
         "path": "Cargo.lock",
         "status": "modified",
         "baseBlob": "b786af92f464e4aa752034f74ca7b53e6a0b124f",
-        "patchedBlob": "9eab961342156e1c8d8538f80416d2afa6779307"
+        "patchedBlob": "c9432f90358b47a2f1a26a17aa455a7f1e05cff6"
       },
       {
         "path": "Cargo.toml",
         "status": "modified",
         "baseBlob": "ffbf86fa13e07a942f81d8bd22c939638b5cc4b9",
-        "patchedBlob": "70aa50c7328f374378f1374543431a5f9604c7d8"
+        "patchedBlob": "a1cad761ec6bc529b6dcc4173e0af72e8189a01d"
       },
       {
         "path": "bridge/checkpoint-verifier/Cargo.toml",
@@ -283,7 +283,7 @@
       {
         "path": "bridge/checkpoint-verifier/tests/cli.rs",
         "status": "added",
-        "patchedBlob": "4382936c1184a9a09cbe63357b1062b5bd255347"
+        "patchedBlob": "766e3feee94b98f276e9095f5b58374c91bc9d4f"
       },
       {
         "path": "bridge/checkpoint-verifier/tests/peg_in_causal_mint_transition_v2_cli.rs",
@@ -422,7 +422,13 @@
         "path": "template/node/Cargo.toml",
         "status": "modified",
         "baseBlob": "67505c6b54a852fb861d3eea3c52f6a85b21af7d",
-        "patchedBlob": "e0ff835ed5d91ad09c9c155033beb376745010ee"
+        "patchedBlob": "82dc5f4e72862643bcd3779f667340db2a82f4a7"
+      },
+      {
+        "path": "template/node/src/benchmarking.rs",
+        "status": "modified",
+        "baseBlob": "2dafe1247b3dd2ffa14270e78047fcc82ffaa7a6",
+        "patchedBlob": "5039c705ae9fe50e52d380179749daf89efd52f5"
       },
       {
         "path": "template/node/src/bridge_atomicity_tests.rs",
@@ -430,28 +436,39 @@
         "patchedBlob": "a723c778f147e4e5b085432d68f8770c218c9a88"
       },
       {
+        "path": "template/node/src/bridge_federated_lab_reservation_tests.rs",
+        "status": "added",
+        "patchedBlob": "cd917a757a449f4e56704ca579eb0537ca526f04"
+      },
+      {
         "path": "template/node/src/chain_spec.rs",
         "status": "modified",
         "baseBlob": "614161fa35457d3f2dec5c00ea0c58a00caa8366",
-        "patchedBlob": "01bb2232820b6fa6ded4b5eb08e7747252d93c22"
+        "patchedBlob": "1a7b904839d323546ddd0adac208d773e624912e"
+      },
+      {
+        "path": "template/node/src/command.rs",
+        "status": "modified",
+        "baseBlob": "2217ea21af4f51f58ba7bae3758409eb267def08",
+        "patchedBlob": "739e6ff6738a4b89ef65c3cc723be2c4d45824f8"
       },
       {
         "path": "template/node/src/main.rs",
         "status": "modified",
         "baseBlob": "0bb5dad17082a3f3a96771a7d22f0638480b4c46",
-        "patchedBlob": "11b3575f3228aa7eacee75ccfe4073e44549984e"
+        "patchedBlob": "4598400d7c479de8f9a922072e51d8d8cd939b51"
       },
       {
         "path": "template/node/src/rpc/mod.rs",
         "status": "modified",
         "baseBlob": "7202d997a813fea79e176adb93553a3da949446b",
-        "patchedBlob": "da043a24a679dc2b50058970350f6bc1db72b3e8"
+        "patchedBlob": "e9074c48acb5a925c1759a187487604bc7338003"
       },
       {
         "path": "template/node/src/service.rs",
         "status": "modified",
         "baseBlob": "ef293a1293491cf1cebbc612c23a0c9c14c9eec5",
-        "patchedBlob": "18da1dda08d68879bf30ff26a6c5c2a2fe474221"
+        "patchedBlob": "afe0ef7111859d26f30e72667c4014316d1a408e"
       },
       {
         "path": "template/node/src/tests/res/bridge-atomicity/ErgoBridge.bin",
@@ -477,6 +494,21 @@
         "path": "template/node/src/tests/res/bridge-atomicity/SERG.runtime.bin",
         "status": "added",
         "patchedBlob": "7f08ffa7706b00667eae774d00dc57c59ec24fc6"
+      },
+      {
+        "path": "template/runtime-v4-lab/Cargo.toml",
+        "status": "added",
+        "patchedBlob": "1ba3e2a023bfb88cff17e5a30e9cdcf0d317a385"
+      },
+      {
+        "path": "template/runtime-v4-lab/build.rs",
+        "status": "added",
+        "patchedBlob": "55776414160657ea1b45266bd124fc885707d3c6"
+      },
+      {
+        "path": "template/runtime-v4-lab/src/lib.rs",
+        "status": "added",
+        "patchedBlob": "ff511c3528638d311679d855e12e765e42d7eed3"
       },
       {
         "path": "template/runtime-v4-test/Cargo.toml",
@@ -553,7 +585,7 @@
       {
         "path": "template/runtime/src/peg_in_pooled_reserve_reservation.rs",
         "status": "added",
-        "patchedBlob": "e991344c9a09dd8e5981b50163463a216d0ad0ec"
+        "patchedBlob": "8f3b31c10e95560a43fe0c9ced3964c924a2b335"
       },
       {
         "path": "template/runtime/src/runtime_body.rs",
@@ -617,23 +649,58 @@
     "baseCommit": "2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1",
     "baseTag": "v6.0.2",
     "patchCommitProvenance": "ed506f3c63273a89793a14505a709f18701825f8",
-    "patchPath": "sources/ergo-node/0001-sidechain-extension-fields.patch",
-    "patchSha256": "31b27cf9acd7ad6d7c05282d964f51be15b5aa78767b354f8f29ee28d39ebf23",
+    "patchPath": "sources/ergo-node/0002-sidechain-extension-fields-candidate-recovery.patch",
+    "patchSha256": "08fb00b4c94f7db54228b6312bea58af430f13825e2b231821da3ef26e4796c3",
     "javaVersion": "17",
-    "testCommand": "sbt \"testOnly org.ergoplatform.mining.CandidateGeneratorSpec\"",
+    "testCommand": "sbt \"testOnly org.ergoplatform.mining.OwnedMiningSubmissionV1Spec\" \"testOnly org.ergoplatform.mining.OwnedMiningSubmissionActorSpec\" \"testOnly org.ergoplatform.http.routes.MiningApiRouteSpec\" \"testOnly org.ergoplatform.mining.CandidateGeneratorSpec\"",
     "buildCommand": "sbt assembly",
     "role": "operator-provided-ergo-extension-producer",
     "commitmentInput": "operator-provided",
     "files": [
       {
+        "path": "src/main/scala/org/ergoplatform/http/api/MiningApiRoute.scala",
+        "status": "modified",
+        "baseBlob": "ce0c10f204d9c05623c44e90e2edc7876a7b4cf9",
+        "patchedBlob": "cfad3bd4d15bda2c407c9f950dc6eea2b10b6c2a"
+      },
+      {
         "path": "src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala",
+        "status": "modified",
         "baseBlob": "bfa0fe6162477fae9012eddd3de8736f2c140a1d",
-        "patchedBlob": "076f788f3965e188047a7a23a6d0e8c1a79134ff"
+        "patchedBlob": "47cb89128a2c754e7d62bf93d983e5df6c2c37fd"
+      },
+      {
+        "path": "src/main/scala/org/ergoplatform/mining/ErgoMiner.scala",
+        "status": "modified",
+        "baseBlob": "e2dc8060c735cee6eebbf9082a2e3519b42f7487",
+        "patchedBlob": "eab6548cff2c08a06d47afc061978a8352d7a2d0"
+      },
+      {
+        "path": "src/main/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1.scala",
+        "status": "added",
+        "patchedBlob": "54831ed65c6ef37f2fd67362a15417c361dc4431"
+      },
+      {
+        "path": "src/test/scala/org/ergoplatform/http/routes/MiningApiRouteSpec.scala",
+        "status": "modified",
+        "baseBlob": "2731827bcf33dbf80749ad2fb40c9304f54a7496",
+        "patchedBlob": "894039d9f2f20f2fadb4a40788f71365de0537e0"
       },
       {
         "path": "src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala",
+        "status": "modified",
         "baseBlob": "1c394b28174aa12303e67827d9c6a38ea6a38caf",
-        "patchedBlob": "6de21f113d966cc94ebd1bbf4f96356001a34433"
+        "patchedBlob": "4c09a8e469bb2650a9a9106d634da3ff6de6ea59"
+      },
+      {
+        "path": "src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionActorSpec.scala",
+        "status": "added",
+        "patchedBlob": "ddad50c8072370bcec0fad59adb4622e3be2a7f9"
+      },
+      {
+        "path": "src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1Spec.scala",
+        "status": "added",
+        "patchedBlob": "801652f2da58bd53f9a49d64c4aeb8518db8dabf"
       }
     ]
   },

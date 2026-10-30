@@ -1,0 +1,86 @@
+{
+  "schema": "e2s.substrate-federated-tracker-v2-reserve-v7-family-compiler-intent.v1",
+  "version": 1,
+  "sigmaStateCommit": "f78deadd668f801e7fae3bc884283f79c6f484fa",
+  "compiler": {
+    "scriptVersion": 3,
+    "treeVersion": 0
+  },
+  "admissionVector": {
+    "relativePath": "relayer/test-vectors/substrate-federated-v1-tracker-admission.json",
+    "sha256Hex": "87b1db594810e8e21f4132ed51ee929dde6a07cce9f690ec8bba2fc90c57f5be"
+  },
+  "templates": [
+    {
+      "role": "tracker",
+      "relativePath": "contracts/SPVTrackerSubstrateFederatedV2.es",
+      "sha256Hex": "110b1aa22d59e1202435bb139cadbb49f28a48c8b8a3056d0426e620ee828eec"
+    },
+    {
+      "role": "duplicatePrevention",
+      "relativePath": "contracts/DoubleUnlockPreventionSubstrateFederatedV1.es",
+      "sha256Hex": "a3902150efcdeb4025a50c6a14149d9dc656232c5c65c923a91f85658ddaa12f"
+    },
+    {
+      "role": "sourceLock",
+      "relativePath": "contracts/MainChainLockPooledReserveV6.es",
+      "sha256Hex": "f03c1e2ecbb0433d9b5bcad2489467bee26e2e03543ec2a1cd61c18aba21db6b"
+    },
+    {
+      "role": "pooledReserve",
+      "relativePath": "contracts/MainChainPooledReserveValidityApplicationV7.es",
+      "sha256Hex": "cc507306454541c09e9e9be1d38d6858566aff4f31b260166e946161499a7229"
+    }
+  ],
+  "tracker": {
+    "anchorSelector": "absolute-ergo-header-height",
+    "trackerNftIdHex": "0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d",
+    "federationProfileIdHex": "957cac901136cc26a00ef51293bf587789292856f79ae0bcf6b4b4c253927de8",
+    "sourceAttestationKeySetDigestHex": "3f934142ee38fbfff97c8b92314d34ab33bce423ab6e4301b2ddc74e3380b42e",
+    "sourceAttestationThreshold": 2,
+    "ergoAdmissionKeySetDigestHex": "9615487c6728fe34514499611d89a438c70ef6788c4b4228dc4885bb59e5ce98",
+    "ergoAdmissionThreshold": 2,
+    "ergoAdmissionPublicKeysHex": [
+      "0227562580bbfc2cf3f72b3dbb725f30f358ca545209255458536adcf1a4aad871",
+      "02671c8e95c0237797901a6cdb2ef8e6599400578385455f3423f77e43df39aad5",
+      "03b6447502eeff10813c6c7a01e1f2c3a97c54bbeeb3f9206984ccb0e63b0c56f3"
+    ],
+    "federationEpoch": "7",
+    "maxAdmissionValidityBlocks": "64"
+  },
+  "application": {
+    "sourceNetworkIdHex": "0101010101010101010101010101010101010101010101010101010101010101",
+    "sidechainIdHex": "0202020202020202020202020202020202020202020202020202020202020202",
+    "bridgeAddressHex": "0606060606060606060606060606060606060606",
+    "tokenAddressHex": "0707070707070707070707070707070707070707",
+    "bridgeRuntimeCodeSha256Hex": "0808080808080808080808080808080808080808080808080808080808080808",
+    "bridgeRuntimeCodeBytes": 12345,
+    "tokenRuntimeCodeSha256Hex": "0909090909090909090909090909090909090909090909090909090909090909",
+    "tokenRuntimeCodeBytes": 6789,
+    "sourceRuntimeCodeSha256Hex": "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+    "sourceRuntimeCodeBytes": 54321,
+    "runtimeProfileIdHex": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+    "settlementProfileIdHex": "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c"
+  },
+  "family": {
+    "schema": "e2s.substrate-federated-settlement-family.v1",
+    "version": 1,
+    "duplicatePreventionNftIdHex": "0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+    "pooledReserveNftIdHex": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+    "sourceRefundDelayBlocks": 10000,
+    "minimumAnchorConfirmations": 10,
+    "maximumSuccessorCreationHeightLag": 100,
+    "minimumExternalFeeNanoErg": "1000000",
+    "maximumExternalFeeNanoErg": "2100000",
+    "settlementAssetIdHex": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "boundaries": {
+    "profileActivated": false,
+    "nodeCheckPerformed": false,
+    "signingAuthorityEstablished": false,
+    "submissionAuthorityEstablished": false,
+    "broadcastAuthorityEstablished": false,
+    "fundsAuthorityEstablished": false,
+    "gate5Closed": false
+  }
+}

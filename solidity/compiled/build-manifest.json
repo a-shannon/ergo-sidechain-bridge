@@ -9,7 +9,7 @@
     "packageJsonPath": "package.json",
     "packageJsonSha256Hex": "4403cf352b6d3d5a3d5752260d2353f8bd195debdf808f9df8e11f4a3afc56fe",
     "packageLockPath": "package-lock.json",
-    "packageLockSha256Hex": "6c987f5ff4c5e32dc518267036f6dc25029297515518d036ce603bab9b6cb51d",
+    "packageLockSha256Hex": "362649c5f11096f2ce5511057fafb93352bd21934098c3e81d6f8644d894b557",
     "packages": [
       {
         "name": "@openzeppelin/contracts",

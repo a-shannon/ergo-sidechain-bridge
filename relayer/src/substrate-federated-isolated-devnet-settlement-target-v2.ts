@@ -5,6 +5,8 @@ import {
 } from './substrate-federated-genesis-observation-v1.js';
 import {
   deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1,
+  deriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2,
+  type DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input,
   type DeriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1Input,
   type SubstrateFederatedIsolatedDevnetTargetDescriptorV1,
 } from './substrate-federated-isolated-devnet-launch-v1.js';
@@ -96,6 +98,28 @@ export interface SubstrateFederatedIsolatedDevnetSettlementTargetV2
 }
 
 const settlementTargets = new WeakSet<object>();
+const settlementTargetsV3 = new WeakSet<object>();
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETTLEMENT_TARGET_V3_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-settlement-target.v3' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETTLEMENT_TARGET_V3_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETTLEMENT_TARGET_V3' as const;
+const SOURCE_AND_COMPILER_CLOSURE_V3_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_AND_COMPILER_CLOSURE_V3';
+
+export interface BuildSubstrateFederatedIsolatedDevnetSettlementTargetV3Input
+  extends DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input {
+  readonly settlementTargetProfile: Readonly<SubstrateFederatedGenesisTargetProfileV1>;
+  readonly settlementObservation: Readonly<SubstrateFederatedGenesisObservationV1>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetSettlementTargetV3 extends Omit<
+  SubstrateFederatedIsolatedDevnetSettlementTargetV2,
+  'schema' | 'version' | 'compatibilityTargetV1AuditDigestHex'
+> {
+  readonly schema: typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETTLEMENT_TARGET_V3_SCHEMA;
+  readonly version: 3;
+  readonly compilerProfile: 'absolute-height-tracker-v2';
+}
 
 /**
  * Rebinds the existing source/compiler closure to one observed local Ergo
@@ -104,6 +128,21 @@ const settlementTargets = new WeakSet<object>();
 export function buildSubstrateFederatedIsolatedDevnetSettlementTargetV2(
   input: Readonly<BuildSubstrateFederatedIsolatedDevnetSettlementTargetV2Input>,
 ): Readonly<SubstrateFederatedIsolatedDevnetSettlementTargetV2> {
+  return buildSettlementTarget(input, 2) as Readonly<SubstrateFederatedIsolatedDevnetSettlementTargetV2>;
+}
+
+export function buildSubstrateFederatedIsolatedDevnetSettlementTargetV3(
+  input: Readonly<BuildSubstrateFederatedIsolatedDevnetSettlementTargetV3Input>,
+): Readonly<SubstrateFederatedIsolatedDevnetSettlementTargetV3> {
+  return buildSettlementTarget(input, 3) as Readonly<SubstrateFederatedIsolatedDevnetSettlementTargetV3>;
+}
+
+function buildSettlementTarget(
+  input: Readonly<BuildSubstrateFederatedIsolatedDevnetSettlementTargetV2Input
+    | BuildSubstrateFederatedIsolatedDevnetSettlementTargetV3Input>,
+  version: 2 | 3,
+): Readonly<SubstrateFederatedIsolatedDevnetSettlementTargetV2
+  | SubstrateFederatedIsolatedDevnetSettlementTargetV3> {
   const record = exactDataRecord(input, [
     'trackerRequest',
     'trackerReceipt',
@@ -149,15 +188,28 @@ export function buildSubstrateFederatedIsolatedDevnetSettlementTargetV2(
     );
   }
 
-  const sourceAndCompilerTarget =
-    deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1({
-      trackerRequest: record.trackerRequest as BuildSubstrateFederatedIsolatedDevnetSettlementTargetV2Input['trackerRequest'],
-      trackerReceipt: record.trackerReceipt as BuildSubstrateFederatedIsolatedDevnetSettlementTargetV2Input['trackerReceipt'],
-      familyTemplates: record.familyTemplates as BuildSubstrateFederatedIsolatedDevnetSettlementTargetV2Input['familyTemplates'],
-      familyReceipt: record.familyReceipt as BuildSubstrateFederatedIsolatedDevnetSettlementTargetV2Input['familyReceipt'],
-      historyBundle: record.historyBundle as BuildSubstrateFederatedIsolatedDevnetSettlementTargetV2Input['historyBundle'],
-      trustPins: record.trustPins as BuildSubstrateFederatedIsolatedDevnetSettlementTargetV2Input['trustPins'],
-    });
+  const compilerInput = {
+    trackerRequest: record.trackerRequest,
+    trackerReceipt: record.trackerReceipt,
+    familyTemplates: record.familyTemplates,
+    familyReceipt: record.familyReceipt,
+    historyBundle: record.historyBundle,
+    trustPins: record.trustPins,
+  };
+  let sourceAndCompilerClosure: SourceAndCompilerClosureV1;
+  let compatibilityTargetV1AuditDigestHex: string | undefined;
+  if (version === 2) {
+    const { schema: _schema, version: _version, settlementNetworkId: _network,
+      descriptorDigestHex, ...closure } = deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1(
+        compilerInput as DeriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1Input,
+      );
+    sourceAndCompilerClosure = closure;
+    compatibilityTargetV1AuditDigestHex = descriptorDigestHex;
+  } else {
+    sourceAndCompilerClosure = deriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2(
+      compilerInput as DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input,
+    );
+  }
   const observedGenesisInputs = {
     trackerBoxIdHex: fixedHex(
       settlementObservation.boxes.tracker.box.boxId,
@@ -174,11 +226,11 @@ export function buildSubstrateFederatedIsolatedDevnetSettlementTargetV2(
   };
   const expectedGenesisInputs = {
     trackerBoxIdHex:
-      sourceAndCompilerTarget.lineages.tracker.genesisInputBoxIdHex,
+      sourceAndCompilerClosure.lineages.tracker.genesisInputBoxIdHex,
     duplicatePreventionBoxIdHex:
-      sourceAndCompilerTarget.lineages.duplicatePrevention.genesisInputBoxIdHex,
+      sourceAndCompilerClosure.lineages.duplicatePrevention.genesisInputBoxIdHex,
     pooledReserveBoxIdHex:
-      sourceAndCompilerTarget.lineages.pooledReserve.genesisInputBoxIdHex,
+      sourceAndCompilerClosure.lineages.pooledReserve.genesisInputBoxIdHex,
   };
   if (
     observedGenesisInputs.trackerBoxIdHex
@@ -193,22 +245,17 @@ export function buildSubstrateFederatedIsolatedDevnetSettlementTargetV2(
     );
   }
 
-  const {
-    schema: _sourceSchema,
-    version: _sourceVersion,
-    descriptorDigestHex: compatibilityTargetV1AuditDigestHex,
-    settlementNetworkId: _sourceSettlementNetworkId,
-    ...sourceAndCompilerClosure
-  } = sourceAndCompilerTarget;
+  const identity = version === 2
+    ? { schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETTLEMENT_TARGET_V2_SCHEMA,
+      version: 2 as const, compatibilityTargetV1AuditDigestHex: compatibilityTargetV1AuditDigestHex! }
+    : { schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETTLEMENT_TARGET_V3_SCHEMA,
+      version: 3 as const, compilerProfile: 'absolute-height-tracker-v2' as const };
   const sourceAndCompilerClosureDigestHex = sha256CanonicalJson(
     sourceAndCompilerClosure,
-    SOURCE_AND_COMPILER_CLOSURE_V2_DIGEST_DOMAIN,
+    version === 2 ? SOURCE_AND_COMPILER_CLOSURE_V2_DIGEST_DOMAIN : SOURCE_AND_COMPILER_CLOSURE_V3_DIGEST_DOMAIN,
   );
   const body = {
-    schema:
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETTLEMENT_TARGET_V2_SCHEMA,
-    version: 2 as const,
-    compatibilityTargetV1AuditDigestHex,
+    ...identity,
     sourceAndCompilerClosureDigestHex,
     settlementNetwork: {
       scope: 'ergo-local-devnet' as const,
@@ -274,11 +321,28 @@ export function buildSubstrateFederatedIsolatedDevnetSettlementTargetV2(
     ...body,
     descriptorDigestHex: sha256CanonicalJson(
       body,
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETTLEMENT_TARGET_V2_DIGEST_DOMAIN,
+      version === 2 ? SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETTLEMENT_TARGET_V2_DIGEST_DOMAIN
+        : SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETTLEMENT_TARGET_V3_DIGEST_DOMAIN,
     ),
   });
-  settlementTargets.add(target);
+  (version === 2 ? settlementTargets : settlementTargetsV3).add(target);
   return target;
+}
+
+export function assertSubstrateFederatedIsolatedDevnetSettlementTargetV3Provenance(
+  value: unknown,
+): asserts value is Readonly<SubstrateFederatedIsolatedDevnetSettlementTargetV3> {
+  if (value === null || typeof value !== 'object' || !settlementTargetsV3.has(value)) {
+    throw new Error('isolated V3 local-settlement target was not built in this process');
+  }
+  const target = value as SubstrateFederatedIsolatedDevnetSettlementTargetV3;
+  const { descriptorDigestHex, ...body } = target;
+  if (target.schema !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETTLEMENT_TARGET_V3_SCHEMA
+    || target.version !== 3 || target.compilerProfile !== 'absolute-height-tracker-v2'
+    || sha256CanonicalJson(body, SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETTLEMENT_TARGET_V3_DIGEST_DOMAIN)
+      !== descriptorDigestHex) {
+    throw new Error('isolated V3 local-settlement target content drifted');
+  }
 }
 
 export function assertSubstrateFederatedIsolatedDevnetSettlementTargetV2Provenance(

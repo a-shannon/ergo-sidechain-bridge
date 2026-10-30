@@ -2168,7 +2168,7 @@ class BridgeRelayerDaemon {
     }
     const inclusionHeight = Number(
       transaction.inclusionHeight
-      ?? currentHeight - confirmations + 1,
+      ?? currentHeight - confirmations,
     );
     if (!Number.isSafeInteger(inclusionHeight) || inclusionHeight < 0) {
       throw new Error('operational transaction has an invalid inclusion height');
@@ -2600,7 +2600,7 @@ class BridgeRelayerDaemon {
           continue;
         }
         if (
-          currentHeight - attempt.confirmationHeight + 1
+          currentHeight - attempt.confirmationHeight
           < ERGO_OPERATIONAL_FINAL_CONFIRMATIONS
         ) {
           this.state.reopenConfirmedErgoOperationalTransactionAttempt(

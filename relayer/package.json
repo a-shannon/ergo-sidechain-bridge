@@ -9,6 +9,14 @@
   "engines": {
     "node": ">=24 <25"
   },
+  "allowScripts": {
+    "better-sqlite3@11.10.0": true,
+    "esbuild@0.28.1": true
+  },
+  "overrides": {
+    "follow-redirects": "1.16.1",
+    "vite": "7.3.7"
+  },
   "scripts": {
     "daemon": "tsx src/relayer-daemon.ts",
     "dev": "tsx watch src/relayer-daemon.ts",
@@ -44,12 +52,28 @@
     "federated:local-devnet:genesis-check": "tsx src/scripts/check-substrate-federated-local-devnet-genesis.ts",
     "federated:legacy-compatibility:devnet-spec": "npm run node:guard && tsx src/scripts/build-substrate-federated-legacy-compatibility-devnet-chain-spec.ts",
     "federated:authority-safe:devnet-spec": "npm run node:guard && tsx src/scripts/build-substrate-federated-authority-safe-devnet-chain-spec.ts",
+    "federated:authority-safe:refresh-build-pins": "npm run node:guard && tsx src/scripts/refresh-substrate-federated-authority-safe-devnet-build-pins-v1.ts",
     "federated:authority-safe:accept": "npm run node:guard && tsx src/scripts/accept-substrate-federated-authority-safe-devnet-v1.ts",
     "federated:authority-safe:history": "npm run node:guard && tsx src/scripts/accept-substrate-federated-authority-safe-devnet-v1.ts --operation history",
     "federated:greenfield:replay": "npm run node:guard && tsx src/scripts/replay-substrate-federated-greenfield-launch-v1.ts",
+    "federated:native:two-cycle": "tsx src/scripts/run-substrate-federated-native-two-cycle-v1.ts",
+    "federated:native:two-cycle:preflight": "tsx src/scripts/preflight-substrate-federated-native-two-cycle-v1.ts",
     "federated:isolated:assemble": "npm run node:guard && tsx src/scripts/assemble-substrate-federated-isolated-devnet-portable-bundle-v1.ts",
     "federated:isolated:relayer-artifacts": "npm run node:guard && tsx src/scripts/build-substrate-federated-isolated-devnet-relayer-artifacts-v1.ts",
+    "federated:isolated:bootstrap:request:create": "npm run node:guard && tsx src/scripts/create-substrate-federated-isolated-devnet-bootstrap-request-v1.ts",
     "federated:isolated:bootstrap:no-submit": "npm run node:guard && tsx src/scripts/run-substrate-federated-isolated-devnet-bootstrap-v1.ts",
+    "federated:isolated:campaign:preflight": "npm run node:guard && tsx src/scripts/preflight-substrate-federated-isolated-devnet-campaign-v1.ts",
+    "federated:isolated:genesis-setup:execute-local": "npm run node:guard && tsx src/scripts/run-substrate-federated-isolated-devnet-genesis-setup-v1.ts",
+    "federated:isolated:peg-in-source-lock:check-local": "npm run node:guard && tsx src/scripts/run-substrate-federated-isolated-devnet-peg-in-source-lock-check-v1.ts",
+    "federated:isolated:peg-in-source-lock:execute-local": "npm run node:guard && tsx src/scripts/run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-v1.ts",
+    "federated:isolated:peg-in-committed-vault:execute-local": "npm run node:guard && tsx src/scripts/run-substrate-federated-isolated-devnet-peg-in-committed-vault-execution-v1.ts",
+    "federated:isolated:peg-in-mint-proof:execute-local": "npm run node:guard && tsx src/scripts/run-substrate-federated-isolated-devnet-peg-in-mint-proof-campaign-v1.ts",
+    "federated:isolated:peg-in-application-checkpoint:execute-local": "npm run node:guard && tsx src/scripts/run-substrate-federated-isolated-devnet-peg-in-application-checkpoint-campaign-v3.ts",
+    "federated:isolated:peg-in-observed-anchor-tracker-check:execute-local": "npm run node:guard && tsx src/scripts/run-substrate-federated-isolated-devnet-peg-in-observed-anchor-tracker-check-campaign-v6.ts",
+    "federated:isolated:peg-in-frozen-observed-anchor-tracker-check:execute-local": "npm run node:guard && tsx src/scripts/run-substrate-federated-isolated-devnet-peg-in-frozen-observed-anchor-tracker-check-campaign-v7.ts",
+    "federated:isolated:peg-in-tracker-transport:execute-local": "npm run node:guard && tsx src/scripts/run-substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-v10.ts",
+    "federated:isolated:peg-in-tracker-transport:execute-local:v11": "npm run node:guard && tsx src/scripts/run-substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-v11.ts",
+    "federated:lab:reservation:acceptance": "npm run node:guard && tsx src/scripts/run-frontier-federated-lab-reservation-acceptance.ts",
     "compiler:runtime-bundle": "npm run node:guard && tsx src/scripts/prepare-authenticated-v2-runtime-bundle.ts",
     "sidechain:deployment-identity:observe": "tsx src/scripts/observe-deployment-identity.ts",
     "test:roundtrip": "tsx src/scripts/test-roundtrip.ts",
@@ -66,6 +90,7 @@
     "settle:aggregate:recover": "tsx src/scripts/aggregate-settlement-recovery.ts",
     "retry": "tsx src/scripts/retry-failed.ts",
     "release:gate": "tsx src/scripts/release-gate.ts",
+    "federated:release:prepare": "tsx src/scripts/prepare-federated-reference-release-evidence-v1.ts",
     "readiness:triage": "tsx src/scripts/readiness-triage.ts",
     "readiness:node-preflight": "tsx src/scripts/readiness-node-preflight.ts",
     "readiness:runtime-prereqs": "tsx src/scripts/readiness-runtime-prereqs.ts",
@@ -194,7 +219,7 @@
     "@fleet-sdk/common": "^0.6.4",
     "@fleet-sdk/core": "^0.6.4",
     "@fleet-sdk/wallet": "^0.12.0",
-    "axios": "^1.19.0",
+    "axios": "^1.20.0",
     "better-sqlite3": "^11.0.0",
     "blakejs": "^1.2.1",
     "dotenv": "^17.4.2",
@@ -207,7 +232,7 @@
     "esbuild": "0.28.1",
     "tsx": "^4.23.11",
     "typescript": "^5.5.0",
-    "vitest": "^3.2.7",
+    "vitest": "4.1.12",
     "yaml": "2.9.0"
   }
 }

@@ -405,3 +405,11 @@ This is local VM-v3 transaction conformance under a disclosed 2-of-3
 federation authority. It performs no signing, node check, submission or
 broadcast and establishes neither activated funds authority, Gate 5 closure,
 trustless status nor production readiness.
+
+## Native Federated Offline Consumers
+
+The [tracker mempool matrix](native-tracker-mempool.md) uses a fixed public
+signed fixture and synthetic persistent UTXO state. The
+[signed-continuation matrix](native-continuation-transaction.md) validates
+the complete three-input transaction in both explicit preheader contexts.
+Each command binds its own source overlay, tools and exact fixture bytes.
