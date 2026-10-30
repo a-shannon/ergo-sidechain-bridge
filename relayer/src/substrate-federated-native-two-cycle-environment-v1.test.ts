@@ -310,6 +310,11 @@ function environmentFixture() {
   // Hosted Windows TEMP may use an alias; fixtures must supply canonical paths.
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'e2s-native-environment-')));
   temporaryRoots.push(root);
+  if (process.platform === 'win32') {
+    for (const key of ['APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP'] as const) {
+      vi.stubEnv(key, directory(root, `helper-${key}`));
+    }
+  }
   const configDirectory = directory(root, 'config-input');
   const bridgeRoot = directory(root, 'bridge-repository');
   directory(bridgeRoot, '.git');

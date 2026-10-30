@@ -6,7 +6,11 @@ This closes the current assembly blocker. The generated build has about 42,000 f
 
 The current builder is now connected in source through an explicit invocation format and the versioned parent, worker and Root V2 entry points. Local composed tests reject altered source, Maven, boot and LevelDB inputs before attempt creation. Those fixtures do not establish the full native process path; that is the next integration check.
 
-CI rebuilt the pinned Frontier and Ergo sources successfully. Its public-audit job still fails on an isolated HTTP regression's 10-second deadline. One local canary/client comparison using the CI-locked Node version completed within the unchanged limits; it does not explain the hosted timeout.
+The native journal prerequisite now passes on the pinned Node 24.14 runtime: a fresh journal opens through the real StateTracker constructor and closes successfully. The check verifies the installed native module, its loader paths and cache identities. It acquires no funds authority.
+
+CI rebuilt the pinned Frontier and Ergo sources successfully and passed the Solidity dependency audit. Its public-audit job found a stale runtime-lock hash in eight process-seam test cases. The corrected fixture now passes all nine cases locally, including the bounded timeout case, with the original limits. Full CI remains a separate check.
+
+The next source check exposed a Windows helper-environment defect: PowerShell could write its module cache into a source checkout when its AppData paths were omitted. Both affected environment builders now require explicit, validated profile and temporary directories. The direct checks and affected V1 consumers pass locally, together with TypeScript and import checks. A fresh native preflight and physical source/dependency capture remain the next integration boundary.
 
 The next milestone is two consecutive deposit, mint, burn and withdrawal cycles on a fresh synthetic local chain, preserving successor state and replay history between cycles. Stopped-state recovery and the operator rehearsal follow from that result.
 

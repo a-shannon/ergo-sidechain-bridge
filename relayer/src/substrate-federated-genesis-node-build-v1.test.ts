@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -63,6 +63,14 @@ beforeEach(() => {
   buildSource = '';
   configuration = undefined;
   root = mkdtempSync(join(tmpdir(), 'bridge-fed-build-test-'));
+  if (process.platform === 'win32') {
+    const canonicalRoot = realpathSync.native(root);
+    for (const key of ['APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP'] as const) {
+      const directory = join(canonicalRoot, `helper-${key}`);
+      mkdirSync(directory);
+      vi.stubEnv(key, directory);
+    }
+  }
   for (const name of ['repository', 'outputs', 'cache', 'tools']) mkdirSync(join(root, name));
   for (const name of ['cargo.exe', 'rustc.exe', 'git.exe', 'protoc.exe']) writeFileSync(join(root, 'tools', name), 'tool fixture');
   writeFileSync(join(root, 'repository', 'historical-artifact'), 'keep');
@@ -113,6 +121,7 @@ beforeEach(() => {
   });
 });
 afterEach(() => {
+  vi.unstubAllEnvs();
   session.dispose();
   if (!root.startsWith(join(tmpdir(), 'bridge-fed-build-test-'))) throw new Error('Unexpected test cleanup root');
   rmSync(root, { recursive: true, force: true });

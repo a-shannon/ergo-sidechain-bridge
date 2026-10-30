@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
   realpathSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, parse, resolve } from 'node:path';
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   runtime: vi.fn(), process: vi.fn(), frontier: vi.fn(), protoc: vi.fn(),
@@ -70,6 +70,7 @@ const homes = ['b0', 'preTarget', 'beforeResolverJob', 'afterResolverJob',
   'beforeUpdateJob', 'afterUpdateJob', 'beforeAssemblyJob', 'afterAssemblyJob'] as const;
 const bridgeLocks = ['solidity/package-lock.json', 'solidity/compiled/build-manifest.json',
   'sources/consensus-source-lock.json'] as const;
+const helperStateKeys = ['APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP'] as const;
 let suite: string | undefined;
 let serial = 0;
 const hash = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
@@ -90,6 +91,7 @@ afterAll(() => {
   expect(existsSync(retained)).toBe(true);
 });
 beforeEach(() => { vi.clearAllMocks(); });
+afterEach(() => { vi.unstubAllEnvs(); });
 
 function fixture() {
   mkdirSync(TEST_ROOT, { recursive: true });
@@ -144,6 +146,13 @@ function fixture() {
 }
 
 function mockEnvironment(config: SubstrateFederatedNativeTwoCycleInvocationV2Config) {
+  if (process.platform === 'win32') {
+    for (const key of helperStateKeys) {
+      const directory = join(dirname(config.bridgeRoot), 'helper-state', key);
+      mkdirSync(directory, { recursive: true });
+      vi.stubEnv(key, realpathSync.native(directory));
+    }
+  }
   mocks.runtime.mockReturnValue({ gitExecutablePath: config.ergoBuild.gitExecutablePath,
     nodeVersion: 'fixture', nodeExecutableSha256: 'a'.repeat(64),
     relayerPackageLockSha256: 'b'.repeat(64), parentRuntimePackagesValidated: true,
@@ -163,6 +172,111 @@ function mockEnvironment(config: SubstrateFederatedNativeTwoCycleInvocationV2Con
 }
 
 describe('fixed V2 invocation selection', () => {
+  it.skipIf(process.platform !== 'win32')('forwards only explicit helper state and fixed Git controls', async () => {
+    const f = fixture(); mockEnvironment(f.config);
+    for (const key of ['HOME', 'USERPROFILE', 'GIT_CONFIG_SYSTEM', 'GIT_CONFIG_GLOBAL',
+      'GIT_DIR', 'NODE_OPTIONS', 'PSModulePath']) vi.stubEnv(key, 'untrusted-parent-value');
+    vi.stubEnv('TMP', process.env.TEMP);
+    await environmentV2(loadV2(f.configPath));
+    const environments = mocks.process.mock.calls.map(([input]) => input.env);
+    expect(environments).toHaveLength(3);
+    expect(new Set(environments).size).toBe(1);
+    for (const environment of environments) expect(environment).toEqual({
+      PATH: dirname(f.config.ergoBuild.gitExecutablePath),
+      SystemRoot: process.env.SystemRoot ?? process.env.SYSTEMROOT,
+      WINDIR: process.env.WINDIR,
+      GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: 'NUL', GIT_TERMINAL_PROMPT: '0',
+      ...Object.fromEntries(helperStateKeys.map(key => [key, process.env[key]])),
+    });
+    expect(mocks.process.mock.calls.map(([input]) => input.args.slice(2))).toEqual([
+      ['rev-parse', '--verify', 'HEAD'], ['rev-parse', '--verify', 'HEAD^{tree}'],
+      ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
+    ]);
+  });
+
+  it.skipIf(process.platform !== 'win32').each(helperStateKeys.flatMap(key =>
+    ['absent', 'empty', 'relative', 'nul', 'remote', 'missing', 'file', 'junction',
+      'ancestor-junction', 'checkout', 'checkout-ancestor'].map(fault => [key, fault] as const)))
+  ('rejects helper %s %s before any Git child or later tool inspection', async (key, fault) => {
+    const f = fixture(); mockEnvironment(f.config); const loaded = loadV2(f.configPath);
+    let value: string | undefined;
+    if (fault === 'empty') value = '';
+    else if (fault === 'relative') value = 'relative-helper-state';
+    else if (fault === 'nul') value = `${process.env[key]}\0`;
+    else if (fault === 'remote') value = '//untrusted/share/helper-state';
+    else if (fault === 'missing') value = join(f.root, 'missing-state');
+    else if (fault === 'file') {
+      value = join(f.root, 'state-file'); writeFileSync(value, 'not a directory');
+    } else if (fault === 'junction' || fault === 'ancestor-junction') {
+      const target = join(f.root, 'state-target'); mkdirSync(target);
+      const alias = join(f.root, 'state-alias'); symlinkSync(target, alias, 'junction');
+      if (fault === 'ancestor-junction') {
+        mkdirSync(join(target, 'child')); value = join(alias, 'child');
+      } else value = alias;
+    } else if (fault === 'checkout') value = loaded.worktreeRoot;
+    else if (fault === 'checkout-ancestor') value = dirname(loaded.worktreeRoot);
+    const nativeEnvironment = process.env;
+    const environmentDescriptor = Object.getOwnPropertyDescriptor(process, 'env');
+    if (!environmentDescriptor) throw new Error('process.env descriptor is unavailable');
+    try {
+      if (fault === 'nul') {
+        const plainEnvironment: NodeJS.ProcessEnv = { ...nativeEnvironment };
+        for (const alias of [...helperStateKeys, 'SystemDrive', 'SYSTEMDRIVE',
+          'SystemRoot', 'SYSTEMROOT', 'WINDIR', 'PATH', 'Path']) {
+          const inherited = nativeEnvironment[alias];
+          if (inherited !== undefined) plainEnvironment[alias] = inherited;
+        }
+        for (const required of [...helperStateKeys, 'SystemDrive', 'SystemRoot', 'PATH']) {
+          expect(plainEnvironment[required]).toBe(nativeEnvironment[required]);
+          expect(plainEnvironment[required]).toBeTypeOf('string');
+          expect(plainEnvironment[required]).not.toBe('');
+        }
+        plainEnvironment[key] = value;
+        Object.defineProperty(process, 'env', {
+          ...environmentDescriptor, value: plainEnvironment,
+        });
+        expect(process.env[key]).toBe(value);
+        expect(process.env[key]).toContain('\0');
+      } else vi.stubEnv(key, value);
+      if (fault === 'nul') {
+        await expect(environmentV2(loaded)).rejects.toThrow(new RegExp(
+          '^Git helper ' + key + ' must be one local absolute non-sensitive path$', 'u'));
+      } else await expect(environmentV2(loaded)).rejects.toThrow();
+      expect(mocks.process).not.toHaveBeenCalled();
+      expect(mocks.frontier).not.toHaveBeenCalled();
+      expect(mocks.protoc).not.toHaveBeenCalled(); expect(mocks.capture).not.toHaveBeenCalled();
+    } finally {
+      if (fault === 'nul') {
+        Object.defineProperty(process, 'env', environmentDescriptor);
+        expect(process.env).toBe(nativeEnvironment);
+      }
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('keeps the non-Windows Git environment unchanged', async () => {
+    const f = fixture(); mockEnvironment(f.config);
+    for (const key of helperStateKeys) vi.stubEnv(key, 'not-a-directory');
+    await environmentV2(loadV2(f.configPath));
+    expect(mocks.process.mock.calls[0]![0].env).toEqual({
+      PATH: dirname(f.config.ergoBuild.gitExecutablePath),
+      SystemRoot: process.env.SystemRoot ?? process.env.SYSTEMROOT, WINDIR: process.env.WINDIR,
+      GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0',
+    });
+  });
+
+  it.each(['dirty-cache', 'stderr'])('retains fail-closed Git %s rejection', async fault => {
+    const f = fixture(); mockEnvironment(f.config);
+    mocks.process.mockImplementation(async ({ args }: { args: string[] }) => ({
+      stdout: args.includes('HEAD^{tree}') ? `${'2'.repeat(40)}\n`
+        : args.includes('HEAD') ? `${f.config.expectedBridgeCommit}\n`
+          : '?? relayer/Microsoft/Windows/PowerShell/ModuleAnalysisCache\0',
+      stderr: fault === 'stderr' ? 'unexpected Git diagnostic' : '', exitCode: 0,
+    }));
+    await expect(environmentV2(loadV2(f.configPath))).rejects.toThrow(
+      fault === 'stderr' ? /emitted diagnostics/ : /no tracked or untracked changes/);
+    expect(mocks.frontier).not.toHaveBeenCalled(); expect(mocks.capture).not.toHaveBeenCalled();
+  });
+
   it('preserves original readable bytes and projects exactly the nested V6 build', () => {
     const f = fixture(); const bytes = readFileSync(f.configPath); const loaded = loadV2(f.configPath);
     expect(Buffer.from(loaded.configBytes)).toEqual(bytes);

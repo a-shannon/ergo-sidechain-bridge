@@ -840,12 +840,13 @@ async function inspectCleanRepository(
   gitExecutablePath: string,
   expectedCommit: string,
 ): Promise<Readonly<{ commit: string; tree: string; clean: true }>> {
+  const environment = minimalGitEnvironment(gitExecutablePath, worktreeRoot);
   const git = async (args: readonly string[], label: string): Promise<string> => {
     const result = await runBoundedProcess({
       executablePath: gitExecutablePath,
       args: ['-C', worktreeRoot, ...args],
       cwd: worktreeRoot,
-      env: minimalGitEnvironment(gitExecutablePath),
+      env: environment,
       timeoutMs: GIT_TIMEOUT_MS,
       maxOutputBytes: MAX_GIT_OUTPUT_BYTES,
       label,
@@ -1468,8 +1469,11 @@ function decodeUtf8(bytes: Uint8Array, label: string): string {
   return text;
 }
 
-function minimalGitEnvironment(gitExecutablePath: string): NodeJS.ProcessEnv {
-  return {
+function minimalGitEnvironment(
+  gitExecutablePath: string,
+  worktreeRoot: string,
+): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {
     PATH: dirname(gitExecutablePath),
     SystemRoot: process.env.SystemRoot ?? process.env.SYSTEMROOT,
     WINDIR: process.env.WINDIR,
@@ -1477,6 +1481,16 @@ function minimalGitEnvironment(gitExecutablePath: string): NodeJS.ProcessEnv {
     GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
     GIT_TERMINAL_PROMPT: '0',
   };
+  if (process.platform === 'win32') {
+    for (const key of ['APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP'] as const) {
+      const directory = existingPath(process.env[key], `Git helper ${key}`, 'directory');
+      if (pathsOverlap(directory, worktreeRoot)) {
+        throw new Error(`Git helper ${key} must be outside the bridge checkout`);
+      }
+      environment[key] = directory;
+    }
+  }
+  return environment;
 }
 
 function pathsOverlap(left: string, right: string): boolean {

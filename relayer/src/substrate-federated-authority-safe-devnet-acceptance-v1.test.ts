@@ -1494,6 +1494,14 @@ function rustSrcObservation() {
 function createPaths() {
   const root = mkdtempSync(join(tmpdir(), 'fed6g1c-acceptance-test-'));
   temporaryDirectories.push(root);
+  if (process.platform === 'win32') {
+    const canonicalRoot = realpathSync.native(root);
+    for (const key of ['APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP'] as const) {
+      const directory = join(canonicalRoot, `helper-${key}`);
+      mkdirSync(directory);
+      vi.stubEnv(key, directory);
+    }
+  }
   const source = join(root, 'frontier');
   const tools = join(root, 'tools');
   mkdirSync(source);

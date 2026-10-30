@@ -78,7 +78,7 @@ function pinnedLauncher() {
   expect(realpathSync(runtimeLockPath)).toBe(runtimeLockPath);
   expect(lstatSync(runtimeLockPath).isSymbolicLink()).toBe(false);
   expect(sha256File(runtimeLockPath))
-    .toBe('d14badc0dd4feeac3fccd510dbb74625eea1a3226b97ff43eb7863a6ad45ea0d');
+    .toBe('7c635d225b02ede4e37edad09b6e2b9fb0f0dc3cb021dee985547142ae80e329');
   const lock = validateAuthenticatedV2RuntimeBundleBuildParentLock(
     JSON.parse(readFileSync(runtimeLockPath, 'utf8')) as unknown);
   const executablePath = realpathSync(process.execPath);

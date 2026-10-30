@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
-import { delimiter, dirname, isAbsolute, join, parse, resolve } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
 
 import {
   buildPinnedLocalNativeReproducibleRustFlags,
@@ -39,7 +39,7 @@ export async function inspectSubstrateFederatedAuthoritySafePinnedToolchainV1(
   const cargoProfile = requiredToolProfile(profile?.cargo, 'Cargo');
   const rustcProfile = requiredToolProfile(profile?.rustc, 'Rust compiler');
   const gitProfile = requiredToolProfile(profile?.git, 'Git');
-  const environment = buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1();
+  const environment = minimalToolEnvironment([input.bridgeRoot, input.cwd]);
   const observation = Object.freeze({
     platformKey,
     rustTarget,
@@ -83,6 +83,10 @@ export async function inspectSubstrateFederatedAuthoritySafePinnedToolchainV1(
 
 export function buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1():
   NodeJS.ProcessEnv {
+  return minimalToolEnvironment([process.cwd()]);
+}
+
+function minimalToolEnvironment(protectedSources: readonly string[]): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {};
   for (const key of ['PATH', 'Path', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP']) {
     if (process.env[key]) environment[key] = process.env[key];
@@ -106,8 +110,43 @@ export function buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1():
     environment.SystemRoot = canonicalSystemRoot;
     environment.WINDIR = canonicalSystemRoot;
     environment.SystemDrive = expectedSystemDrive;
+    for (const key of ['APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP'] as const) {
+      const directory = canonicalHelperStateDirectory(process.env[key], key);
+      if (protectedSources.some(source => pathsOverlap(directory, resolve(source)))) {
+        throw new Error(`Windows helper ${key} must be outside protected source directories`);
+      }
+      environment[key] = directory;
+    }
   }
   return environment;
+}
+
+function canonicalHelperStateDirectory(value: unknown, key: string): string {
+  const label = `Windows helper ${key}`;
+  if (typeof value !== 'string' || value.length === 0 || value.includes('\0')
+      || !isAbsolute(value) || /^(?:\\\\|\/\/|\\[?.]\\|\\Device\\)/iu.test(value)) {
+    throw new Error(`${label} must be one local absolute directory`);
+  }
+  const requested = resolve(value);
+  let cursor = parse(requested).root;
+  for (const component of requested.slice(cursor.length).split(/[\\/]/u).filter(Boolean)) {
+    cursor = resolve(cursor, component);
+    const stat = lstatSync(cursor);
+    if (!stat.isDirectory() || stat.isSymbolicLink()
+        || !sameCanonicalPath(realpathSync.native(cursor), cursor)) {
+      throw new Error(`${label} must be one canonical link-free directory`);
+    }
+  }
+  return realpathSync.native(requested);
+}
+
+function pathsOverlap(left: string, right: string): boolean {
+  const inside = (parent: string, child: string) => {
+    const tail = relative(parent.toLowerCase(), child.toLowerCase());
+    return tail === '' || (tail !== '..' && !tail.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)
+      && !isAbsolute(tail));
+  };
+  return inside(left, right) || inside(right, left);
 }
 
 /** Reject a Windows native build host without the MSVC discovery environment. */
