@@ -272,6 +272,47 @@ function pipelineDependencies(): WasmAvlBuildPipelineDependenciesV2 & {
 }
 
 describe('source-locked WASM AVL build pipeline', () => {
+  it.each(['PSModuleAnalysisCachePath', 'psmoduleanalysiscachepath', undefined])(
+    'preserves an explicit helper cache through the build environment and pipeline (%s)',
+    async cacheKey => {
+      const profile = path.join(BRIDGE_ROOT, '.owned-build-profile');
+      const cachePath = path.join(profile, 'module-analysis-cache');
+      const profiles = {
+        APPDATA: path.join(profile, 'appdata'),
+        LOCALAPPDATA: path.join(profile, 'localappdata'),
+        TEMP: path.join(profile, 'temp'),
+        TMP: path.join(profile, 'temp'),
+      };
+      const env = buildWasmAvlEnvironment({
+        env: {
+          PATH: PATH_VALUE,
+          ...profiles,
+          ...(cacheKey === undefined ? {} : { [cacheKey]: cachePath }),
+          UNRELATED_SENTINEL: 'must-not-reach-child',
+        },
+        bridgeRoot: BRIDGE_ROOT,
+        cargoHome: CARGO_HOME,
+        rustupHome: RUSTUP_HOME,
+      });
+      const dependencies = pipelineDependencies();
+
+      await runWasmAvlBuildPipelineV2(BRIDGE_ROOT, pipelinePlan(env), dependencies);
+      expect(dependencies.runBoundedProcess).toHaveBeenCalledOnce();
+      const request = dependencies.runBoundedProcess.mock.calls[0]![0];
+      if (cacheKey === undefined) {
+        expect(request.env).not.toHaveProperty('PSModuleAnalysisCachePath');
+      } else {
+        expect(request.env.PSModuleAnalysisCachePath).toBe(cachePath);
+      }
+      expect(request.env).toMatchObject(profiles);
+      expect(request.env).not.toHaveProperty('UNRELATED_SENTINEL');
+      expect(request.cwd).toBe(path.join(BRIDGE_ROOT, 'wasm-avl'));
+      expect(request.timeoutMs).toBe(900_000);
+      expect(request.maxOutputBytes).toBe(8 * 1024 * 1024);
+      expect(request.terminationGraceMs).toBe(5_000);
+    },
+  );
+
   it('uses the pinned offline no-install command and bounded Windows process contract', async () => {
     const dependencies = pipelineDependencies();
     const result = await runWasmAvlBuildPipelineV2(

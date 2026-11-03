@@ -50,6 +50,7 @@ const ALLOWED_PARENT_ENVIRONMENT = [
   'LOCALAPPDATA',
   'PATH',
   'PATHEXT',
+  'PSModuleAnalysisCachePath',
   'SystemRoot',
   'TEMP',
   'TMP',
