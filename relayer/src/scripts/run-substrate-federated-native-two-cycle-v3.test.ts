@@ -179,6 +179,34 @@ describe('explicit V3 parent with V2 invocation', () => {
     expect(mocks.readyV1).not.toHaveBeenCalled();
   });
 
+  it.each([true, false])('preserves owned worker helper profiles with optional cache path %s', async supplied => {
+    const f = fixture();
+    const profiles = Object.fromEntries(['APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP'].map(key => {
+      const path = join(f.root, 'worker-helper-profile', key.toLowerCase());
+      mkdirSync(path, { recursive: true });
+      vi.stubEnv(key, path);
+      return [key, path];
+    }));
+    const cachePath = join(profiles.LOCALAPPDATA!, 'ModuleAnalysisCache');
+    vi.stubEnv('PSModuleAnalysisCachePath', supplied ? cachePath : undefined);
+    vi.stubEnv('BRIDGE_WORKER_UNRELATED_FIXTURE', 'must-not-be-forwarded');
+
+    await expect(runV3(['--config', f.configPath])).rejects.toBe(stop);
+    expect(mocks.process).toHaveBeenCalledOnce();
+    const launched = mocks.process.mock.calls[0]![0];
+    expect(basename(launched.args.find((arg: string) => arg.endsWith('worker-v2.ts'))!))
+      .toBe('run-substrate-federated-native-two-cycle-worker-v2.ts');
+    for (const [key, path] of Object.entries(profiles)) expect(launched.env[key]).toBe(path);
+    expect(Object.hasOwn(launched.env, 'BRIDGE_WORKER_UNRELATED_FIXTURE')).toBe(false);
+    if (supplied) expect(launched.env.PSModuleAnalysisCachePath).toBe(cachePath);
+    else expect(Object.hasOwn(launched.env, 'PSModuleAnalysisCachePath')).toBe(false);
+    expect(launched.timeoutMs).toBe(4 * 60 * 60_000);
+    expect(launched.terminationGraceMs).toBe(30_000);
+    expect(launched.maxStdoutBytes).toBe(1024);
+    expect(launched.maxStderrBytes).toBe(64 * 1024);
+    expect(launched.maxOutputBytes).toBe(1024 + 64 * 1024);
+  });
+
   it('keeps the named legacy V2 route on its fixed V1 loader', async () => {
     const f = fixture(); const failure = new Error('legacy loader selected');
     mocks.loadV1.mockImplementation(() => { throw failure; });

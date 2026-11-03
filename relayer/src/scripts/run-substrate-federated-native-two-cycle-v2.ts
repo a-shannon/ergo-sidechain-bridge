@@ -1233,7 +1233,7 @@ function childEnvironment(
     'PATHEXT',
     'ComSpec', 'COMSPEC', 'TEMP', 'TMP', 'USERPROFILE', 'HOME',
     'LOCALAPPDATA', 'APPDATA', 'RUSTUP_HOME', 'LIB',
-    'LIBPATH', 'INCLUDE',
+    'LIBPATH', 'INCLUDE', 'PSModuleAnalysisCachePath',
   ]) {
     const value = process.env[key];
     if (value !== undefined && value.length > 0) environment[key] = value;
