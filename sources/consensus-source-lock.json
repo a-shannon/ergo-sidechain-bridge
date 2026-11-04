@@ -650,7 +650,7 @@
     "baseTag": "v6.0.2",
     "patchCommitProvenance": "ed506f3c63273a89793a14505a709f18701825f8",
     "patchPath": "sources/ergo-node/0002-sidechain-extension-fields-candidate-recovery.patch",
-    "patchSha256": "08fb00b4c94f7db54228b6312bea58af430f13825e2b231821da3ef26e4796c3",
+    "patchSha256": "32ec76b0fcc9dece3c4e85d12fe1135be14a705d1ff5c833974221a5c63baeab",
     "javaVersion": "17",
     "testCommand": "sbt \"testOnly org.ergoplatform.mining.OwnedMiningSubmissionV1Spec\" \"testOnly org.ergoplatform.mining.OwnedMiningSubmissionActorSpec\" \"testOnly org.ergoplatform.http.routes.MiningApiRouteSpec\" \"testOnly org.ergoplatform.mining.CandidateGeneratorSpec\"",
     "buildCommand": "sbt assembly",
@@ -695,7 +695,7 @@
       {
         "path": "src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionActorSpec.scala",
         "status": "added",
-        "patchedBlob": "ddad50c8072370bcec0fad59adb4622e3be2a7f9"
+        "patchedBlob": "3a3218b31a3198300d5db975f9670c4e64602d13"
       },
       {
         "path": "src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1Spec.scala",

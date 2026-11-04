@@ -47,6 +47,14 @@ const checkout = {
     ['build.sbt', overlay.patchedBlob],
   ]),
 };
+const currentCheckout = {
+  ...checkout,
+  blobs: {
+    ...checkout.blobs,
+    'src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionActorSpec.scala':
+      '3a3218b31a3198300d5db975f9670c4e64602d13',
+  },
+};
 
 function candidate(changes: Record<string, unknown> = {}) {
   return {
@@ -62,10 +70,11 @@ function candidate(changes: Record<string, unknown> = {}) {
 describe('isolated devnet Ergo node build V4 source boundary', () => {
   it('binds the current consensus only through an explicit V6 selection', () => {
     expect(createHash('sha256').update(currentConsensusSourceLockBytes).digest('hex'))
-      .toBe('c08b2cfa28cddf5559fa3f7c8d3ea9cede01af986748a88651a80002d55276fd');
+      .toBe('228d8f9acdbd6fbb7c3f3453a744766bb43efef15eb00fe707882a9d3b803da8');
     const selected = assertV4ErgoSourceObservation(candidate({
       consensusSourceLockBytes: currentConsensusSourceLockBytes,
       lockSelection: 'v6-current',
+      checkout: currentCheckout,
     }));
     expect(selected.expectedStatus).toBe(status);
     expect(selected.sourceIdentityDigestHex)
@@ -76,6 +85,13 @@ describe('isolated devnet Ergo node build V4 source boundary', () => {
     expect(() => assertV4ErgoSourceObservation(candidate({
       lockSelection: 'v6-current',
     }))).toThrow(/V6 current consensus source lock bytes/u);
+  });
+
+  it('rejects the historical ActorSpec blob under the selected current lock', () => {
+    expect(() => assertV4ErgoSourceObservation(candidate({
+      consensusSourceLockBytes: currentConsensusSourceLockBytes,
+      lockSelection: 'v6-current',
+    }))).toThrow(/nine-file raw checkout differs/u);
   });
 
   it('accepts exactly the original eight declarations and pinned ninth overlay', () => {

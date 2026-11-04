@@ -36,12 +36,26 @@ completion during cleanup. On Windows, cancellation uses the existing Job
 Object channel; an unverified process-tree exit keeps ownership pending.
 Cancellation cannot turn a late successful exit into a successful test.
 
-The preceding published head's [CI run](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/41782411024)
-passed the Linux rebuild and Solidity audit, but the Windows audit expired at
-the isolated HTTP test's ten-second outer deadline. The local matched
-diagnostics passed. The cancellation correction addresses process ownership;
-it does not establish the cause of that hosted timeout. The child and test
-deadlines remain unchanged. Exact-head CI is a separate result.
+The [subsequent CI run](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/41850770352)
+passed the Solidity audit and failed in an Ergo mining test. The subsequent
+source check identified a fixture ordering race: its separate application
+probe could receive an event before the
+candidate generator consumed it. The fixture now waits for the generator's
+actual readiness within the same three-second budget before requesting one
+candidate. Production mining guards are unchanged.
+
+The complete corrected actor suite passes all 31 tests locally. Two new cases
+control delivery of real application events; removing the readiness wait or
+duplicating the candidate request makes the corresponding checks fail. The
+cumulative Ergo patch and current source locks bind the tested bytes, while
+historical locks retain their original identities. This deterministic local
+evidence does not identify the hosted run's exact mailbox schedule.
+
+Windows CI still expired at the isolated HTTP test's ten-second outer deadline.
+The local matched diagnostics passed. Caller cancellation preserves process
+ownership; the hosted timeout cause remains unresolved. Child, test and cleanup
+deadlines remain unchanged, and CI on the next published head is a separate
+validation result.
 
 The operational milestone ahead is still two complete deposit, mint, burn and
 withdrawal cycles on the same fresh synthetic chain, carrying successor state

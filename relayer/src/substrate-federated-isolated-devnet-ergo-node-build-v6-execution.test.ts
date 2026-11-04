@@ -347,7 +347,7 @@ describe('fresh V6 builder to fixed node-owner input', () => {
     const input = fixture();
     writeFileSync(join(input.bridgeRoot, V6_NODE_BUILD_LOCK_RELATIVE_PATH),
       V6_NODE_BUILD_LOCK_CANONICAL_TEXT.replace(
-        'c08b2cfa28cddf5559fa3f7c8d3ea9cede01af986748a88651a80002d55276fd',
+        '228d8f9acdbd6fbb7c3f3453a744766bb43efef15eb00fe707882a9d3b803da8',
         '82e96dca999244f145a67381e0037770dfd93ad61ecb29d3063a6e5ea426a8b6'));
     await expect(run(input)).rejects.toThrow(/selected lock digest/u);
     expect(actor).not.toHaveBeenCalled();

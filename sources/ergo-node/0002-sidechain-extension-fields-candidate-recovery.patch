@@ -1875,10 +1875,10 @@ index 1c394b28174aa12303e67827d9c6a38ea6a38caf..4c09a8e469bb2650a9a9106d634da3ff
  }
 diff --git a/src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionActorSpec.scala b/src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionActorSpec.scala
 new file mode 100644
-index 0000000000000000000000000000000000000000..ddad50c8072370bcec0fad59adb4622e3be2a7f9
+index 0000000000000000000000000000000000000000..3a3218b31a3198300d5db975f9670c4e64602d13
 --- /dev/null
 +++ b/src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionActorSpec.scala
-@@ -0,0 +1,788 @@
+@@ -0,0 +1,932 @@
 +package org.ergoplatform.mining
 +
 +import akka.actor.{Actor, ActorRef, ActorSystem, Props}
@@ -1933,6 +1933,28 @@ index 0000000000000000000000000000000000000000..ddad50c8072370bcec0fad59adb4622e
 +    }
 +  }
 +
++  private case object ReleaseAppliedEvent
++  private case object GetGenerateRequestCount
++  private case class GenerateRequestCount(value: Int)
++  private final class HeldAppliedEventRelay(destination: ActorRef, observed: ActorRef,
++                                            headerId: String) extends Actor {
++    private var held = Vector.empty[FullBlockApplied]
++    private var generateRequests = 0
++    override def receive: Receive = {
++      case request: GenerateCandidate =>
++        generateRequests += 1
++        destination.tell(request, sender())
++      case GetGenerateRequestCount => sender() ! GenerateRequestCount(generateRequests)
++      case event @ FullBlockApplied(header) if header.id == headerId =>
++        held :+= event
++        observed ! event
++      case event: FullBlockApplied => destination ! event
++      case ReleaseAppliedEvent =>
++        held.foreach(destination ! _)
++        held = Vector.empty
++    }
++  }
++
 +  private final class Fixture(val system: ActorSystem, var generator: ActorRef, val readers: ActorRef,
 +                              val forwarder: ActorRef, val submissions: TestProbe, val applied: TestProbe,
 +                              val control: Control, val nodeSettings: ErgoSettings, val node: ActorRef) {
@@ -1952,10 +1974,29 @@ index 0000000000000000000000000000000000000000..ddad50c8072370bcec0fad59adb4622e
 +      generator ! ChangedState(state)
 +      barrier()
 +    }
-+    def candidate(): Candidate = {
-+      val reply = TestProbe()(system)
-+      generator.tell(GenerateCandidate(Seq.empty, reply = true, forced = true), reply.ref)
-+      reply.expectMsgPF(3.seconds) { case StatusReply.Success(value: Candidate) => value }
++    def candidate(onClosed: () => Unit = () => (), requestObserver: Option[ActorRef] = None,
++                  replyOverride: Option[TestProbe] = None): Candidate = {
++      val reply = replyOverride.getOrElse(TestProbe()(system))
++      reply.within(3.seconds) {
++        var closedObserved = false
++        // Undefined max uses this within's remaining budget without re-dilation.
++        reply.awaitCond({
++          val closed = control.submissionsClosed
++          if (closed && !closedObserved) {
++            closedObserved = true
++            onClosed()
++          }
++          !closed
++        })
++        requestObserver.getOrElse(generator).tell(GenerateCandidate(Seq.empty, reply = true, forced = true), reply.ref)
++        val result = reply.expectMsgPF() { case StatusReply.Success(value: Candidate) => value }
++        requestObserver.foreach { observer =>
++          // Same-sender FIFO: every helper request precedes this count query.
++          observer.tell(GetGenerateRequestCount, reply.ref)
++          reply.expectMsgPF() { case GenerateRequestCount(value) => value shouldBe 1 }
++        }
++        result
++      }
 +    }
 +    def solve(candidate: Candidate): ErgoFullBlock =
 +      nodeSettings.chainSettings.powScheme.proveCandidate(candidate.candidateBlock, defaultMinerSecret.w, 0, 1000).get
@@ -1971,6 +2012,25 @@ index 0000000000000000000000000000000000000000..ddad50c8072370bcec0fad59adb4622e
 +    def applySubmitted(block: ErgoFullBlock): Unit = {
 +      forwarder ! ReleaseSubmission
 +      applied.expectMsgPF(2.seconds) { case FullBlockApplied(header) => header.id shouldBe block.id }
++    }
++    // These two setup operations are used only by the event-ordering cases below.
++    def holdAppliedEvent(block: ErgoFullBlock): (ActorRef, TestProbe) = {
++      val observed = TestProbe()(system)
++      val relay = system.actorOf(Props(new HeldAppliedEventRelay(generator, observed.ref, block.id)))
++      system.eventStream.subscribe(relay, classOf[FullBlockApplied])
++      system.eventStream.unsubscribe(generator, classOf[FullBlockApplied])
++      barrier()
++      (relay, observed)
++    }
++    def joinActualReadersAt(block: ErgoFullBlock): Unit = {
++      val joined = TestProbe()(system)
++      joined.awaitAssert({
++        val current = liveReaders()
++        val state = current.s.asInstanceOf[UtxoStateReader]
++        current.h.bestFullBlockOpt.map(_.id) shouldBe Some(block.id)
++        state.stateContext.lastHeaderOpt.map(_.id) shouldBe Some(block.id)
++        setReaders(current.h, state)
++      }, 3.seconds)
 +    }
 +    def hold(): HoldReceipt = {
 +      val reply = TestProbe()(system)
@@ -2059,6 +2119,90 @@ index 0000000000000000000000000000000000000000..ddad50c8072370bcec0fad59adb4622e
 +        system.stop(current.generator)
 +        terminated.expectTerminated(current.generator, 2.seconds)
 +      } finally TestKit.shutdownActorSystem(system)
++    }
++  }
++
++  it should "wait for the actual buffered application before one next-parent candidate" in {
++    withFixture(permits = true) { fixture =>
++      val anchor = fixture.solve(fixture.candidate())
++      fixture.submit(anchor)
++      fixture.applySubmitted(anchor)
++      fixture.joinActualReadersAt(anchor)
++      val first = fixture.solve(fixture.candidate())
++      first.header.parentId shouldBe anchor.id
++      val parent = fixture.hold().watermark
++      parent shouldBe Watermark(anchor.id, anchor.header.height)
++      val transaction = first.transactions.head.id
++      fixture.arm(parent, transaction)
++      fixture.control.requiredPermitTransaction shouldBe Some(transaction)
++      fixture.control.submissionsClosed shouldBe false
++      val (relay, observed) = fixture.holdAppliedEvent(first)
++      fixture.submit(first)
++      fixture.control.submissionsClosed shouldBe true
++      fixture.applySubmitted(first)
++      observed.expectMsgPF(3.seconds) { case FullBlockApplied(header) => header.id shouldBe first.id }
++      fixture.joinActualReadersAt(first)
++      fixture.status(parent, transaction) shouldBe
++        TransactionPermitStatus("ef" * 32, transaction, parent, completed = false, finalWatermark = None)
++      fixture.control.requiredPermitTransaction shouldBe Some(transaction)
++      fixture.control.submissionsClosed shouldBe true
++      var observedClosed = false
++      val next = fixture.solve(fixture.candidate(
++        onClosed = () => {
++          observedClosed = true
++          fixture.control.submissionsClosed shouldBe true
++          relay ! ReleaseAppliedEvent
++        },
++        requestObserver = Some(relay)))
++      observedClosed shouldBe true
++      next.header.parentId shouldBe first.id
++      next.header.height shouldBe first.header.height + 1
++      fixture.control.requiredPermitTransaction shouldBe None
++      fixture.control.submissionsClosed shouldBe false
++      fixture.submissions.expectNoMessage(200.millis)
++    }
++  }
++
++  it should "fail within the candidate budget without generating when the actual application remains buffered" in {
++    withFixture(permits = true) { fixture =>
++      val anchor = fixture.solve(fixture.candidate())
++      fixture.submit(anchor)
++      fixture.applySubmitted(anchor)
++      fixture.joinActualReadersAt(anchor)
++      val first = fixture.solve(fixture.candidate())
++      first.header.parentId shouldBe anchor.id
++      val parent = fixture.hold().watermark
++      parent shouldBe Watermark(anchor.id, anchor.header.height)
++      val transaction = first.transactions.head.id
++      fixture.arm(parent, transaction)
++      fixture.control.requiredPermitTransaction shouldBe Some(transaction)
++      fixture.control.submissionsClosed shouldBe false
++      val (relay, observed) = fixture.holdAppliedEvent(first)
++      fixture.submit(first)
++      fixture.control.submissionsClosed shouldBe true
++      fixture.applySubmitted(first)
++      observed.expectMsgPF(3.seconds) { case FullBlockApplied(header) => header.id shouldBe first.id }
++      fixture.joinActualReadersAt(first)
++      fixture.status(parent, transaction) shouldBe
++        TransactionPermitStatus("ef" * 32, transaction, parent, completed = false, finalWatermark = None)
++      fixture.control.requiredPermitTransaction shouldBe Some(transaction)
++      fixture.control.submissionsClosed shouldBe true
++      var observedClosed = false
++      val reply = TestProbe()(fixture.system)
++      intercept[AssertionError] {
++        fixture.candidate(
++          onClosed = () => observedClosed = true,
++          requestObserver = Some(relay), replyOverride = Some(reply))
++      }
++      observedClosed shouldBe true
++      // A separate FIFO postcondition does not extend the failed candidate budget.
++      relay.tell(GetGenerateRequestCount, reply.ref)
++      reply.expectMsgPF() { case GenerateRequestCount(value) => value shouldBe 0 }
++      fixture.control.requiredPermitTransaction shouldBe Some(transaction)
++      fixture.control.submissionsClosed shouldBe true
++      fixture.status(parent, transaction) shouldBe
++        TransactionPermitStatus("ef" * 32, transaction, parent, completed = false, finalWatermark = None)
++      fixture.submissions.expectNoMessage(200.millis)
 +    }
 +  }
 +
