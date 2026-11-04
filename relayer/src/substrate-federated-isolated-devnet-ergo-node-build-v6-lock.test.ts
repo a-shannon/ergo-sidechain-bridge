@@ -51,7 +51,7 @@ describe('V6 current node build lock is a source-only selected input', () => {
       lock: {
         schemaVersion: 6,
         consensusSourceLockSha256:
-          '443fc2029710f85eb487fa5566e5395160ab946d65abce73380e046fd311cb32',
+          'c08b2cfa28cddf5559fa3f7c8d3ea9cede01af986748a88651a80002d55276fd',
         ownedMavenMirrorReceiptSha256:
           '27ff67d2da5b0dd35a7a4f401f9d8bd1d386ff15d8fc80ba4c2decbbc5527f31',
         ownedMavenMirrorMetadataSha256:

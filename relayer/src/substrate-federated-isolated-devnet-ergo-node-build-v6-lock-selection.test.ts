@@ -57,7 +57,7 @@ describe('explicit V6 or unchanged legacy node build lock selection', () => {
       schemaVersion: 6,
       kind: 'substrate-federated-isolated-devnet-node-build-lock-v6-current',
       consensusSourceLockSha256:
-        '443fc2029710f85eb487fa5566e5395160ab946d65abce73380e046fd311cb32',
+        'c08b2cfa28cddf5559fa3f7c8d3ea9cede01af986748a88651a80002d55276fd',
       sourceOnly: true, campaignAdmitted: false,
     });
     expect(legacyInspect).not.toHaveBeenCalled();
@@ -78,7 +78,7 @@ describe('explicit V6 or unchanged legacy node build lock selection', () => {
     mkdirSync(sourceDir);
     const selectedPath = resolve(fixtureRoot, V6_NODE_BUILD_LOCK_RELATIVE_PATH);
     writeFileSync(selectedPath, V6_NODE_BUILD_LOCK_CANONICAL_TEXT.replace(
-      '443fc2029710f85eb487fa5566e5395160ab946d65abce73380e046fd311cb32',
+      'c08b2cfa28cddf5559fa3f7c8d3ea9cede01af986748a88651a80002d55276fd',
       '82e96dca999244f145a67381e0037770dfd93ad61ecb29d3063a6e5ea426a8b6'),
     { flag: 'wx' });
     expect(() => inspectSelectedV6OrLegacyBuildLock(fixtureRoot!, 'v6-current'))

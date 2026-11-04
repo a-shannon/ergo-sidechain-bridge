@@ -4,7 +4,7 @@
   "solidityBuild": {
     "schema": "ergo-sidechain-bridge/solidity-build-closure/v1",
     "manifestPath": "solidity/compiled/build-manifest.json",
-    "manifestSha256": "312eb0fee01f3ca8ae4da4bc84dafcb5fee381b691143c44ec9f27f6a0199c43",
+    "manifestSha256": "e67c41b3db9c40c27fe079f1b253195aa90a735181bc99c33e079e7a98438eab",
     "checkCommand": "npm --prefix solidity run check",
     "compiler": "solc@0.8.35",
     "dependency": "@openzeppelin/contracts@5.6.1",

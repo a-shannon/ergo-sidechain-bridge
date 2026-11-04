@@ -62,7 +62,7 @@ function candidate(changes: Record<string, unknown> = {}) {
 describe('isolated devnet Ergo node build V4 source boundary', () => {
   it('binds the current consensus only through an explicit V6 selection', () => {
     expect(createHash('sha256').update(currentConsensusSourceLockBytes).digest('hex'))
-      .toBe('443fc2029710f85eb487fa5566e5395160ab946d65abce73380e046fd311cb32');
+      .toBe('c08b2cfa28cddf5559fa3f7c8d3ea9cede01af986748a88651a80002d55276fd');
     const selected = assertV4ErgoSourceObservation(candidate({
       consensusSourceLockBytes: currentConsensusSourceLockBytes,
       lockSelection: 'v6-current',
