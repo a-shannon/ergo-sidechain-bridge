@@ -549,6 +549,24 @@ describe('pinned local native verifier build conformance', () => {
     expect((outcome.error as BoundedProcessExitError).exitCode).not.toBe(0);
   }, PROCESS_LIFECYCLE_TEST_TIMEOUT_MS);
 
+  it('cancels an owned process when its caller aborts during preparation', async () => {
+    const controller = new AbortController();
+    const completion = runBoundedProcess({
+      executablePath: process.execPath,
+      args: ['-e', 'setInterval(() => {}, 1000)'],
+      cwd: bridgeRoot,
+      env: minimalTestProcessEnvironment(),
+      timeoutMs: 5_000,
+      maxOutputBytes: 1_024,
+      terminationGraceMs: 1_000,
+      signal: controller.signal,
+      label: 'test owned caller cancellation',
+    });
+
+    controller.abort();
+    await expect(completion).rejects.toThrow('test owned caller cancellation aborted');
+  }, PROCESS_LIFECYCLE_TEST_TIMEOUT_MS);
+
   it('retains successful process stdout as exact raw bytes', async () => {
     const expected = Buffer.from([0xff, 0x00, 0x61]);
     const result = await runBoundedProcess({
@@ -625,7 +643,7 @@ describe('pinned local native verifier build conformance', () => {
   );
 
   it('waits for a timed-out process tree to stop before returning cleanup authority', async () => {
-    const workspace = createPinnedLocalNativeBuildWorkspace();
+    const workspace = createProcessLifecycleWorkspace();
     const markerRoot = mkdtempSync(join(tmpdir(), 'e2s-build-timeout-marker-'));
     const readyPath = resolve(markerRoot, 'descendant-ready.txt');
     const descendantScript = [
@@ -676,7 +694,7 @@ describe('pinned local native verifier build conformance', () => {
   }, PROCESS_LIFECYCLE_TEST_TIMEOUT_MS);
 
   it('waits for an output-overflow process to stop before cleanup', async () => {
-    const workspace = createPinnedLocalNativeBuildWorkspace();
+    const workspace = createProcessLifecycleWorkspace();
     const markerRoot = mkdtempSync(join(tmpdir(), 'e2s-build-overflow-marker-'));
     const readyPath = resolve(markerRoot, 'descendant-ready.txt');
     const triggerPath = resolve(markerRoot, 'emit-output.txt');
@@ -738,7 +756,7 @@ describe('pinned local native verifier build conformance', () => {
 
   it('rejects output overflow that races verified Windows process completion', async () => {
     if (process.platform !== 'win32') return;
-    const workspace = createPinnedLocalNativeBuildWorkspace();
+    const workspace = createProcessLifecycleWorkspace();
     try {
       const outcome = await captureProcessOutcome(runBoundedNativeBuildProcess({
         executablePath: process.execPath,
@@ -765,7 +783,7 @@ describe('pinned local native verifier build conformance', () => {
 
   it('rejects a contained Windows wrapper failure without quarantining cleanup', async () => {
     if (process.platform !== 'win32') return;
-    const workspace = createPinnedLocalNativeBuildWorkspace();
+    const workspace = createProcessLifecycleWorkspace();
     try {
       const outcome = await captureProcessOutcome(runBoundedNativeBuildProcess({
         executablePath: resolve(workspace.buildTargetPath, 'missing-native-target.exe'),
@@ -788,7 +806,7 @@ describe('pinned local native verifier build conformance', () => {
   }, PROCESS_LIFECYCLE_TEST_TIMEOUT_MS);
 
   it('terminates a process that exceeds its independent stderr limit', async () => {
-    const workspace = createPinnedLocalNativeBuildWorkspace();
+    const workspace = createProcessLifecycleWorkspace();
     try {
       const outcome = await captureProcessOutcome(runBoundedNativeBuildProcess({
         executablePath: process.execPath,
@@ -845,7 +863,7 @@ describe('pinned local native verifier build conformance', () => {
 
   it('kills a detached descendant before a successful Windows run returns', async () => {
     if (process.platform !== 'win32') return;
-    const workspace = createPinnedLocalNativeBuildWorkspace();
+    const workspace = createProcessLifecycleWorkspace();
     const markerRoot = mkdtempSync(join(tmpdir(), 'e2s-build-success-marker-'));
     const readyPath = resolve(markerRoot, 'descendant-ready.txt');
     const descendantScript = 'setTimeout(() => process.exit(0), 10000);';
@@ -879,7 +897,7 @@ describe('pinned local native verifier build conformance', () => {
 
   it('closes inherited pipes by killing the contained Windows descendants', async () => {
     if (process.platform !== 'win32') return;
-    const workspace = createPinnedLocalNativeBuildWorkspace();
+    const workspace = createProcessLifecycleWorkspace();
     const markerRoot = mkdtempSync(join(tmpdir(), 'e2s-build-inherited-pipe-marker-'));
     const readyPath = resolve(markerRoot, 'descendant-ready.txt');
     const descendantScript = 'setInterval(() => {}, 1000);';
@@ -918,7 +936,7 @@ describe('pinned local native verifier build conformance', () => {
 
   it('contains an orphaned grandchild after its intermediary exits', async () => {
     if (process.platform !== 'win32') return;
-    const workspace = createPinnedLocalNativeBuildWorkspace();
+    const workspace = createProcessLifecycleWorkspace();
     const markerRoot = mkdtempSync(join(tmpdir(), 'e2s-build-orphan-marker-'));
     const readyPath = resolve(markerRoot, 'grandchild-ready.txt');
     const grandchildScript = 'setInterval(() => {}, 1000);';
@@ -1004,6 +1022,14 @@ describe('pinned local native verifier build conformance', () => {
     })).toThrow(/descendants remain/i);
   }, PROCESS_LIFECYCLE_TEST_TIMEOUT_MS);
 });
+
+function createProcessLifecycleWorkspace(): { buildTargetPath: string; cleanup: () => void } {
+  const buildTargetPath = mkdtempSync(join(tmpdir(), 'e2s-process-lifecycle-'));
+  return {
+    buildTargetPath,
+    cleanup: () => rmSync(buildTargetPath, { recursive: true, force: true }),
+  };
+}
 
 function sha256(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex');

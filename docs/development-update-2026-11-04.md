@@ -1,34 +1,47 @@
 # Ergo/Substrate bridge: development update, 4 November 2026
 
-The bridge reference now selects the patched redirect dependency across its
-Solidity and relayer toolchains. This removes the known local dependency-audit
-blocker while preserving the exact compiled contracts and their source bindings.
-It helps keep the reference reproducible for teams evaluating Ergo as a
-settlement layer for a Substrate/EVM sidechain.
+Since the [29 October checkpoint](development-update-2026-10-29.md), the
+federated Ergo/Substrate bridge reference has validated build inputs and local
+runtime components for its next integration run. The aim is an engineering base for
+teams that want Ergo settlement with familiar Substrate/EVM execution tools.
 
-The Solidity contracts were rebuilt in an isolated checkout. Their ten ABI,
-bytecode, metadata and storage-layout artifacts are byte-for-byte unchanged;
-only the dependency hashes in the build manifest changed. Those measured
-identities propagate through the current consensus and node-build locks.
-Historical build receipts retain their original identities.
+The Solidity and relayer toolchains now select the patched redirect dependency.
+Their scoped dependency audits pass. The Solidity contracts were rebuilt in an
+isolated checkout: all ten ABI, bytecode, metadata and storage-layout artifacts
+are unchanged. The build manifest and current source locks bind the new
+dependency identities.
 
-Validation now uses the locked Vitest 4.1.12. The affected source-lock tests and
-a bounded synthetic process case pass, the WASM package was built afresh, and
-TypeScript and import checks pass against that package. The isolated Solidity
-and relayer npm audits both report zero vulnerabilities. The exact source and
-artifact joins received independent review.
+The retained WASM package was built and its source-lock tests checked at the
+earlier checkpoint. The current lock refresh binds the revised process runner
+while preserving those JavaScript and WASM bytes. Historical receipts retain
+their original identities.
 
-The SQLite addon was also rebuilt from source. A real StateTracker opened and
-closed a new diagnostic database under Node 24.14 / ABI 137, with independent
-review of the native inputs and result. This closes the local native-component
-check.
+The SQLite addon was rebuilt from source, and a real StateTracker opened and
+closed a fresh diagnostic database under Node 24.14 / ABI 137. A later
+same-parent check combined that constructor with the retained WASM assertions,
+current environment checks and physical node-build input checks. Those local
+results received independent review; they do not establish campaign execution.
 
-The Linux CI source rebuild stopped in RocksDB 8.1.1 before the bridge assertions:
-its header uses `uint64_t` without including `cstdint`. The source job now forces
-that header. All 42 workflow tests and the selected baseline case pass, alongside
-TypeScript and import checks. Hosted compilation must still confirm this fix.
-A separate Windows job aborted while downloading the pinned Microsoft JDK,
-before product code ran; its underlying cause remains unresolved.
+The [Linux source rebuild](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/41782411024/job/126416767547)
+passes the LAB reservation tests, native proof-verifier checks and both patched
+node builds. The Linux job includes `cstdint` explicitly for the RocksDB 8.1.1
+header that previously stopped compilation. The current SPV lock also binds the
+reviewed producer sources while preserving the JavaScript and WASM artifact
+bytes. The separate Java runtime inspection checks its pinned toolchain and
+classpath; it does not compile or execute a new JVM result.
+
+This checkpoint also adds optional caller cancellation to the bounded process
+runner. The HTTP isolation test passes its own abort signal and awaits the same
+completion during cleanup. On Windows, cancellation uses the existing Job
+Object channel; an unverified process-tree exit keeps ownership pending.
+Cancellation cannot turn a late successful exit into a successful test.
+
+The preceding published head's [CI run](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/41782411024)
+passed the Linux rebuild and Solidity audit, but the Windows audit expired at
+the isolated HTTP test's ten-second outer deadline. The local matched
+diagnostics passed. The cancellation correction addresses process ownership;
+it does not establish the cause of that hosted timeout. The child and test
+deadlines remain unchanged. Exact-head CI is a separate result.
 
 The operational milestone ahead is still two complete deposit, mint, burn and
 withdrawal cycles on the same fresh synthetic chain, carrying successor state
@@ -37,4 +50,6 @@ evidence and external acceptance remain open. The earlier native invocation
 stays closed; its failure cause is unestablished.
 
 The reference remains explicitly federated. The STARK-based trustless upgrade
-is a separate track, and production readiness has not been established.
+is a separate track, and production readiness has not been established. The
+[current development PR](https://github.com/a-shannon/ergo-sidechain-bridge/pull/7)
+contains the source changes; it is not a release or an accepted deployment.

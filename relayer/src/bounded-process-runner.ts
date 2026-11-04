@@ -33,6 +33,7 @@ export interface BoundedProcessInput {
   maxStdoutBytes?: number;
   maxStderrBytes?: number;
   terminationGraceMs?: number;
+  signal?: AbortSignal;
   label: string;
 }
 
@@ -105,6 +106,7 @@ export async function runBoundedProcess(
       throw new Error(`bounded process ${label} must be a positive safe integer`);
     }
   }
+  if (input.signal?.aborted) throw new Error(`${input.label} aborted`);
 
   return await new Promise<BoundedProcessResult>((resolvePromise, reject) => {
     let settled = false;
@@ -123,8 +125,30 @@ export async function runBoundedProcess(
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
     const spawnSpecification = buildBoundedProcessSpawnSpecification(input);
-    const child = process.platform === 'win32'
-      ? spawn(spawnSpecification.executablePath, spawnSpecification.args, {
+    // Preparation is synchronous, but an input callback can abort while it runs.
+    if (input.signal?.aborted) {
+      reject(new Error(`${input.label} aborted`));
+      return;
+    }
+    let cancellationReady = false;
+    let abortPending = false;
+    const onAbort = (): void => {
+      abortPending = true;
+      if (cancellationReady) requestTermination(new Error(`${input.label} aborted`));
+    };
+    input.signal?.addEventListener('abort', onAbort);
+    if (input.signal?.aborted) {
+      input.signal.removeEventListener('abort', onAbort);
+      reject(new Error(`${input.label} aborted`));
+      return;
+    }
+    let child: ChildProcess & {
+      stdout: NonNullable<ChildProcess['stdout']>;
+      stderr: NonNullable<ChildProcess['stderr']>;
+    };
+    try {
+      child = process.platform === 'win32'
+        ? spawn(spawnSpecification.executablePath, spawnSpecification.args, {
           cwd: spawnSpecification.cwd,
           windowsHide: true,
           shell: false,
@@ -132,7 +156,7 @@ export async function runBoundedProcess(
           env: spawnSpecification.env,
           stdio: ['pipe', 'pipe', 'pipe'],
         })
-      : spawn(spawnSpecification.executablePath, spawnSpecification.args, {
+        : spawn(spawnSpecification.executablePath, spawnSpecification.args, {
           cwd: spawnSpecification.cwd,
           windowsHide: true,
           shell: false,
@@ -140,6 +164,11 @@ export async function runBoundedProcess(
           env: spawnSpecification.env,
           stdio: ['ignore', 'pipe', 'pipe'],
         });
+    } catch (error) {
+      input.signal?.removeEventListener('abort', onAbort);
+      reject(error);
+      return;
+    }
     const watchdogTimeoutMs = process.platform === 'win32'
       ? input.timeoutMs + WINDOWS_JOB_RUNNER_WATCHDOG_ALLOWANCE_MS
       : input.timeoutMs;
@@ -239,6 +268,26 @@ export async function runBoundedProcess(
         exitVerificationFailure = undefined;
         stopTerminationRetry();
       }
+      if (
+        requestedFailure
+        && input.signal?.aborted
+        && process.platform !== 'win32'
+        && !liveTreeTerminationConfirmed
+      ) {
+        // Abort may arrive after exit but before close. Reinspect the group;
+        // never try to kill an exited parent's potentially reused PID.
+        try {
+          assertNoNativeBuildDescendants(child);
+          liveTreeTerminationConfirmed = true;
+          terminationFailure = undefined;
+          exitVerificationFailure = undefined;
+          stopTerminationRetry();
+        } catch (error) {
+          exitVerificationFailure = error instanceof Error
+            ? error
+            : new Error('native build descendant inspection failed');
+        }
+      }
       if (requestedFailure) {
         if (
           liveTreeTerminationConfirmed
@@ -268,6 +317,9 @@ export async function runBoundedProcess(
       }
       finish();
     });
+    // A synchronous spawn/listener callback can abort before setup is complete.
+    cancellationReady = true;
+    if (abortPending || input.signal?.aborted) onAbort();
 
     function requestTermination(error: Error): void {
       if (settled || requestedFailure) return;
@@ -326,11 +378,13 @@ export async function runBoundedProcess(
 
     function finish(error?: Error): void {
       if (settled) return;
+      if (!error && input.signal?.aborted) error = new Error(`${input.label} aborted`);
       clearTimeout(timer);
       stopTerminationRetry();
       if (terminationDeadline) clearTimeout(terminationDeadline);
       if (postExitCloseTimer) clearTimeout(postExitCloseTimer);
       if (terminationQuarantineHold) clearInterval(terminationQuarantineHold);
+      input.signal?.removeEventListener('abort', onAbort);
       if (error) {
         settled = true;
         reject(error);

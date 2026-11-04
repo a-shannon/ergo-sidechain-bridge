@@ -43,7 +43,7 @@
     },
     {
       "path": "relayer/src/bounded-process-runner.ts",
-      "sha256": "2dadbfc063fc51f7f7c6ed85ac95380378957447110ebf8daee13723eb797ab3"
+      "sha256": "553eaf56628879a11ed8e67b91378f22421f303efc47d47065df4bedf1639594"
     },
     {
       "path": "relayer/src/scripts/windows-job-process.ps1",

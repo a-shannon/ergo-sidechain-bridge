@@ -112,7 +112,7 @@ describe('ErgoClient installed Axios HTTP transport', () => {
     expect(requests).toBe(1);
   });
 
-  it('ignores an inherited createConnection hook in an isolated actual-client process', async () => {
+  it('ignores an inherited createConnection hook in an isolated actual-client process', async (context) => {
     // GHSA-m8m8-qj5v-23w3: never pollute the Vitest/RPC process or replace the adapter.
     const source = `
       import assert from 'node:assert/strict';
@@ -156,7 +156,7 @@ describe('ErgoClient installed Axios HTTP transport', () => {
       assert.equal(Object.getOwnPropertyDescriptor(Object.prototype, 'createConnection'), original);
       process.stdout.write(JSON.stringify({ hookCalls, requests, restored: true }));
     `;
-    const result = await runBoundedProcess({
+    const completion = runBoundedProcess({
       executablePath: process.execPath,
       args: ['--import', new URL('../node_modules/tsx/dist/loader.mjs', import.meta.url).href,
         '--input-type=module', '--eval', source],
@@ -166,6 +166,7 @@ describe('ErgoClient installed Axios HTTP transport', () => {
       timeoutMs: 5_000,
       terminationGraceMs: 1_000,
       maxOutputBytes: 16 * 1024,
+      signal: context.signal,
       label: 'isolated ErgoClient inherited connection hook',
     }).catch((error: unknown) => {
       if (error instanceof BoundedProcessExitError) {
@@ -174,6 +175,12 @@ describe('ErgoClient installed Axios HTTP transport', () => {
       }
       throw error;
     });
+    context.onTestFinished(async () => {
+      // Timeout aborts the signal; this remains pending until owned closure.
+      // A containment or cancellation error must remain visible to Vitest.
+      await completion;
+    });
+    const result = await completion;
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe('');
     expect(JSON.parse(result.stdout)).toEqual({ hookCalls: 0, requests: 1, restored: true });
