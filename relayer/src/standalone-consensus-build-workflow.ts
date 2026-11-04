@@ -495,8 +495,9 @@ export function validateStandaloneConsensusBuildWorkflow(
   }
   if (JSON.stringify(job?.env) !== JSON.stringify({
     CARGO_NET_GIT_FETCH_WITH_CLI: 'true',
+    CXXFLAGS: '-include cstdint',
   })) {
-    errors.push('standalone consensus job environment must contain only Git CLI fetch enabled');
+    errors.push('standalone consensus job environment must match the reviewed Git and C++ settings');
   }
   if (job && JSON.stringify(Object.keys(job).sort()) !== JSON.stringify([
     'env',

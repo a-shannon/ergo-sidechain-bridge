@@ -24,6 +24,7 @@ const sourceLock = JSON.parse(readFileSync(
 const consensusJobEnvironment = [
   '    env:',
   '      CARGO_NET_GIT_FETCH_WITH_CLI: "true"',
+  '      CXXFLAGS: "-include cstdint"',
   '',
 ].join('\n');
 
@@ -93,6 +94,7 @@ describe('standalone consensus-source build workflow', () => {
     });
     expect(parsedWorkflow.jobs['consensus-sources'].env).toEqual({
       CARGO_NET_GIT_FETCH_WITH_CLI: 'true',
+      CXXFLAGS: '-include cstdint',
     });
     expect(parsedWorkflow.jobs['audit-alpha'].env).toBeUndefined();
     expect(parsedWorkflow.jobs['solidity-audit'].env).toBeUndefined();
@@ -134,22 +136,26 @@ describe('standalone consensus-source build workflow', () => {
 
   it.each([
     ['missing', ''],
-    ['disabled', '    env:\n      CARGO_NET_GIT_FETCH_WITH_CLI: "false"\n'],
-    ['wrong-case string', '    env:\n      CARGO_NET_GIT_FETCH_WITH_CLI: "TRUE"\n'],
-    ['boolean value', '    env:\n      CARGO_NET_GIT_FETCH_WITH_CLI: true\n'],
-    ['numeric value', '    env:\n      CARGO_NET_GIT_FETCH_WITH_CLI: 1\n'],
+    ['disabled', '    env:\n      CARGO_NET_GIT_FETCH_WITH_CLI: "false"\n      CXXFLAGS: "-include cstdint"\n'],
+    ['wrong-case string', '    env:\n      CARGO_NET_GIT_FETCH_WITH_CLI: "TRUE"\n      CXXFLAGS: "-include cstdint"\n'],
+    ['boolean value', '    env:\n      CARGO_NET_GIT_FETCH_WITH_CLI: true\n      CXXFLAGS: "-include cstdint"\n'],
+    ['numeric value', '    env:\n      CARGO_NET_GIT_FETCH_WITH_CLI: 1\n      CXXFLAGS: "-include cstdint"\n'],
     ['non-map value', '    env: "CARGO_NET_GIT_FETCH_WITH_CLI=true"\n'],
+    ['missing C++ include', '    env:\n      CARGO_NET_GIT_FETCH_WITH_CLI: "true"\n'],
+    ['changed C++ include', '    env:\n      CARGO_NET_GIT_FETCH_WITH_CLI: "true"\n      CXXFLAGS: "-include stdint.h"\n'],
+    ['extra C++ argument', '    env:\n      CARGO_NET_GIT_FETCH_WITH_CLI: "true"\n      CXXFLAGS: "-include cstdint -w"\n'],
+    ['alternate flags variable', '    env:\n      CARGO_NET_GIT_FETCH_WITH_CLI: "true"\n      CXXFLAGS: "-include cstdint"\n      CFLAGS: "-include cstdint"\n'],
     [
       'extra TLS-disabling variable',
-      '    env:\n      CARGO_NET_GIT_FETCH_WITH_CLI: "true"\n      GIT_SSL_NO_VERIFY: true\n',
+      '    env:\n      CARGO_NET_GIT_FETCH_WITH_CLI: "true"\n      CXXFLAGS: "-include cstdint"\n      GIT_SSL_NO_VERIFY: true\n',
     ],
-  ])('requires the exact job-level Git CLI fetch environment (%s)', (_name, replacement) => {
+  ])('requires the exact source job environment (%s)', (_name, replacement) => {
     const mutatedWorkflow = workflowText.replace(consensusJobEnvironment, replacement);
     expect(mutatedWorkflow).not.toBe(workflowText);
 
     const result = validateStandaloneConsensusBuildWorkflow(mutatedWorkflow, sourceLock);
     expect(result.errors).toContain(
-      'standalone consensus job environment must contain only Git CLI fetch enabled',
+      'standalone consensus job environment must match the reviewed Git and C++ settings',
     );
     if (replacement === '') {
       expect(result.errors).toContain(
@@ -157,9 +163,30 @@ describe('standalone consensus-source build workflow', () => {
       );
     } else {
       expect(result.errors).toEqual([
-        'standalone consensus job environment must contain only Git CLI fetch enabled',
+        'standalone consensus job environment must match the reviewed Git and C++ settings',
       ]);
     }
+    expect(result.checks.exactCommandGraphValid).toBe(false);
+  });
+
+  it.each([
+    ['audit-alpha', 'public audit job may contain only its defaults, name, runner, timeout, and exact steps'],
+    ['solidity-audit', 'Solidity audit job may contain only its name, runner, timeout, and exact steps'],
+  ])('rejects the C++ flag in the %s job', (jobName, error) => {
+    const marker = `  ${jobName}:\n`;
+    const mutatedWorkflow = workflowText.replace(marker, `${marker}    env:\n      CXXFLAGS: "-include cstdint"\n`);
+    expect(mutatedWorkflow).not.toBe(workflowText);
+    const result = validateStandaloneConsensusBuildWorkflow(mutatedWorkflow, sourceLock);
+    expect(result.errors).toContain(error);
+    expect(result.checks.exactCommandGraphValid).toBe(false);
+  });
+
+  it('rejects a Windows audit step C++ override', () => {
+    const marker = '      - name: Isolate audit Node.js\n';
+    const mutatedWorkflow = workflowText.replace(marker, `${marker}        env:\n          CXXFLAGS: "-include cstdint"\n`);
+    expect(mutatedWorkflow).not.toBe(workflowText);
+    const result = validateStandaloneConsensusBuildWorkflow(mutatedWorkflow, sourceLock);
+    expect(result.errors).toContain('Isolate audit Node.js: environment is not allowed');
     expect(result.checks.exactCommandGraphValid).toBe(false);
   });
 
