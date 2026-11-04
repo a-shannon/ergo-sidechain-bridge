@@ -19,11 +19,11 @@
     },
     {
       "path": "relayer/package.json",
-      "sha256": "abee55db6fe4bf967397e8dc3783fdf8e74f431ac740c328fe2d5e423ebb00eb"
+      "sha256": "3518c0893e86202d2a7c1e976bd3c3942c7423a978b3ff009d0c2f621abf0b8d"
     },
     {
       "path": "relayer/package-lock.json",
-      "sha256": "3a41a7c004d8fea1c6722c9edbb7648545b4e4f0cf0e822f62c9774337b5aea3"
+      "sha256": "86a5cce1af43afa594dcfc2b46d02f4b6a5fdb039547dda73c6d8a48a2a5aeba"
     },
     {
       "path": "relayer/tsconfig.json",
@@ -31,7 +31,7 @@
     },
     {
       "path": "relayer/src/scripts/build-wasm-avl.ts",
-      "sha256": "76d13fcd5ebaa9ba6ed9875d9dff942319a429bc68907e59ee97cc027b16df98"
+      "sha256": "4f6ad04a39c177d532ddc8829b00af9e402d4d985641038e701efafe805a8be5"
     },
     {
       "path": "relayer/src/scripts/build-wasm-avl-pipeline-v2.ts",
