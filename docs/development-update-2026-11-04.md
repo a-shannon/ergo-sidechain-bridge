@@ -57,6 +57,18 @@ ownership; the hosted timeout cause remains unresolved. Child, test and cleanup
 deadlines remain unchanged, and CI on the next published head is a separate
 validation result.
 
+Preparatory refusals after configuration validation can now produce a create-only
+public diagnostic. Eight phase tags distinguish environment checks, Ergo input
+checks, the WASM build and final preparation checks. The report carries input
+digests and the source commit declared by the configuration. It excludes paths
+and raw errors, keeps completion claims false, and preserves the original
+failure returned to the caller.
+
+The decoder, file-writer and Parent checks pass 52 focused tests. TypeScript
+and the import guard pass, and the source has independent review. Import or
+configuration-load failures remain outside this diagnostic; an absent report
+does not prove that no preparatory work occurred.
+
 The operational milestone ahead is still two complete deposit, mint, burn and
 withdrawal cycles on the same fresh synthetic chain, carrying successor state
 and replay history between cycles. Stopped-state recovery, operator/FED-7

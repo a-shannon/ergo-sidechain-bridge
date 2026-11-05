@@ -1,4 +1,10 @@
 import { createHash } from 'node:crypto';
+import {
+  captureNativeTwoCyclePreparationConfigV1,
+  tryPublishNativeTwoCyclePreparationFailureV1,
+  originalNativeTwoCyclePreparationFailureV1,
+  withNativeTwoCyclePreparationPhaseV1,
+} from '../substrate-federated-native-two-cycle-preparation-v1.js';
 import { validateSubstrateFederatedNativeTwoCycleResultV1 as validateProjectedResult } from '../substrate-federated-native-two-cycle-result-codec-v1.js';
 import {
   existsSync,
@@ -238,34 +244,50 @@ async function runFromArguments(
 ): Promise<Readonly<RunSubstrateFederatedNativeTwoCycleResult>> {
   const configPath = parseArguments(argv);
   const initial = loadInvocation(invocationVersion, configPath);
-  const environmentBeforeBuild =
-    await validateEnvironment(invocationVersion, initial);
-  if (invocationVersion === 1) {
-    const legacy = initial as Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV1>;
-    assertSubstrateFederatedIsolatedDevnetErgoNodeBuildOutputReadyV1(
-      legacy.config.bridgeRoot, legacy.config.ergoSourcePath);
-  } else {
-    await assertV6ErgoRuntimeBuildInputsReady(
-      (initial as Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV2>).config.ergoBuild,
-      'parent-before-wasm');
-  }
-  const wasmPackage = await buildWasmAvlPackageV2(initial.config.bridgeRoot, { quiet: true });
-  assertSubstrateFederatedNativeWasmAvlPackageMatchesV1(
-    initial.config.bridgeRoot,
-    wasmPackage,
-  );
-  const environmentBefore =
-    await validateEnvironment(invocationVersion, initial);
-  assertSameEnvironment(environmentBeforeBuild, environmentBefore);
-  if (copiedSelectionEntryExists(join(initial.attemptPath,
-    'worker-deposit-funding-stage-v2.json'))
-    || copiedSelectionEntryExists(join(initial.attemptPath,
-      'failure-deposit-funding-stage-v2.json'))) {
-    throw new Error('native two-cycle V2 deposit funding output is occupied before entry');
-  }
-  if (invocationVersion === 2) await assertV6ErgoRuntimeBuildInputsReady(
-    (initial as Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV2>).config.ergoBuild,
-    'parent-before-attempt');
+  const preparationContext = captureNativeTwoCyclePreparationConfigV1(initial);
+  const { wasmPackage, environmentBefore } = await (async () => {
+    try {
+      const environmentBeforeBuild = await withNativeTwoCyclePreparationPhaseV1(
+        'environment-before-build', () => validateEnvironment(invocationVersion, initial));
+      await withNativeTwoCyclePreparationPhaseV1('ergo-inputs-before-wasm', async () => {
+        if (invocationVersion === 1) {
+          const legacy = initial as Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV1>;
+          assertSubstrateFederatedIsolatedDevnetErgoNodeBuildOutputReadyV1(
+            legacy.config.bridgeRoot, legacy.config.ergoSourcePath);
+        } else {
+          await assertV6ErgoRuntimeBuildInputsReady(
+            (initial as Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV2>).config.ergoBuild,
+            'parent-before-wasm');
+        }
+      });
+      const wasmPackage = await withNativeTwoCyclePreparationPhaseV1('wasm-build',
+        () => buildWasmAvlPackageV2(initial.config.bridgeRoot, { quiet: true }));
+      await withNativeTwoCyclePreparationPhaseV1('wasm-package', () =>
+        assertSubstrateFederatedNativeWasmAvlPackageMatchesV1(
+          initial.config.bridgeRoot, wasmPackage));
+      const environmentBefore = await withNativeTwoCyclePreparationPhaseV1(
+        'environment-after-build', () => validateEnvironment(invocationVersion, initial));
+      await withNativeTwoCyclePreparationPhaseV1('environment-stability', () =>
+        assertSameEnvironment(environmentBeforeBuild, environmentBefore));
+      await withNativeTwoCyclePreparationPhaseV1('pre-attempt-outputs', () => {
+        if (copiedSelectionEntryExists(join(initial.attemptPath,
+          'worker-deposit-funding-stage-v2.json'))
+          || copiedSelectionEntryExists(join(initial.attemptPath,
+            'failure-deposit-funding-stage-v2.json'))) {
+          throw new Error('native two-cycle V2 deposit funding output is occupied before entry');
+        }
+      });
+      await withNativeTwoCyclePreparationPhaseV1('ergo-inputs-before-attempt', async () => {
+        if (invocationVersion === 2) await assertV6ErgoRuntimeBuildInputsReady(
+          (initial as Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV2>).config.ergoBuild,
+          'parent-before-attempt');
+      });
+      return { wasmPackage, environmentBefore };
+    } catch (error) {
+      tryPublishNativeTwoCyclePreparationFailureV1(initial, preparationContext, error);
+      throw originalNativeTwoCyclePreparationFailureV1(error);
+    }
+  })();
   const attemptPath = createAttemptDirectory(initial.attemptPath);
   const capturedConfigPath = join(attemptPath, 'config.json');
   const startPath = join(attemptPath, 'start.json');
