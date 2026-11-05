@@ -19,6 +19,7 @@ vi.mock('node:fs', async importOriginal => {
 
 import {
   assertSubstrateFederatedAuthoritySafeMsvcBuildHostV1,
+  buildSubstrateFederatedAuthoritySafeCargoEnvironmentV1 as cargoEnvironment,
   buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1 as minimalEnvironment,
   inspectSubstrateFederatedAuthoritySafePinnedToolchainV1 as inspectTools,
 } from './substrate-federated-authority-safe-devnet-build-environment-v1.js';
@@ -141,6 +142,7 @@ const stateKeys = ['APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP'] as const;
 function stateFixture() {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'e2s-native-helper-state-')));
   roots.push(root);
+  vi.stubEnv('PSModuleAnalysisCachePath', undefined);
   const directory = (name: string) => {
     const value = join(root, name); mkdirSync(value, { recursive: true }); return value;
   };
@@ -170,6 +172,77 @@ function stateFixture() {
 }
 
 describe.skipIf(process.platform !== 'win32')('Windows helper state forwarding', () => {
+  function cargoInput(f: ReturnType<typeof stateFixture>) {
+    const directory = (name: string) => {
+      const value = join(f.root, name); mkdirSync(value); return value;
+    };
+    const profile = directory('profile');
+    vi.stubEnv('USERPROFILE', profile); vi.stubEnv('HOME', profile);
+    vi.stubEnv('RUSTUP_HOME', directory('rustup'));
+    vi.stubEnv('CARGO_HOME', 'unselected-parent-cargo-home');
+    for (const key of ['LIB', 'LIBPATH', 'INCLUDE']) vi.stubEnv(key, `fixture-${key}`);
+    const protocExecutablePath = join(f.tools, 'protoc.exe');
+    writeFileSync(protocExecutablePath, 'fixture protoc bytes');
+    return { ...f.input, cargoTargetDirectory: directory('cargo-target'),
+      cargoHomeDirectory: directory('selected-cargo-home'),
+      frontierSourcePath: f.input.cwd, protocExecutablePath,
+      rustTarget: 'x86_64-pc-windows-msvc' };
+  }
+
+  it('forwards the owned module cache through the minimal environment', () => {
+    const f = stateFixture();
+    const selected = join(f.root, 'helper-state', 'module-analysis-cache');
+    vi.stubEnv('PSModuleAnalysisCachePath', selected);
+    vi.stubEnv('PSModulePath', 'untrusted-module-search-path');
+    const environment = minimalEnvironment();
+    expect(environment.PSModuleAnalysisCachePath).toBe(selected);
+    expect(environment).not.toHaveProperty('PSModulePath');
+    expect(toolMocks.process).not.toHaveBeenCalled();
+  });
+
+  it('forwards the owned module cache to all three actual tool-probe receivers', async () => {
+    const f = stateFixture();
+    const selected = join(f.root, 'helper-state', 'module-analysis-cache');
+    vi.stubEnv('PSModuleAnalysisCachePath', selected);
+    vi.stubEnv('PSModulePath', 'untrusted-module-search-path');
+    await inspectTools(f.input);
+    expect(toolMocks.process).toHaveBeenCalledTimes(3);
+    for (const [input] of toolMocks.process.mock.calls) {
+      expect(input.env.PSModuleAnalysisCachePath).toBe(selected);
+      expect(input.env).not.toHaveProperty('PSModulePath');
+    }
+  });
+
+  it('forwards the owned module cache to Cargo without changing its pinned inputs', () => {
+    const f = stateFixture(); const input = cargoInput(f);
+    const selected = join(f.root, 'helper-state', 'module-analysis-cache');
+    vi.stubEnv('PSModuleAnalysisCachePath', selected);
+    vi.stubEnv('PSModulePath', 'untrusted-module-search-path');
+    const environment = cargoEnvironment(input);
+    expect(environment.PSModuleAnalysisCachePath).toBe(selected);
+    expect(environment.CARGO_HOME).toBe(input.cargoHomeDirectory);
+    expect(environment.CARGO_TARGET_DIR).toBe(input.cargoTargetDirectory);
+    expect(environment.RUSTC).toBe(input.rustcExecutablePath);
+    expect(environment.PROTOC).toBe(realpathSync(input.protocExecutablePath));
+    for (const key of ['LIB', 'LIBPATH', 'INCLUDE']) {
+      expect(environment[key]).toBe(`fixture-${key}`);
+    }
+    expect(environment.Path).toContain(f.tools);
+    expect(environment).not.toHaveProperty('PSModulePath');
+    expect(toolMocks.process).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, ''])('keeps an absent or empty module-cache selector omitted (%s)', async value => {
+    const f = stateFixture(); const input = cargoInput(f);
+    vi.stubEnv('PSModuleAnalysisCachePath', value);
+    expect(minimalEnvironment()).not.toHaveProperty('PSModuleAnalysisCachePath');
+    expect(cargoEnvironment(input)).not.toHaveProperty('PSModuleAnalysisCachePath');
+    await inspectTools(f.input);
+    for (const [probe] of toolMocks.process.mock.calls) {
+      expect(probe.env).not.toHaveProperty('PSModuleAnalysisCachePath');
+    }
+  });
+
   it('uses one exact state whitelist for all three pinned tool probes', async () => {
     const f = stateFixture();
     for (const key of ['HOME', 'USERPROFILE', 'GIT_CONFIG_GLOBAL', 'GIT_DIR', 'NODE_OPTIONS',

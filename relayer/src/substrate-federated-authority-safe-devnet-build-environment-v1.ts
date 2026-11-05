@@ -117,6 +117,9 @@ function minimalToolEnvironment(protectedSources: readonly string[]): NodeJS.Pro
       }
       environment[key] = directory;
     }
+    if (process.env.PSModuleAnalysisCachePath) {
+      environment.PSModuleAnalysisCachePath = process.env.PSModuleAnalysisCachePath;
+    }
   }
   return environment;
 }
