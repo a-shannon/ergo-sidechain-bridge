@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import {
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -17,7 +18,9 @@ import { pathToFileURL } from 'node:url';
 import {
   resolveAuthenticatedV2CompilerRuntimeProjectInputs,
   validateAuthenticatedV2CompilerRuntimeBundle,
+  validatePinnedAuthenticatedV2CompilerHost,
   type AuthenticatedV2CompilerRuntimeBuildInputs,
+  type VerifiedParentRuntime,
 } from './authenticated-v2-source-tree-conformance.js';
 
 export const AUTHENTICATED_V2_RUNTIME_BUNDLE_BUILD_PROFILE =
@@ -272,11 +275,10 @@ function hashDirectoryFiles(root: string): string {
   return createHash('sha256').update(records.join('\n'), 'utf8').digest('hex');
 }
 
-export function validateAuthenticatedV2RuntimeBundleBuildParent(
+function loadRuntimeBundleParentLock(
   bridgeRootInput: string,
-): AuthenticatedV2RuntimeBundleBuildParentLock {
+): { bridgeRoot: string; lock: AuthenticatedV2RuntimeBundleBuildParentLock } {
   const bridgeRoot = realpathSync(bridgeRootInput);
-  const relayerRoot = realpathSync(path.resolve(bridgeRoot, 'relayer'));
   const lockPath = realpathSync(path.resolve(
     bridgeRoot,
     'sources',
@@ -294,6 +296,13 @@ export function validateAuthenticatedV2RuntimeBundleBuildParent(
   if (forbidden.length > 0) {
     throw new Error('runtime-bundle parent contains a forbidden environment override');
   }
+  return { bridgeRoot, lock };
+}
+
+export function validateAuthenticatedV2RuntimeBundleBuildParent(
+  bridgeRootInput: string,
+): AuthenticatedV2RuntimeBundleBuildParentLock {
+  const { bridgeRoot, lock } = loadRuntimeBundleParentLock(bridgeRootInput);
   if (process.version !== `v${lock.nodeVersion}`) {
     throw new Error('runtime-bundle parent Node version does not match the lock');
   }
@@ -301,6 +310,30 @@ export function validateAuthenticatedV2RuntimeBundleBuildParent(
   if (!statSync(nodeExecutable).isFile() || sha256File(nodeExecutable) !== lock.nodeExecutableSha256) {
     throw new Error('runtime-bundle parent Node executable does not match the lock');
   }
+  validateRuntimeBundleParentLoader(bridgeRoot, lock);
+  return lock;
+}
+
+/** The FED compilers retain their historical Node host; the loader uses current packages. */
+export function validatePinnedFederatedCampaignParentRuntime(
+  bridgeRootInput: string,
+): VerifiedParentRuntime {
+  const { bridgeRoot, lock } = loadRuntimeBundleParentLock(bridgeRootInput);
+  validateRuntimeBundleParentLoader(bridgeRoot, lock);
+  const host = validatePinnedAuthenticatedV2CompilerHost(bridgeRoot);
+  return Object.freeze({
+    ...host,
+    relayerPackageLockSha256: lock.relayerPackageLockSha256,
+    parentRuntimePackagesValidated: true as const,
+    loaderInvocationValidated: true as const,
+  });
+}
+
+function validateRuntimeBundleParentLoader(
+  bridgeRoot: string,
+  lock: AuthenticatedV2RuntimeBundleBuildParentLock,
+): void {
+  const relayerRoot = realpathSync(path.resolve(bridgeRoot, 'relayer'));
   if (
     hashAuthenticatedV2RuntimeBundlePackageLock(
       readFileSync(path.resolve(relayerRoot, 'package-lock.json')),
@@ -309,12 +342,19 @@ export function validateAuthenticatedV2RuntimeBundleBuildParent(
   ) {
     throw new Error('runtime-bundle parent package lock does not match the lock');
   }
-  const nodeModulesRoot = realpathSync(path.resolve(relayerRoot, 'node_modules'));
+  const nodeModulesPath = path.resolve(relayerRoot, 'node_modules');
+  const nodeModulesRoot = realpathSync(nodeModulesPath);
+  if (nodeModulesRoot !== nodeModulesPath || lstatSync(nodeModulesPath).isSymbolicLink()) {
+    throw new Error('runtime-bundle parent node_modules must not be an alias');
+  }
   const verifiedPackages = new Map<string, string>();
   for (const entry of lock.parentRuntimePackages) {
-    const packageRoot = realpathSync(path.resolve(bridgeRoot, entry.path));
+    const packagePath = path.resolve(bridgeRoot, entry.path);
+    const packageRoot = realpathSync(packagePath);
     if (
-      !isInsidePath(packageRoot, nodeModulesRoot)
+      packageRoot !== packagePath
+      || lstatSync(packagePath).isSymbolicLink()
+      || !isInsidePath(packageRoot, nodeModulesRoot)
       || !statSync(packageRoot).isDirectory()
       || hashDirectoryFiles(packageRoot) !== entry.sha256
     ) {
@@ -336,7 +376,6 @@ export function validateAuthenticatedV2RuntimeBundleBuildParent(
   ) {
     throw new Error('runtime-bundle parent tsx invocation does not match the lock');
   }
-  return lock;
 }
 
 function runSbtProcess(

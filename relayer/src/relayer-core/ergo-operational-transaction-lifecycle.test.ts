@@ -6,6 +6,10 @@ import {
   PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
   SCS_ORACLE_UPDATE_OPERATION_PROFILE,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_V2_OPERATION_PROFILE,
   admitErgoOperationalTransaction,
   executeErgoOperationalTransaction,
   type ErgoOperationalSubmission,
@@ -138,6 +142,146 @@ function fixture(options: FixtureOptions = {}) {
 }
 
 describe('Ergo operational transaction lifecycle', () => {
+  it('binds withdrawal V2 to exactly reserve, DUP and fee without granting authority', () => {
+    expect(SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_V2_OPERATION_PROFILE)
+      .toBe('e2s.substrate-federated-local-devnet-withdrawal-operation.v2');
+    const exact = input({
+      operationProfile: SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_V2_OPERATION_PROFILE,
+      inputBoxIds: [SOURCE_BOX_ID, hex('31'), FEE_BOX_ID],
+    });
+    const admission = admitErgoOperationalTransaction(exact);
+    expect(admission).toMatchObject({
+      sourceBoxId: SOURCE_BOX_ID, inputBoxIds: exact.inputBoxIds,
+      targetSidechainHeight: null, targetSidechainBlockHashHex: null, heartbeatKeyHex: null,
+    });
+    expect(Object.isFrozen(admission.inputBoxIds)).toBe(true);
+    expect(admission).not.toHaveProperty('authorizationArtifact');
+    expect(admission.bindingDigestHex).not.toBe(admitErgoOperationalTransaction({
+      ...exact, operationProfile: SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE,
+    }).bindingDigestHex);
+  });
+
+  it.each([
+    { inputBoxIds: [SOURCE_BOX_ID, FEE_BOX_ID] },
+    { inputBoxIds: [SOURCE_BOX_ID, hex('31'), FEE_BOX_ID, hex('32')] },
+    { inputBoxIds: [SOURCE_BOX_ID, SOURCE_BOX_ID, FEE_BOX_ID] },
+    { inputBoxIds: [SOURCE_BOX_ID, hex('31'), SOURCE_BOX_ID] },
+    { inputBoxIds: [SOURCE_BOX_ID, FEE_BOX_ID, FEE_BOX_ID] },
+    { sourceBoxId: FEE_BOX_ID },
+    { targetSidechainHeight: 1 },
+    { targetSidechainBlockHashHex: hex('33') },
+    { heartbeatKeyHex: HEARTBEAT_KEY },
+    { operationProfile: 'e2s.substrate-federated-local-devnet-withdrawal-operation.v1' },
+    { operationProfile: 'e2s.substrate-federated-local-devnet-withdrawal-operation.v3' },
+  ])('rejects withdrawal V2 shape or context drift %j before capabilities run', async patch => {
+    const flow = fixture();
+    await expect(executeErgoOperationalTransaction(input({
+      operationProfile: SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_V2_OPERATION_PROFILE,
+      inputBoxIds: [SOURCE_BOX_ID, hex('31'), FEE_BOX_ID],
+      ...patch,
+    } as Partial<ErgoOperationalTransactionInput>), flow.ports)).rejects.toThrow(
+      /exactly three inputs|must be unique|first input|forbids sidechain|unknown Ergo operational/,
+    );
+    expect(flow.events).toEqual([]);
+  });
+
+  it('binds withdrawal fee funding separately from tracker funding and other operations', () => {
+    expect(SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE)
+      .toBe('e2s.substrate-federated-local-devnet-withdrawal-fee-funding-operation.v1');
+    const admission = admitErgoOperationalTransaction(input({
+      operationProfile: SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE,
+    }));
+    expect(admission).toMatchObject({
+      targetSidechainHeight: null, targetSidechainBlockHashHex: null, heartbeatKeyHex: null,
+    });
+    expect(Object.isFrozen(admission)).toBe(true);
+    for (const operationProfile of [
+      SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE,
+      PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
+      DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE,
+      SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE,
+      SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
+    ]) {
+      expect(admission.bindingDigestHex).not.toBe(
+        admitErgoOperationalTransaction(input({ operationProfile })).bindingDigestHex,
+      );
+    }
+  });
+
+  it.each([
+    { targetSidechainHeight: 1 },
+    { targetSidechainBlockHashHex: hex('21') },
+    { heartbeatKeyHex: HEARTBEAT_KEY },
+    { operationProfile: 'e2s.substrate-federated-local-devnet-withdrawal-fee-funding-operation.v2' },
+    { operationProfile: 'e2s.substrate-federated-local-devnet-withdrawal-operation.v1' },
+    { operationProfile: undefined },
+  ])('rejects withdrawal fee funding context or profile drift %j before capabilities run', async patch => {
+    const flow = fixture();
+    await expect(executeErgoOperationalTransaction(input({
+      operationProfile: SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE,
+      ...patch,
+    } as ErgoOperationalTransactionInput), flow.ports)).rejects.toThrow(
+      /forbids sidechain and heartbeat context|unknown Ergo operational transaction profile/,
+    );
+    expect(flow.events).toEqual([]);
+  });
+
+  it('keeps withdrawal fee funding in the exact ordered lifecycle', async () => {
+    const flow = fixture();
+    await expect(executeErgoOperationalTransaction(input({
+      operationProfile: SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE,
+    }), flow.ports)).resolves.toMatchObject({ status: 'accepted' });
+    expect(flow.events).toEqual([
+      'sign', 'check', 'revalidate', 'authorize', 'reserve', 'submit', 'finalize:accepted',
+    ]);
+  });
+
+  it('binds tracker fee funding to its own profile without acquiring context or authority', () => {
+    expect(SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE)
+      .toBe('e2s.substrate-federated-local-devnet-tracker-fee-funding-operation.v1');
+    const admission = admitErgoOperationalTransaction(input({
+      operationProfile: SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE,
+    }));
+    expect(admission).toMatchObject({
+      targetSidechainHeight: null,
+      targetSidechainBlockHashHex: null,
+      heartbeatKeyHex: null,
+    });
+    for (const operationProfile of [
+      PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
+      DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE,
+      SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE,
+      SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
+    ]) {
+      expect(admission.bindingDigestHex).not.toBe(
+        admitErgoOperationalTransaction(input({ operationProfile })).bindingDigestHex,
+      );
+    }
+  });
+
+  it.each([
+    { targetSidechainHeight: 1 },
+    { targetSidechainBlockHashHex: hex('21') },
+    { heartbeatKeyHex: HEARTBEAT_KEY },
+  ])('rejects independent tracker fee funding context drift %j before capabilities run', async patch => {
+    const flow = fixture();
+    await expect(executeErgoOperationalTransaction(input({
+      operationProfile: SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE,
+      ...patch,
+    }), flow.ports)).rejects.toThrow(/forbids sidechain and heartbeat context/);
+    expect(flow.events).toEqual([]);
+  });
+
+  it('keeps tracker fee funding in the exact ordered lifecycle', async () => {
+    const flow = fixture();
+    await expect(executeErgoOperationalTransaction(input({
+      operationProfile: SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE,
+    }), flow.ports)).resolves.toMatchObject({ status: 'accepted' });
+    expect(flow.events).toEqual([
+      'sign', 'check', 'revalidate', 'authorize', 'reserve', 'submit', 'finalize:accepted',
+    ]);
+  });
+
   it('orders every stage and records the durable reservation before transport', async () => {
     const flow = fixture();
 

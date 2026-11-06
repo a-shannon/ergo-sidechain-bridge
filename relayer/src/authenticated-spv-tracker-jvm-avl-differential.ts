@@ -12,7 +12,7 @@ import {
   type AuthenticatedSpvTrackerJvmAvlReport,
 } from './authenticated-v2-source-tree-conformance.js';
 
-const WASM_LOCK_SCHEMA = 'e2s.authenticated-spv-tracker-jvm-avl-wasm-lock.v3';
+const WASM_LOCK_SCHEMA = 'e2s.authenticated-spv-tracker-jvm-avl-wasm-lock.v4';
 export const AUTHENTICATED_SPV_TRACKER_JVM_AVL_DIFFERENTIAL_RESULT_SCHEMA =
   'e2s.authenticated-spv-tracker-jvm-avl-differential-result.v1';
 export const AUTHENTICATED_SPV_TRACKER_JVM_AVL_DIFFERENTIAL_RESULT_PREFIX =
@@ -22,7 +22,15 @@ const WASM_SOURCE_PATHS = [
   'wasm-avl/Cargo.toml',
   'wasm-avl/Cargo.lock',
   'wasm-avl/src/lib.rs',
+  'relayer/package.json',
+  'relayer/package-lock.json',
+  'relayer/tsconfig.json',
   'relayer/src/scripts/build-wasm-avl.ts',
+  'relayer/src/scripts/build-wasm-avl-pipeline-v2.ts',
+  'relayer/src/substrate-federated-native-wasm-avl-build-tool-pins-v1.ts',
+  'relayer/src/bounded-process-runner.ts',
+  'relayer/src/scripts/windows-job-process.ps1',
+  'relayer/src/substrate-federated-native-wasm-avl-package-v1.ts',
 ] as const;
 const WASM_RUNTIME_PATHS = [
   'wasm-avl/pkg/bridge_avl.js',

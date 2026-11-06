@@ -31,27 +31,29 @@ Definition of Done instead of selecting a new evidence or hardening slice from
 the broader roadmap.
 
 The bridge's strategic value is not simply that Ergo can host an EVM bridge.
-The strategic value is proving that Ergo can settle sidechain exits with strong
-cryptographic guarantees.
+It is delivering an auditable Ergo settlement stack with an explicit authority
+model today while preserving the path to Ergo-verifiable sidechain exits.
 
 Substrate/Frontier is the EVM-compatible execution layer and commitment
 producer. It should emit or derive bridge-specific commitments that Ergo can
 verify. It is not the final trust layer.
 
-Critical dependency order:
+The current delivery plan has two explicit profiles:
 
-1. Phase 010a: close the two known fail-open timeout paths, then finish only
-   the minimum non-throwaway hardening needed to keep the current prototype
-   safe and reproducible.
-2. Phase 008 and Phase 009: make sidechain consensus and `0x04` extension
-   commitments verifiable enough to support burn proofs.
-3. Phase 011 / Gate 5: implement trustless burn verification and on-chain proof
-   acceptance.
-4. STARK-ready `bridge_event_root` / `burn_root`: keep the commitment format
-   versioned, Blake2b-friendly, and compatible with a future EIP-0045 aggregate
-   proof path if native STARK verification lands.
-5. Phase 011b: keep showcase and AVL lanes bounded as developer evidence and
-   fallback machinery.
+1. **WP-06-FED:** complete the EIP-independent federated reference path. Its
+   serial boundary is canonical tracker admission, then burn/checkpoint,
+   global replay, external-fee payout and profile-specific recovery. This path
+   may support a bounded federated reference package, never a trustless claim.
+2. **WP-06-STARK / Phase 011 / Gate 5:** preserve the versioned,
+   Blake2b/STARK-ready `bridge_event_root` / `burn_root` path and resume native
+   on-chain verification when an activated compatible verifier exists. This is
+   the Chain zeta / Phantom Burn closure path and the only route to a trustless
+   claim.
+
+Phase 008/009 consensus and `0x04` commitment work remain prerequisites to the
+trustless profile, not blockers for the explicitly federated package. Phase
+011b showcase and AVL lanes stay bounded as developer evidence and fallback
+machinery.
 
 Gate 6 governance readiness is not the Chain zeta fix.
 
@@ -115,7 +117,7 @@ that Ergo anchor, not sidechain finality.
 | **009** | Braid Merged Mining | Extension section injection via `SidechainsDataPrefix = 0x04` (kushti-confirmed 2026-05-06) + BraidAuxPow verification + EIP draft for sidechain commitment format | `[ ]` Not started |
 | **010a** | On-Chain Multisig MVP | P0 containment for refundable-mint and stale-burn payout, plus `atLeast()` guards and remaining non-throwaway hardening. Full governance remains deferred. | `[-]` Critical timeout fixes open; other compile/eval hardening done |
 | **010b** | Committee Governance | Governance hardening and release-readiness evidence: key rotation, member addition/removal, governance contract, and operator review. Not the Chain zeta cryptographic fix. | `[ ]` Parallel / deferred unless a release validator requires it |
-| **011** | Trustless Burn Verification | SPV relay / burn proof path via versioned `bridge_event_root` / `burn_root` commitments under `0x04` extension-section keys. This is the Chain zeta full fix: Ergo verifies sidechain finality, burn inclusion, payout binding, and DUP replay binding before release. Raw Frontier/EVM receipt proof machinery is not the preferred final design; use a Blake2b/STARK-ready bridge-native commitment tree. | `[ ]` Critical path |
+| **011** | Trustless Burn Verification | SPV relay / burn proof path via versioned `bridge_event_root` / `burn_root` commitments under `0x04` extension-section keys. This is the Chain zeta full fix: Ergo verifies sidechain finality, burn inclusion, payout binding, and DUP replay binding before release. Raw Frontier/EVM receipt proof machinery is not the preferred final design; use a Blake2b/STARK-ready bridge-native commitment tree. | `[ ]` Trustless-profile critical path; externally blocked |
 | **011b** | Showcase & Parallelization Demo | Package the prototype for external EVM/Substrate teams: subblock-ready monitoring, batch-vs-single benchmarks, bounded sharded eUTXO settlement demo, developer walkthroughs, and "what Ergo adds" material. AVL lanes are demo/fallback machinery, not the final high-throughput architecture if EIP-0045/STARK aggregate settlement becomes available. | `[-]` Bounded demo work only — docs/showcase/offline scripts done; no new legacy V1 live transport is planned |
 | **012** | Mainnet Deployment | Out of scope for this branch; no mainnet migration or mainnet production-ready claim | `[ ]` Not started |
 | **015** | FROST Threshold Signatures | 100+ validator committee via custom FROST ciphersuite | `[ ]` Deferred |
@@ -199,7 +201,8 @@ This repository is no longer just a bridge PoC. It should become a reference imp
 
 | File | Description |
 |------|-------------|
-| [bridge-execution-plan.md](bridge-execution-plan.md) | Canonical autonomous continuation queue, large work packages, agent routing, verification, and institutional-reference exit criteria |
+| [bridge-execution-plan.md](bridge-execution-plan.md) | Single active continuation queue, bounded batches, validation dependencies and institutional-reference exit criteria |
+| [bridge-execution-history-2026-09-05.md](bridge-execution-history-2026-09-05.md) | Historical package specifications and checkpoints; not the active work order |
 | [implementationplan001.md](implementationplan001.md) | Phase 001 detailed plan |
 | [walkthrough001.md](walkthrough001.md) – [walkthrough001d.md](walkthrough001d.md) | Phase 001: Scaffold, audit, NFTs, AVL, signing |
 | [walkthrough002.md](walkthrough002.md) – [walkthrough002d.md](walkthrough002d.md) | Phase 002: Substrate compilation, runtime, EVM, Solidity |
@@ -255,5 +258,5 @@ This repository is no longer just a bridge PoC. It should become a reference imp
 - **Spike 11**: ✅ Multi-claim batch settlement validated offline/spike only (unlock: 10 claims, DUP: 20 burn IDs). SPVTracker ErgoTree changed (guarded token access). Single-claim fallback retained.
 - **Legacy batch daemon path**: **RETIRED** — the offline batch spike remains useful diagnostic evidence, but every new legacy V1 daemon, CLI, programmatic signing, authorization, submission, and broadcast route is physically absent. Historical confirmation and recovery remain for already-submitted transactions. This does not retire historical on-chain V1 authority or close Gate 5.
 - **Showcase target**: `[-]` Phase 011b — docs, offline benchmark, proof inspector, sharded lanes design committed. Live batch demo attempted 2026-05-09: Ergo preflight PASS, Frontier PASS, EVM deploy PASS, 2 peg-out burns created, daemon blocked on missing `0x0401` extension anchor. Resolution: patched devnet miner via `scripts/run-patched-ergo-devnet.ps1`. Funding path previously proven with a devnet-only node fixture (0.15 ERG minimum, 0.5 ERG comfortable).
-- **Next engineering milestone**: execute the active package in [Bridge Execution Plan](bridge-execution-plan.md). The relayer can no longer initiate either unsafe legacy value-release route: owner mint and legacy aggregate payout transport are physically absent, while diagnostics and exact historical recovery remain. Authenticated V2 remains candidate/check-only. The next concrete Gate 5 milestone is a reviewed non-mainnet V4 cutover profile and package that binds application identity, external-fee conservation, global DUP lineage, exact target-node acceptance, and the activated finality parent. The real package-bound WP-06T11 `/transactions/check` exercise remains blocked until approved non-mainnet T9 inputs, both-chain recollection, and a compatible activated target node exist. WP-01 and WP-02 inventory work remains non-authorizing input to that cutover, not release evidence by itself.
+- **Next engineering milestone**: close canonical tracker admission for the EIP-independent federated profile, then compose burn/checkpoint binding, global replay insertion, external-fee payout and recovery. The [Bridge Execution Plan](bridge-execution-plan.md) owns this order. New owner-mint and legacy payout initiation remain absent; local campaigns do not enable operational funds authority. The activated-verifier V4 cutover and Gate 5 belong to the separate trustless upgrade, not a prerequisite for the federated reference.
 - **Future scale track**: STARK / EIP-45 aggregate settlement is now explicitly tracked as the likely long-term way to break the inline verification cap. It should not block the current AVL batch demo, but it should prevent over-investing in lane complexity if native STARK verification becomes near-term.

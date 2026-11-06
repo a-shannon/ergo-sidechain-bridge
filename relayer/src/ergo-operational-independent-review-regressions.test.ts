@@ -740,7 +740,7 @@ describe('independent-review operational transaction regressions', () => {
       'private async reconcilePegIns',
     );
     const depthIndex = source.indexOf(
-      'currentHeight - attempt.confirmationHeight + 1',
+      'currentHeight - attempt.confirmationHeight',
     );
     const headerLookupIndex = source.indexOf(
       'await this.ergo.getBlockHeaderHash(attempt.confirmationHeight)',
@@ -752,5 +752,8 @@ describe('independent-review operational transaction regressions', () => {
       depthIndex,
     )).toBeGreaterThan(depthIndex);
     expect(headerLookupIndex).toBeGreaterThan(depthIndex);
+    expect(source).not.toContain(
+      'currentHeight - attempt.confirmationHeight + 1',
+    );
   });
 });

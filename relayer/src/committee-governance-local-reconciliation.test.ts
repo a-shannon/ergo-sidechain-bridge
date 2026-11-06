@@ -73,7 +73,10 @@ describe('local committee governance reconciliation producer', () => {
     const result = spawnSync(
       process.execPath,
       [
-        'node_modules/tsx/dist/cli.mjs',
+        '--require',
+        'tsx/preflight',
+        '--import',
+        'tsx',
         'src/scripts/committee-governance-local-reconciliation.ts',
         '--help',
       ],
@@ -102,7 +105,10 @@ describe('local committee governance reconciliation producer', () => {
       const producer = spawnSync(
         process.execPath,
         [
-          'node_modules/tsx/dist/cli.mjs',
+          '--require',
+          'tsx/preflight',
+          '--import',
+          'tsx',
           'src/scripts/committee-governance-local-reconciliation.ts',
           '--observed-at',
           '2026-07-02T13:00:00.000Z',
@@ -149,7 +155,10 @@ describe('local committee governance reconciliation producer', () => {
     const result = spawnSync(
       process.execPath,
       [
-        'node_modules/tsx/dist/cli.mjs',
+        '--require',
+        'tsx/preflight',
+        '--import',
+        'tsx',
         'src/scripts/committee-governance-local-reconciliation.ts',
         '--observed-at',
         '2026-07-02T13:00:00.000Z',
@@ -174,7 +183,10 @@ function runValidator(inputTarget: string, reportTarget: string) {
   return spawnSync(
     process.execPath,
     [
-      'node_modules/tsx/dist/cli.mjs',
+      '--require',
+      'tsx/preflight',
+      '--import',
+      'tsx',
       'src/scripts/validate-committee-governance-reconciliation.ts',
       '--reconciliation-json',
       inputTarget,

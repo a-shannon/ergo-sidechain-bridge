@@ -8,7 +8,8 @@ import { validateBenchmarkEvidence } from '../benchmark-evidence.js';
 import { validateCleanCheckoutEvidence } from '../clean-checkout-evidence.js';
 import { validateCommitteeGovernanceEvidence } from '../committee-governance-evidence.js';
 import { validateDependencyReviewEvidence } from '../dependency-review-evidence.js';
-import { readEvidenceJsonTarget } from '../evidence-json-target-path.js';
+import { readBoundedEvidenceJsonTargetText, readEvidenceJsonTarget } from '../evidence-json-target-path.js';
+import { parseFederatedReferenceReleaseEvidenceV1 } from '../federated-reference-release-evidence-v1.js';
 import { readEvidenceMarkdownTarget } from '../evidence-target-path.js';
 import { validateExternalIntegrationEvidence } from '../external-integration-evidence.js';
 import { validateOperatorReadinessEvidence } from '../operator-readiness-evidence.js';
@@ -34,6 +35,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const checklistPath = resolve(__dirname, '../../../docs/release-checklist.md');
 const checklist = readFileSync(checklistPath, 'utf8');
 const TARGET_ARGUMENT_FLAGS = new Set([
+  '--federated-reference-evidence-json',
   '--fresh-checkpoint-json',
   '--live-preflight-json',
   '--assembly-report-json',
@@ -58,6 +60,9 @@ const TARGET_ARGUMENT_FLAGS = new Set([
 ]);
 const args = process.argv.slice(2);
 const cliStructuralIssues: string[] = validateKnownOptions(args);
+const federatedReferenceTarget = parseTargetArgument(args, '--federated-reference-evidence-json');
+const federatedReferenceEvidenceValidation = federatedReferenceTarget
+  ? validateFederatedReferenceTarget(federatedReferenceTarget) : undefined;
 const freshCheckpointJsonTarget = parseTargetArgument(args, '--fresh-checkpoint-json');
 const livePreflightJsonTarget = parseTargetArgument(args, '--live-preflight-json');
 const assemblyReportJsonTarget = parseTargetArgument(args, '--assembly-report-json');
@@ -148,6 +153,7 @@ const postSubmitObserveJsonValidation = postSubmitObserveJsonTarget
   ? validatePostSubmitObserveJsonTarget(postSubmitObserveJsonTarget, livePreflightJsonTarget)
   : undefined;
 const result = evaluateReleaseGate(checklist, {
+  federatedReferenceEvidenceValidation,
   localLiveRehearsalEvidenceValidation,
   liveRehearsalEvidenceValidation,
   localSettlementProfileActivationJsonValidation,
@@ -204,6 +210,16 @@ function validateKnownOptions(args: string[]): string[] {
       .filter(arg => arg.startsWith('--') && !TARGET_ARGUMENT_FLAGS.has(arg))
       .map(arg => `unknown option ${arg}`),
   )];
+}
+
+function validateFederatedReferenceTarget(target: string) {
+  const read = readBoundedEvidenceJsonTargetText(target, '--federated-reference-evidence-json');
+  try {
+    if (read.text === undefined || read.errors.length) throw new Error('FED evidence read refused');
+    return { target, status: 'PASS' as const, errors: [], report: parseFederatedReferenceReleaseEvidenceV1(read.text) };
+  } catch {
+    return { target: read.label, status: 'BLOCKED' as const, errors: ['FED reference evidence cannot be read or canonically validated'] };
+  }
 }
 
 function parseTargetArgument(args: string[], flag: string): string | undefined {

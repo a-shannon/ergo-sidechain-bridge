@@ -7,9 +7,9 @@
   },
   "dependencyClosure": {
     "packageJsonPath": "package.json",
-    "packageJsonSha256Hex": "4403cf352b6d3d5a3d5752260d2353f8bd195debdf808f9df8e11f4a3afc56fe",
+    "packageJsonSha256Hex": "69657eeb93bd67d1e5360e8d40589014ec5f430f74500c7e438f3df3ffdbcb6d",
     "packageLockPath": "package-lock.json",
-    "packageLockSha256Hex": "6c987f5ff4c5e32dc518267036f6dc25029297515518d036ce603bab9b6cb51d",
+    "packageLockSha256Hex": "131b7827fdbd0eaf142a81be0931c0394b22b17ca43524838c9484453f96199f",
     "packages": [
       {
         "name": "@openzeppelin/contracts",

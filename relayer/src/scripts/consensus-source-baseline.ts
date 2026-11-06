@@ -3,6 +3,7 @@ import { fileURLToPath } from 'url';
 
 import {
   inspectConsensusSourceBaseline,
+  type CheckoutBytePolicy,
   type ConsensusSourceBaselineReport,
 } from '../consensus-source-baseline.js';
 import { discoverBridgeRepositoryRoot } from '../bridge-repository-layout.js';
@@ -10,6 +11,7 @@ import { discoverBridgeRepositoryRoot } from '../bridge-repository-layout.js';
 export interface ConsensusSourceBaselineArgs {
   frontierSourcePath?: string;
   ergoSourcePath?: string;
+  frontierCheckoutBytePolicy?: CheckoutBytePolicy;
   requireFrontierCheckout: boolean;
   requireErgoCheckout: boolean;
   checkoutMode: 'full' | 'lock-only' | 'ergo-only';
@@ -48,6 +50,18 @@ export function parseConsensusSourceBaselineArgs(argv: string[]): ConsensusSourc
       args.checkoutMode = 'ergo-only';
       continue;
     }
+    if (arg === '--frontier-byte-policy') {
+      if (args.frontierCheckoutBytePolicy !== undefined) {
+        throw new Error('--frontier-byte-policy may be supplied only once');
+      }
+      const policy = requireValue(argv, index, arg);
+      if (policy !== 'raw' && policy !== 'controlled-crlf') {
+        throw new Error('--frontier-byte-policy must be raw or controlled-crlf');
+      }
+      args.frontierCheckoutBytePolicy = policy;
+      index += 1;
+      continue;
+    }
     if (arg === '--frontier-source') {
       if (args.checkoutMode === 'ergo-only') {
         throw new Error('--frontier-source cannot be combined with --ergo-only');
@@ -66,6 +80,9 @@ export function parseConsensusSourceBaselineArgs(argv: string[]): ConsensusSourc
     throw new Error(`Unknown argument: ${arg}`);
   }
 
+  if (args.frontierCheckoutBytePolicy !== undefined && args.checkoutMode !== 'full') {
+    throw new Error('--frontier-byte-policy requires full checkout mode');
+  }
   if (args.checkoutMode === 'ergo-only' && !args.ergoSourcePath) {
     throw new Error('--ergo-only requires --ergo-source');
   }
@@ -130,11 +147,12 @@ function yesNo(value: boolean): 'yes' | 'no' {
 function usage(): string {
   return [
     'Usage:',
-    '  npm run sources:verify -- [--frontier-source <path>] [--ergo-source <path>]',
+    '  npm run sources:verify -- [--frontier-source <path>] [--ergo-source <path>] [--frontier-byte-policy <raw|controlled-crlf>]',
     '  npm run sources:verify -- --ergo-only --ergo-source <path>',
     '  npm run sources:verify:lock',
     '',
     'Full mode requires the pinned Frontier base plus tracked runtime patch and the patched Ergo source checkout.',
+    'Frontier byte policy defaults to controlled-crlf. Select raw for exact Frontier build-input bytes; Ergo normalization is unchanged.',
     'Ergo-only mode validates the patched Ergo checkout for isolated Ergo-node execution without claiming a Frontier build.',
     'Lock-only mode validates tracked source identities and patch bytes without claiming a build.',
   ].join('\n');
@@ -155,6 +173,7 @@ async function main(): Promise<void> {
     bridgeRoot,
     frontierSourcePath: args.frontierSourcePath,
     ergoSourcePath: args.ergoSourcePath,
+    frontierCheckoutBytePolicy: args.frontierCheckoutBytePolicy,
     requireFrontierCheckout: args.requireFrontierCheckout,
     requireErgoCheckout: args.requireErgoCheckout,
   });

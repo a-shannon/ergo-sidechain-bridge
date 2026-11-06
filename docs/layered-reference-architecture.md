@@ -13,17 +13,17 @@ separation plus a frozen clean-checkout and independent-review checkpoint. A
 future source publication must repeat the promotion gates against its exact
 candidate; that is a promotion obligation, not unfinished module extraction.
 
-The protocol critical path remains WP-06 and Gate 5: authenticate a source
-checkpoint, prove source-chain finality, prove withdrawal inclusion, bind the
-payout and replay update, and obtain full Ergo transaction acceptance. The
-current packaging gate is the bounded WP-08A closeout; it must preserve those
-semantics and must not activate an unreviewed funds route.
+The [execution plan](../phases/bridge-execution-plan.md) owns delivery priority.
+WP-06-FED is the active EIP-independent federated reference. Its disclosed
+quorums do not establish trustlessness. Gate 5 is the separate WP-06-STARK
+upgrade: an activated verifier must establish the statement and source-finality
+semantics before value release. It does not block the federated reference.
 
-Architecture-only review and controlled private CI may proceed earlier. No
-bridge source tree, public repository, public branch, tag, source snapshot, or
-release archive may be published under any label until WP-08A satisfies its
-Definition of Done. This is a first-public-source-release gate, not merely a
-restriction on release wording.
+WP-08A's completed extraction and first-publication requirements remain
+maintained boundaries, not a pending dependency to repeat before each batch.
+Changes to those boundaries require affected revalidation; public promotion
+requires exact-candidate review, publication guards and the required CI.
+Neither publication nor packaging activates a funds route.
 
 Substrate/Frontier is the current EVM-compatible execution and commitment
 production layer. It is not the final trust layer. Ergo contracts decide value
@@ -532,11 +532,12 @@ future byte-reuse decision must first specify the public semantics of
 `assetId` and `amount`. If those semantics cannot cover raw token units without
 ambiguity, the token lane must use a new leaf version and domain.
 
-## Current Incompatibilities And Extraction Constraints
+## Extraction Inventory And Maintained Constraints
 
-WP-08A is extracting one behavior-preserving lifecycle at a time. The
-aggregate-recovery path now has concrete adapters and an application root, but
-the following broader boundary mismatches remain:
+This inventory was recorded during WP-08A's incremental extraction. Retain it
+as a review checklist, not a second backlog. Check each item against current
+source and the execution plan before treating it as unfinished work; completed
+extraction does not discharge the invariant a later consumer still requires.
 
 1. Outside aggregate recovery, `relayer/src/relayer-daemon.ts` still constructs
    RPC clients, loads runtime configuration, orchestrates lifecycles, invokes
@@ -580,14 +581,16 @@ the following broader boundary mismatches remain:
    profile must unify same-height replacement, advancing-tip replacement,
    ancestry, and finalized-history policy through one port.
 
-These are extraction constraints, not reasons to delay WP-06. No new seam is
-permitted during WP-06 unless Gate 5 already requires it, it preserves all
-observable behavior and bytes, and it does not delay the critical path.
+These extraction constraints do not delay the selected WP-06 delivery track.
+Add a new boundary only when the active milestone needs it; preserve existing
+observable behavior, canonical bytes and capability restrictions. New protocol
+semantics require an explicit versioned decision and affected verification,
+not an incidental extraction change. Gate 5 governs the trustless upgrade,
+not the EIP-independent federated integration.
 
-WP-07 records its recovery and adversarial behavior baseline against the
-current authoritative seams; it does not depend on public package ports that
-WP-08A has not yet implemented. WP-08A must then replay the same matrix through
-the extracted ports without changing any security-relevant outcome.
+The WP-07 recovery baseline preceded public package ports. Changes to those
+ports must replay the affected baseline without changing security-relevant
+outcomes; already-completed WP-08A extraction is not a fresh prerequisite.
 
 ## Claim Boundary
 

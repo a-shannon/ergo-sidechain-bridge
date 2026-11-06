@@ -2458,6 +2458,36 @@ Evidence:
 - [EVM Developer Showcase](evm-developer-showcase.md)
 - `relayer/src/external-integration-evidence.test.ts`
 
+## FED Reference Preparation
+
+The federated reference has its own evidence profile. It does not close the
+authenticated-external-fee Gate 3 rows above. A version 1 preparation report
+validates the public parent receipt and its candidate bindings; it keeps release
+blocked pending the one-use launcher graph, accumulated-state recovery, external
+operator reproduction and custody, final assurance and real FED-7 acceptance.
+Parent receipt validation alone does not establish those results.
+
+| Field | Value |
+|---|---|
+| FED profile | substrate-federated-v1 |
+| FED evidence purpose | fed-reference-preparation |
+| FED evidence target | none |
+| FED candidate commit | unestablished |
+| FED candidate tree | unestablished |
+
+Prepare the canonical report with the exact candidate commit and tree:
+
+```bash
+npm run --silent federated:release:prepare -- --candidate-commit <commit> --candidate-tree <tree>
+```
+
+The command emits JSON on stdout and reads no runtime state by default. Its
+optional `--parent-result-json` accepts reviewed public JSON evidence within the
+repository. It never loads worker files or recovery state. Set the table's
+target, commit and tree to that report, then pass the same target to
+`npm run release:gate -- --federated-reference-evidence-json <report.json>`.
+A structurally valid preparation report still returns a blocked release decision.
+
 ## Pending Evidence Register
 
 Every row below is a structured publication blocker until it is replaced by a

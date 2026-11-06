@@ -1,0 +1,505 @@
+import { randomBytes } from 'node:crypto';
+import { Interface, SigningKey, Transaction, Wallet, keccak256, recoverAddress, type HDNodeWallet } from 'ethers';
+import blakejs from 'blakejs';
+import { decodeValidityApplicationPooledReserveMintReservationStatementV4Hex }
+  from '../validity-application-pooled-reserve-mint-reservation-v4.js';
+import { assertFederatedNativeContinuationParentV1, assertFederatedNativeContinuationStepParentV1,
+  type FederatedNativeContinuationParentV1, type FederatedNativeContinuationStepParentV1 }
+  from './federated-native-reservation-execution-v1.js';
+
+const SYSTEM_ACCOUNT_PREFIX = '26aa394eea5630e07c48ae0c9558cef7b99d880ec681799c0cf30e8886371da9';
+const NATIVE_ENDOWMENT = 100_000_000_000_000_000_000n;
+
+export interface FederatedGenesisOperatorV1 {
+  readonly addressHex: string;
+  readonly launchDomainHex: string;
+  readonly nativeFunding: Readonly<{
+    amountUnits: string;
+    storageKeyHex: string;
+    accountInfoScaleHex: string;
+  }>;
+}
+
+const owners = new WeakMap<object, HDNodeWallet>();
+const reservationSigners = new WeakSet<object>();
+const completedReservations = new WeakMap<object, Readonly<{ genesisHashHex: string }>>();
+const mintSigners = new WeakSet<object>();
+const completedMints = new WeakMap<object, Readonly<{
+  bridgeAddressHex: string; amountNanoErg: string; mintIdentityHex: string;
+}>>();
+const approveSigners = new WeakSet<object>();
+const burnSigners = new WeakSet<object>();
+const completedApprovals = new WeakMap<object, Readonly<FederatedGenesisWithdrawalInputV1>>();
+const completedBurns = new WeakMap<object, Readonly<{ transactionHashHex: string }>>();
+const continuationReservationSigners = new WeakSet<object>();
+const completedContinuationReservations = new WeakMap<object, Readonly<{
+  parent: Readonly<FederatedNativeContinuationParentV1>;
+  mintIdentityHex: string;
+  extrinsicHashHex: string;
+  signedExtrinsicHex: string;
+}>>();
+const continuationMintSigners = new WeakSet<object>();
+const continuationApproveSigners = new WeakSet<object>();
+const continuationBurnSigners = new WeakSet<object>();
+const completedContinuationMints = new WeakMap<object, Readonly<{
+  parent: Readonly<FederatedNativeContinuationStepParentV1>;
+  transactionHashHex: string;
+}>>();
+const completedContinuationApprovals = new WeakMap<object, Readonly<{
+  parent: Readonly<FederatedNativeContinuationStepParentV1>;
+  transactionHashHex: string;
+}>>();
+const mintAbi = new Interface(['function mintSERG(address recipient,uint256 amount,bytes32 mintIdentity)']);
+const withdrawalAbi = new Interface(['function approve(address,uint256)', 'function pegOut(uint256,bytes)']);
+
+/** The proof-bound app must establish parent-state eligibility; this adapter only signs. */
+export async function signFederatedGenesisMintV1(owner: Readonly<FederatedGenesisOperatorV1>, input: Readonly<{
+  nonce: number; bridgeAddressHex: string; recipientAddressHex: string; amountNanoErg: string; mintIdentityHex: string;
+}>) {
+  assertFederatedGenesisOperatorV1(owner);
+  if (!reservationSigners.has(owner) || mintSigners.has(owner)) throw new Error('FED mint signing requires its unused post-reservation slot');
+  const fields = ['nonce', 'bridgeAddressHex', 'recipientAddressHex', 'amountNanoErg', 'mintIdentityHex'];
+  if (input === null || typeof input !== 'object' || Object.getPrototypeOf(input) !== Object.prototype
+    || Reflect.ownKeys(input).length !== fields.length || fields.some(key => {
+      const property = Object.getOwnPropertyDescriptor(input, key);
+      return !property?.enumerable || !Object.hasOwn(property, 'value');
+    })) throw new Error('FED mint signing requires exact own-data fields');
+  const { nonce, bridgeAddressHex, recipientAddressHex, amountNanoErg, mintIdentityHex } = input;
+  if (!Number.isSafeInteger(nonce) || nonce !== 1
+    || typeof bridgeAddressHex !== 'string' || !/^0x[0-9a-f]{40}$/.test(bridgeAddressHex) || /^0x0+$/.test(bridgeAddressHex)
+    || recipientAddressHex !== `0x${owner.addressHex}` || bridgeAddressHex === recipientAddressHex
+    || typeof amountNanoErg !== 'string' || !/^[1-9][0-9]{0,18}$/.test(amountNanoErg)
+    || BigInt(amountNanoErg) > 0x7fff_ffff_ffff_ffffn
+    || typeof mintIdentityHex !== 'string' || !/^0x[0-9a-f]{64}$/.test(mintIdentityHex) || /^0x0+$/.test(mintIdentityHex)) {
+    throw new Error('FED mint signing differs from its first-block operator scope');
+  }
+  // Exact height-one parent: cover the pinned base fee's maximum 12.5% single-block rise.
+  const transaction = Object.freeze({ type: 0, chainId: 4242, nonce, to: bridgeAddressHex,
+    gasPrice: 1_125_000_000n, gasLimit: 5_000_000n, value: 0n,
+    data: mintAbi.encodeFunctionData('mintSERG', [recipientAddressHex, amountNanoErg, mintIdentityHex]) });
+  assertFederatedGenesisOperatorV1(owner);
+  if (mintSigners.has(owner)) throw new Error('FED mint signing requires its unused post-reservation slot');
+  mintSigners.add(owner);
+  try {
+    const signedTransactionHex = await owners.get(owner)!.signTransaction(transaction);
+    assertFederatedGenesisOperatorV1(owner);
+    const parsed = Transaction.from(signedTransactionHex);
+    if (parsed.serialized !== signedTransactionHex || parsed.signature === null || !parsed.signature.isValid()
+      || parsed.signature.networkV === null || parsed.from?.toLowerCase() !== recipientAddressHex
+      || parsed.type !== 0 || parsed.chainId !== 4242n || parsed.nonce !== nonce
+      || parsed.to?.toLowerCase() !== bridgeAddressHex || parsed.data !== transaction.data
+      || parsed.gasPrice !== transaction.gasPrice || parsed.gasLimit !== transaction.gasLimit || parsed.value !== 0n) {
+      throw new Error('FED mint signature differs from its exact transaction');
+    }
+    completedMints.set(owner, Object.freeze({ bridgeAddressHex, amountNanoErg, mintIdentityHex }));
+    return Object.freeze({ signedTransactionHex, transactionHashHex: parsed.hash!, nonce });
+  } catch (error) { disposeFederatedGenesisOperatorV1(owner); throw error; }
+}
+
+export interface FederatedGenesisWithdrawalInputV1 {
+  readonly nonce: number;
+  readonly parentNativeHeight: number;
+  readonly bridgeAddressHex: string;
+  readonly tokenAddressHex: string;
+  readonly grossAmountNanoErg: string;
+  readonly recipientErgoTreeHex: string;
+}
+
+/** Signing only: the caller must authenticate the retained application and freshly observe its parent. */
+export async function signFederatedGenesisApproveV1(owner: Readonly<FederatedGenesisOperatorV1>,
+  input: Readonly<FederatedGenesisWithdrawalInputV1>) {
+  return signWithdrawal(owner, input, 'approve');
+}
+
+/** A completed approval signature is not proof of inclusion or burn eligibility. */
+export async function signFederatedGenesisBurnV1(owner: Readonly<FederatedGenesisOperatorV1>,
+  input: Readonly<FederatedGenesisWithdrawalInputV1>) {
+  return signWithdrawal(owner, input, 'burn');
+}
+
+async function signWithdrawal(owner: Readonly<FederatedGenesisOperatorV1>,
+  input: Readonly<FederatedGenesisWithdrawalInputV1>, phase: 'approve' | 'burn') {
+  assertFederatedGenesisOperatorV1(owner);
+  const minted = completedMints.get(owner);
+  const used = phase === 'approve' ? approveSigners : burnSigners;
+  const approval = completedApprovals.get(owner);
+  if (!minted || used.has(owner) || phase === 'burn' && !approval) {
+    throw new Error('FED withdrawal signing requires its unused completed predecessor slot');
+  }
+  const fields = ['nonce', 'parentNativeHeight', 'bridgeAddressHex', 'tokenAddressHex',
+    'grossAmountNanoErg', 'recipientErgoTreeHex'] as const;
+  if (input === null || typeof input !== 'object' || Object.getPrototypeOf(input) !== Object.prototype
+    || Reflect.ownKeys(input).length !== fields.length || fields.some(key => {
+      const property = Object.getOwnPropertyDescriptor(input, key);
+      return !property?.enumerable || !Object.hasOwn(property, 'value');
+    })) throw new Error('FED withdrawal signing requires exact own-data fields');
+  input = Object.freeze({ ...input });
+  const { nonce, parentNativeHeight, bridgeAddressHex, tokenAddressHex, grossAmountNanoErg, recipientErgoTreeHex } = input;
+  const expectedNonce = phase === 'approve' ? 2 : 3;
+  if (nonce !== expectedNonce || parentNativeHeight !== expectedNonce
+    || bridgeAddressHex !== minted.bridgeAddressHex
+    || typeof tokenAddressHex !== 'string' || !/^0x[0-9a-f]{40}$/.test(tokenAddressHex) || /^0x0+$/.test(tokenAddressHex)
+    || tokenAddressHex === bridgeAddressHex || tokenAddressHex === `0x${owner.addressHex}`
+    || typeof grossAmountNanoErg !== 'string' || !/^[1-9][0-9]{0,18}$/.test(grossAmountNanoErg)
+    || BigInt(grossAmountNanoErg) < 15_000_000n || BigInt(grossAmountNanoErg) > BigInt(minted.amountNanoErg)
+    || typeof recipientErgoTreeHex !== 'string' || !/^0x0008cd0[23][0-9a-f]{64}$/.test(recipientErgoTreeHex)) {
+    throw new Error('FED withdrawal signing differs from its bounded native scope');
+  }
+  try {
+    const key = `0x${recipientErgoTreeHex.slice(8)}`;
+    if (SigningKey.computePublicKey(key, true).toLowerCase() !== key) throw new Error('noncanonical key');
+  } catch { throw new Error('FED withdrawal recipient is not a valid P2PK curve point'); }
+  if (phase === 'burn' && (approval!.bridgeAddressHex !== bridgeAddressHex || approval!.tokenAddressHex !== tokenAddressHex
+    || approval!.grossAmountNanoErg !== grossAmountNanoErg || approval!.recipientErgoTreeHex !== recipientErgoTreeHex)) {
+    throw new Error('FED burn differs from its retained approval scope');
+  }
+  // Pinned genesis base fee 1e9 with at most 12.5% growth per parent block.
+  // These are ceilings for parents 2 and 3 only, paid from synthetic native endowment.
+  const transaction = Object.freeze({ type: 0, chainId: 4242, nonce,
+    to: phase === 'approve' ? tokenAddressHex : bridgeAddressHex,
+    gasPrice: phase === 'approve' ? 1_265_625_000n : 1_423_828_125n,
+    gasLimit: 5_000_000n, value: 0n, data: phase === 'approve'
+      ? withdrawalAbi.encodeFunctionData('approve', [bridgeAddressHex, grossAmountNanoErg])
+      : withdrawalAbi.encodeFunctionData('pegOut', [grossAmountNanoErg, recipientErgoTreeHex]) });
+  // Input inspection can invoke Proxy traps. Claim only after rechecking current custody and use.
+  assertFederatedGenesisOperatorV1(owner);
+  if (used.has(owner)) throw new Error('FED withdrawal signing requires its unused completed predecessor slot');
+  used.add(owner);
+  try {
+    const signedTransactionHex = await owners.get(owner)!.signTransaction(transaction);
+    assertFederatedGenesisOperatorV1(owner);
+    const parsed = Transaction.from(signedTransactionHex);
+    if (parsed.serialized !== signedTransactionHex || parsed.signature === null || !parsed.signature.isValid()
+      || parsed.signature.networkV === null || parsed.from?.toLowerCase() !== `0x${owner.addressHex}`
+      || parsed.type !== 0 || parsed.chainId !== 4242n || parsed.nonce !== nonce
+      || parsed.to?.toLowerCase() !== transaction.to || parsed.data !== transaction.data
+      || parsed.gasPrice !== transaction.gasPrice || parsed.gasLimit !== transaction.gasLimit || parsed.value !== 0n) {
+      throw new Error('FED withdrawal signature differs from its exact transaction');
+    }
+    if (phase === 'approve') completedApprovals.set(owner, input);
+    else completedBurns.set(owner, Object.freeze({ transactionHashHex: parsed.hash! }));
+    return Object.freeze({ signedTransactionHex, transactionHashHex: parsed.hash!, nonce });
+  } catch (error) { disposeFederatedGenesisOperatorV1(owner); throw error; }
+}
+
+export interface FederatedGenesisReservationInputV1 {
+  readonly genesisHashHex: string;
+  readonly nonce: number;
+  readonly statementHex: string;
+  readonly sourceProofEnvelopeScaleHex: string;
+}
+
+/** Pinned AccountId20/EthereumSignature runtime only. No RPC or transport. */
+export function signFederatedGenesisReservationV1(
+  owner: Readonly<FederatedGenesisOperatorV1>,
+  input: Readonly<FederatedGenesisReservationInputV1>,
+) {
+  assertFederatedGenesisOperatorV1(owner);
+  if (reservationSigners.has(owner)) throw new Error('FED native reservation signing is already consumed');
+  const keys = ['genesisHashHex', 'nonce', 'statementHex', 'sourceProofEnvelopeScaleHex'];
+  if (input === null || typeof input !== 'object' || Object.getPrototypeOf(input) !== Object.prototype
+    || Reflect.ownKeys(input).length !== keys.length || keys.some(key => {
+      const descriptor = Object.getOwnPropertyDescriptor(input, key);
+      return !descriptor?.enumerable || !Object.hasOwn(descriptor, 'value');
+    })) throw new Error('FED native reservation requires exact own-data fields');
+  const { genesisHashHex, nonce, statementHex, sourceProofEnvelopeScaleHex } = input;
+  if (typeof genesisHashHex !== 'string' || !/^0x[0-9a-f]{64}$/.test(genesisHashHex)
+    || genesisHashHex === `0x${'00'.repeat(32)}`
+    || !Number.isSafeInteger(nonce) || nonce < 0 || nonce > 0xffffffff
+    || typeof statementHex !== 'string' || !/^0x[0-9a-f]{1206}$/.test(statementHex)
+    || typeof sourceProofEnvelopeScaleHex !== 'string'
+    || !/^0x(?:[0-9a-f]{2}){1,65536}$/.test(sourceProofEnvelopeScaleHex)) {
+    throw new Error('FED native reservation has invalid canonical bytes or nonce');
+  }
+  assertFederatedGenesisOperatorV1(owner);
+  if (reservationSigners.has(owner)) throw new Error('FED native reservation signing is already consumed');
+  reservationSigners.add(owner);
+  const result = signReservation(owner, { genesisHashHex, nonce, statementHex, sourceProofEnvelopeScaleHex });
+  completedReservations.set(owner, Object.freeze({ genesisHashHex }));
+  return result;
+}
+
+/** Sign the first continuation reservation only from its authenticated original-burn parent. */
+export function signFederatedGenesisContinuationReservationV1(
+  owner: Readonly<FederatedGenesisOperatorV1>,
+  input: Readonly<{
+    parent: Readonly<FederatedNativeContinuationParentV1>;
+    statementHex: string;
+    sourceProofEnvelopeScaleHex: string;
+  }>,
+) {
+  assertFederatedGenesisOperatorV1(owner);
+  if (continuationReservationSigners.has(owner)) {
+    throw new Error('FED continuation reservation signing is already consumed');
+  }
+  const fields = ['parent', 'statementHex', 'sourceProofEnvelopeScaleHex'];
+  if (input === null || typeof input !== 'object' || Object.getPrototypeOf(input) !== Object.prototype
+    || Reflect.ownKeys(input).length !== fields.length || fields.some(key => {
+      const descriptor = Object.getOwnPropertyDescriptor(input, key);
+      return !descriptor?.enumerable || !Object.hasOwn(descriptor, 'value');
+    })) throw new Error('FED continuation reservation requires exact own-data fields');
+  const { parent, statementHex, sourceProofEnvelopeScaleHex } = input;
+  assertFederatedNativeContinuationParentV1(parent);
+  const reservation = completedReservations.get(owner);
+  const mint = completedMints.get(owner);
+  const burn = completedBurns.get(owner);
+  if (!reservation || !mint || !burn
+    || parent.genesisHashHex !== reservation.genesisHashHex
+    || parent.operatorAddressHex !== `0x${owner.addressHex}`
+    || parent.previousMintIdentityHex !== mint.mintIdentityHex
+    || parent.previousBurnTransactionHashHex !== burn.transactionHashHex
+    || parent.nonce !== 4 || parent.blockHeight !== 4) {
+    throw new Error('FED continuation parent differs from the retained original operation');
+  }
+  if (typeof statementHex !== 'string' || !/^0x[0-9a-f]{1206}$/.test(statementHex)
+    || typeof sourceProofEnvelopeScaleHex !== 'string'
+    || !/^0x(?:[0-9a-f]{2}){1,65536}$/.test(sourceProofEnvelopeScaleHex)) {
+    throw new Error('FED continuation reservation has invalid canonical bytes');
+  }
+  const next = decodeValidityApplicationPooledReserveMintReservationStatementV4Hex(statementHex);
+  if (!/^0x[0-9a-f]{64}$/.test(next.mintIdentityHex) || /^0x0+$/.test(next.mintIdentityHex)
+    || next.mintIdentityHex === mint.mintIdentityHex) {
+    throw new Error('FED continuation reservation requires a fresh nonzero mint identity');
+  }
+  // Input inspection and statement decoding can invoke external code. Recheck authority before claiming the slot.
+  assertFederatedGenesisOperatorV1(owner);
+  assertFederatedNativeContinuationParentV1(parent);
+  if (continuationReservationSigners.has(owner)) {
+    throw new Error('FED continuation reservation signing is already consumed');
+  }
+  continuationReservationSigners.add(owner);
+  const result = signReservation(owner, { genesisHashHex: parent.genesisHashHex, nonce: parent.nonce,
+    statementHex, sourceProofEnvelopeScaleHex }, () => assertFederatedNativeContinuationParentV1(parent));
+  completedContinuationReservations.set(owner, Object.freeze({ parent, mintIdentityHex: next.mintIdentityHex,
+    extrinsicHashHex: result.extrinsicHashHex, signedExtrinsicHex: result.signedExtrinsicHex }));
+  return result;
+}
+
+const continuationStepFields = ['phase', 'genesisHashHex', 'parentNativeBlockHashHex',
+  'parentEthereumBlockHashHex', 'parentNativeHeight', 'nonce', 'reservationExtrinsicHashHex',
+  'mintIdentityHex', 'recipientAddressHex', 'bridgeAddressHex', 'tokenAddressHex',
+  'amountNanoErg', 'gasPriceWei', 'previousTransactionHashHex', 'grossAmountNanoErg',
+  'recipientErgoTreeHex'] as const;
+
+/** Sign the retained operation's second mint from its authenticated reservation inclusion. */
+export async function signFederatedGenesisContinuationMintV1(
+  owner: Readonly<FederatedGenesisOperatorV1>,
+  parent: Readonly<FederatedNativeContinuationStepParentV1>,
+) {
+  return signContinuationEthereumStep(owner, parent, 'mint');
+}
+
+/** Sign the retained operation's second approval from its authenticated mint inclusion. */
+export async function signFederatedGenesisContinuationApproveV1(
+  owner: Readonly<FederatedGenesisOperatorV1>,
+  parent: Readonly<FederatedNativeContinuationStepParentV1>,
+) {
+  return signContinuationEthereumStep(owner, parent, 'approve');
+}
+
+/** Sign the retained operation's second burn from its authenticated approval inclusion. */
+export async function signFederatedGenesisContinuationBurnV1(
+  owner: Readonly<FederatedGenesisOperatorV1>,
+  parent: Readonly<FederatedNativeContinuationStepParentV1>,
+) {
+  return signContinuationEthereumStep(owner, parent, 'burn');
+}
+
+async function signContinuationEthereumStep(owner: Readonly<FederatedGenesisOperatorV1>,
+  parent: Readonly<FederatedNativeContinuationStepParentV1>, phase: 'mint' | 'approve' | 'burn') {
+  assertFederatedGenesisOperatorV1(owner);
+  assertExactContinuationStepParent(parent);
+  assertFederatedNativeContinuationStepParentV1(parent);
+  const reservation = completedReservations.get(owner);
+  const firstMint = completedMints.get(owner);
+  const firstApproval = completedApprovals.get(owner);
+  const firstBurn = completedBurns.get(owner);
+  const continuationReservation = completedContinuationReservations.get(owner);
+  const continuationMint = completedContinuationMints.get(owner);
+  const continuationApproval = completedContinuationApprovals.get(owner);
+  const used = phase === 'mint' ? continuationMintSigners
+    : phase === 'approve' ? continuationApproveSigners : continuationBurnSigners;
+  const expectedNonce = phase === 'mint' ? 5 : phase === 'approve' ? 6 : 7;
+  const expectedGasPriceWei = phase === 'mint' ? '1802032472'
+    : phase === 'approve' ? '2027286531' : '2280697348';
+  if (!reservation || !firstMint || !firstApproval || !firstBurn || !continuationReservation
+    || used.has(owner) || phase === 'approve' && !continuationMint || phase === 'burn' && !continuationApproval) {
+    throw new Error('FED continuation signing requires its unused retained predecessor slot');
+  }
+  const snapshot = Object.freeze({ ...parent });
+  const priorStep = phase === 'approve' ? continuationMint : phase === 'burn' ? continuationApproval : undefined;
+  if (parent.phase !== phase || parent.genesisHashHex !== reservation.genesisHashHex
+    || parent.genesisHashHex !== continuationReservation.parent.genesisHashHex
+    || parent.parentNativeHeight !== expectedNonce || parent.nonce !== expectedNonce
+    || parent.reservationExtrinsicHashHex !== continuationReservation.extrinsicHashHex
+    || parent.mintIdentityHex !== continuationReservation.mintIdentityHex
+    || parent.recipientAddressHex !== `0x${owner.addressHex}`
+    || parent.bridgeAddressHex !== firstMint.bridgeAddressHex
+    || parent.tokenAddressHex !== firstApproval.tokenAddressHex
+    || parent.gasPriceWei !== expectedGasPriceWei
+    || typeof parent.amountNanoErg !== 'string' || !/^[1-9][0-9]{0,18}$/.test(parent.amountNanoErg)
+    || BigInt(parent.amountNanoErg) > 0x7fff_ffff_ffff_ffffn
+    || typeof parent.parentNativeBlockHashHex !== 'string' || !/^0x[0-9a-f]{64}$/.test(parent.parentNativeBlockHashHex)
+    || /^0x0+$/.test(parent.parentNativeBlockHashHex)
+    || typeof parent.parentEthereumBlockHashHex !== 'string' || !/^0x[0-9a-f]{64}$/.test(parent.parentEthereumBlockHashHex)
+    || /^0x0+$/.test(parent.parentEthereumBlockHashHex)) {
+    throw new Error('FED continuation signing differs from its retained operation scope');
+  }
+  if (phase === 'mint') {
+    if (parent.previousTransactionHashHex !== null || parent.grossAmountNanoErg !== null
+      || parent.recipientErgoTreeHex !== null) {
+      throw new Error('FED continuation mint differs from its reservation parent');
+    }
+  } else {
+    if (parent.previousTransactionHashHex !== priorStep!.transactionHashHex
+      || parent.amountNanoErg !== continuationMint!.parent.amountNanoErg
+      || parent.bridgeAddressHex !== continuationMint!.parent.bridgeAddressHex
+      || parent.tokenAddressHex !== continuationMint!.parent.tokenAddressHex
+      || parent.mintIdentityHex !== continuationMint!.parent.mintIdentityHex
+      || typeof parent.grossAmountNanoErg !== 'string' || !/^[1-9][0-9]{0,18}$/.test(parent.grossAmountNanoErg)
+      || BigInt(parent.grossAmountNanoErg) < 15_000_000n
+      || BigInt(parent.grossAmountNanoErg) > 0x7fff_ffff_ffff_ffffn
+      || BigInt(parent.grossAmountNanoErg) > BigInt(firstMint.amountNanoErg)
+        - BigInt(firstApproval.grossAmountNanoErg) + BigInt(parent.amountNanoErg)
+      || typeof parent.recipientErgoTreeHex !== 'string'
+      || !/^0x0008cd0[23][0-9a-f]{64}$/.test(parent.recipientErgoTreeHex)) {
+      throw new Error('FED continuation withdrawal differs from its accumulated balance scope');
+    }
+    try {
+      const key = `0x${parent.recipientErgoTreeHex.slice(8)}`;
+      if (SigningKey.computePublicKey(key, true).toLowerCase() !== key) throw new Error('noncanonical key');
+    } catch { throw new Error('FED continuation withdrawal recipient is not a valid P2PK curve point'); }
+    if (phase === 'burn' && (parent.grossAmountNanoErg !== continuationApproval!.parent.grossAmountNanoErg
+      || parent.recipientErgoTreeHex !== continuationApproval!.parent.recipientErgoTreeHex)) {
+      throw new Error('FED continuation burn differs from its retained approval scope');
+    }
+  }
+  const transaction = Object.freeze({ type: 0, chainId: 4242, nonce: parent.nonce,
+    to: phase === 'approve' ? parent.tokenAddressHex : parent.bridgeAddressHex,
+    gasPrice: BigInt(parent.gasPriceWei), gasLimit: 5_000_000n, value: 0n,
+    data: phase === 'mint'
+      ? mintAbi.encodeFunctionData('mintSERG', [parent.recipientAddressHex, parent.amountNanoErg, parent.mintIdentityHex])
+      : phase === 'approve'
+        ? withdrawalAbi.encodeFunctionData('approve', [parent.bridgeAddressHex, parent.grossAmountNanoErg])
+        : withdrawalAbi.encodeFunctionData('pegOut', [parent.grossAmountNanoErg, parent.recipientErgoTreeHex]) });
+  // Parsing or encoding can invoke external code. Claim only after current custody and capability are rechecked.
+  assertFederatedGenesisOperatorV1(owner);
+  assertFederatedNativeContinuationStepParentV1(parent);
+  assertContinuationStepUnchanged(parent, snapshot);
+  if (used.has(owner)) throw new Error('FED continuation signing requires its unused retained predecessor slot');
+  used.add(owner);
+  try {
+    const signedTransactionHex = await owners.get(owner)!.signTransaction(transaction);
+    assertFederatedGenesisOperatorV1(owner);
+    assertFederatedNativeContinuationStepParentV1(parent);
+    assertContinuationStepUnchanged(parent, snapshot);
+    const parsed = Transaction.from(signedTransactionHex);
+    if (parsed.serialized !== signedTransactionHex || parsed.signature === null || !parsed.signature.isValid()
+      || parsed.signature.networkV === null || parsed.from?.toLowerCase() !== `0x${owner.addressHex}`
+      || parsed.type !== 0 || parsed.chainId !== 4242n || parsed.nonce !== parent.nonce
+      || parsed.to?.toLowerCase() !== transaction.to || parsed.data !== transaction.data
+      || parsed.gasPrice !== transaction.gasPrice || parsed.gasLimit !== transaction.gasLimit || parsed.value !== 0n) {
+      throw new Error('FED continuation signature differs from its exact transaction');
+    }
+    assertFederatedGenesisOperatorV1(owner);
+    assertFederatedNativeContinuationStepParentV1(parent);
+    assertContinuationStepUnchanged(parent, snapshot);
+    const completed = Object.freeze({ parent: snapshot, transactionHashHex: parsed.hash! });
+    if (phase === 'mint') completedContinuationMints.set(owner, completed);
+    else if (phase === 'approve') completedContinuationApprovals.set(owner, completed);
+    return Object.freeze({ signedTransactionHex, transactionHashHex: parsed.hash!, nonce: parent.nonce });
+  } catch (error) { disposeFederatedGenesisOperatorV1(owner); throw error; }
+}
+
+function assertExactContinuationStepParent(parent: Readonly<FederatedNativeContinuationStepParentV1>): void {
+  if (parent === null || typeof parent !== 'object' || Object.getPrototypeOf(parent) !== Object.prototype
+    || Reflect.ownKeys(parent).length !== continuationStepFields.length || continuationStepFields.some(key => {
+      const descriptor = Object.getOwnPropertyDescriptor(parent, key);
+      return !descriptor?.enumerable || !Object.hasOwn(descriptor, 'value');
+    })) throw new Error('FED continuation signing requires exact own-data parent fields');
+}
+
+function assertContinuationStepUnchanged(parent: Readonly<FederatedNativeContinuationStepParentV1>,
+  snapshot: Readonly<FederatedNativeContinuationStepParentV1>): void {
+  assertExactContinuationStepParent(parent);
+  if (continuationStepFields.some(key => parent[key] !== snapshot[key])) {
+    throw new Error('FED continuation signing parent changed during signing');
+  }
+}
+
+function signReservation(owner: Readonly<FederatedGenesisOperatorV1>, input: Readonly<FederatedGenesisReservationInputV1>,
+  assertBound: () => void = () => {}) {
+  const { genesisHashHex, nonce, statementHex, sourceProofEnvelopeScaleHex } = input;
+  const statement = Buffer.from(statementHex.slice(2), 'hex');
+  const proof = Buffer.from(sourceProofEnvelopeScaleHex.slice(2), 'hex');
+  // Pallet 12 / call 6: Vec<u8> statement, followed by the already SCALE-encoded proof struct.
+  const call = Buffer.concat([Buffer.from([12, 6]), compact(statement.length), statement, proof]);
+  // Immortal era, compact u32 nonce, zero tip. The proof itself has bounded expiry.
+  const extra = Buffer.concat([Buffer.from([0]), compact(nonce), Buffer.from([0])]);
+  const genesis = Buffer.from(genesisHashHex.slice(2), 'hex');
+  const payload = Buffer.concat([call, extra, Buffer.from('0100000001000000', 'hex'), genesis, genesis]);
+  // SDK SignedPayload hashes payloads >256 bytes before EthereumSignature hashes with Keccak.
+  const signingDigestHex = keccak256(blakejs.blake2b(payload, undefined, 32));
+  try {
+    assertFederatedGenesisOperatorV1(owner);
+    assertBound();
+    const signature = owners.get(owner)!.signingKey.sign(signingDigestHex);
+    assertFederatedGenesisOperatorV1(owner);
+    assertBound();
+    if (recoverAddress(signingDigestHex, signature).toLowerCase().slice(2) !== owner.addressHex) {
+      throw new Error('FED native reservation signature has a different signer');
+    }
+    const signatureBytes = Buffer.concat([Buffer.from(signature.r.slice(2), 'hex'),
+      Buffer.from(signature.s.slice(2), 'hex'), Buffer.from([signature.yParity])]);
+    const body = Buffer.concat([Buffer.from([0x84]), Buffer.from(owner.addressHex, 'hex'),
+      signatureBytes, extra, call]);
+    const extrinsic = Buffer.concat([compact(body.length), body]);
+    assertFederatedGenesisOperatorV1(owner);
+    assertBound();
+    return Object.freeze({ genesisHashHex, nonce, signerAddressHex: owner.addressHex,
+      callScaleHex: `0x${call.toString('hex')}`, signingDigestHex,
+      signedExtrinsicHex: `0x${extrinsic.toString('hex')}`,
+      extrinsicHashHex: `0x${Buffer.from(blakejs.blake2b(extrinsic, undefined, 32)).toString('hex')}` });
+  } catch (error) {
+    disposeFederatedGenesisOperatorV1(owner);
+    throw error;
+  }
+}
+
+function compact(value: number): Buffer {
+  if (value < 64) return Buffer.from([value * 4]);
+  if (value < 16384) { const result = Buffer.alloc(2); result.writeUInt16LE(value * 4 + 1); return result; }
+  if (value < 0x40000000) { const result = Buffer.alloc(4); result.writeUInt32LE(value * 4 + 2); return result; }
+  const result = Buffer.alloc(5); result[0] = 3; result.writeUInt32LE(value, 1); return result;
+}
+
+/** Fresh local custody only. Creation never signs or connects to a provider. */
+export function createFederatedGenesisOperatorV1(): Readonly<FederatedGenesisOperatorV1> {
+  const wallet = Wallet.createRandom();
+  const addressHex = wallet.address.toLowerCase().slice(2);
+  // Pinned FED runtime: AccountId20, Blake2_128Concat, AccountInfo<u32,
+  // AccountData<u128>>. SDK bbc435c genesis gives one provider and NEW_LOGIC.
+  const account = Buffer.alloc(80);
+  account.writeUInt32LE(1, 8);
+  account.writeBigUInt64LE(NATIVE_ENDOWMENT & ((1n << 64n) - 1n), 16);
+  account.writeBigUInt64LE(NATIVE_ENDOWMENT >> 64n, 24);
+  account[79] = 0x80;
+  const keyHash = Buffer.from(blakejs.blake2b(Buffer.from(addressHex, 'hex'), undefined, 16)).toString('hex');
+  const owner = Object.freeze({ addressHex, launchDomainHex: randomBytes(32).toString('hex'),
+    nativeFunding: Object.freeze({ amountUnits: NATIVE_ENDOWMENT.toString(),
+      storageKeyHex: `0x${SYSTEM_ACCOUNT_PREFIX}${keyHash}${addressHex}`,
+      accountInfoScaleHex: `0x${account.toString('hex')}` }) });
+  owners.set(owner, wallet);
+  return owner;
+}
+
+export function assertFederatedGenesisOperatorV1(owner: Readonly<FederatedGenesisOperatorV1>): void {
+  const wallet = owners.get(owner);
+  if (!wallet || wallet.address.toLowerCase().slice(2) !== owner.addressHex) {
+    throw new Error('FED operator custody is absent, copied or disposed');
+  }
+}
+
+export function disposeFederatedGenesisOperatorV1(owner: Readonly<FederatedGenesisOperatorV1>): void {
+  owners.delete(owner);
+}

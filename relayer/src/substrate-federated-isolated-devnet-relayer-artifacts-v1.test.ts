@@ -14,6 +14,7 @@ import {
   decodeSubstrateFederatedIsolatedDevnetGitBlobBatchV1,
   decodeSubstrateFederatedIsolatedDevnetBuildArchiveV1,
   encodeSubstrateFederatedIsolatedDevnetBuildArchiveV1,
+  maximumSubstrateFederatedIsolatedDevnetGitBlobBatchBytesV1,
   produceSubstrateFederatedIsolatedDevnetRelayerArtifactsV1,
 } from './substrate-federated-isolated-devnet-relayer-artifacts-v1.js';
 import { parseSubstrateFederatedIsolatedDevnetRelayerArtifactsArgsV1 } from './scripts/build-substrate-federated-isolated-devnet-relayer-artifacts-v1.js';
@@ -173,6 +174,26 @@ describe('Substrate federated isolated-devnet relayer artifacts V1', () => {
     )).toThrow(/trailing bytes/);
   });
 
+  it('bounds Git batch framing separately from source blob content', () => {
+    const genericGitOutputLimit = 32 * 1024 * 1024;
+    const contentLimit = 48 * 1024 * 1024;
+    const currentClosureBlobCount = 1_443;
+    const batchLimit =
+      maximumSubstrateFederatedIsolatedDevnetGitBlobBatchBytesV1(
+        currentClosureBlobCount,
+      );
+
+    expect(batchLimit).toBe(contentLimit + currentClosureBlobCount * 56);
+    expect(batchLimit).toBeGreaterThan(contentLimit);
+    expect(contentLimit).toBeGreaterThan(genericGitOutputLimit);
+    expect(batchLimit).toBeLessThanOrEqual(64 * 1024 * 1024);
+    expect(() => maximumSubstrateFederatedIsolatedDevnetGitBlobBatchBytesV1(0))
+      .toThrow(/positive safe integer/);
+    expect(() => maximumSubstrateFederatedIsolatedDevnetGitBlobBatchBytesV1(
+      Number.MAX_SAFE_INTEGER,
+    )).toThrow(/bounded limit/);
+  });
+
   it('requires exactly one explicit value for each CLI input', () => {
     const destinationDirectory = resolve('bounded-relayer-artifacts');
     const wasmPackExecutable = resolve('tools', 'wasm-pack');
@@ -291,6 +312,10 @@ describe('Substrate federated isolated-devnet relayer artifacts V1', () => {
     expect(moduleSource).toContain("'cat-file', '--batch'");
     expect(moduleSource).toContain("GIT_NO_REPLACE_OBJECTS: '1'");
     expect(moduleSource).not.toContain('checkout-index');
+    expect(moduleSource).toContain("SCRATCH_DIRECTORY_PREFIX = '.e2s-rba-build-'");
+    expect(moduleSource).not.toContain(
+      '`.${basename(target.finalDirectory)}.build-${randomUUID()}`',
+    );
     expect(moduleSource).toContain('constants.O_NOFOLLOW');
     expect(moduleSource).toContain('buildToolchainAuthenticated: false');
     expect(moduleSource).toContain('fixedLocalVolumesAuthenticated: false');

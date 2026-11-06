@@ -179,6 +179,120 @@ export function assertSubstrateFederatedIsolatedDevnetContractArtifactsV1Provena
   }
 }
 
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CONTRACT_ARTIFACTS_V2_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-contract-artifacts.v2' as const;
+
+const RECEIPT_DIGEST_DOMAIN_V2 =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CONTRACT_ARTIFACTS_V2';
+const REPORTS_V2 = new WeakSet<object>();
+const CONTRACTS_V2 = Object.freeze({
+  ...CONTRACTS,
+  tracker: Object.freeze({
+    relativePath: 'contracts/SPVTrackerSubstrateFederatedV2.es',
+    sourceUrl: new URL(
+      '../../contracts/SPVTrackerSubstrateFederatedV2.es',
+      import.meta.url,
+    ),
+    expectedSha256Hex:
+      '110b1aa22d59e1202435bb139cadbb49f28a48c8b8a3056d0426e620ee828eec',
+  }),
+} as const);
+
+export interface SubstrateFederatedIsolatedDevnetContractArtifactsV2 {
+  readonly receipt: Readonly<{
+    readonly schema:
+      typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CONTRACT_ARTIFACTS_V2_SCHEMA;
+    readonly version: 2;
+    readonly status: 'exact_reviewed_contract_templates_collected';
+    readonly receiptDigestHex: string;
+    readonly artifacts:
+      Readonly<Record<ContractRole, Readonly<ContractArtifactIdentityV1>>>;
+    readonly checks:
+      SubstrateFederatedIsolatedDevnetContractArtifactsV1['receipt']['checks'];
+    readonly boundaries:
+      SubstrateFederatedIsolatedDevnetContractArtifactsV1['receipt']['boundaries'];
+  }>;
+  readonly templates: Readonly<Record<ContractRole, string>>;
+}
+
+/** Collects the V2 tracker with the unchanged reviewed settlement templates. */
+export function collectSubstrateFederatedIsolatedDevnetContractArtifactsV2():
+  Readonly<SubstrateFederatedIsolatedDevnetContractArtifactsV2> {
+  const entries = (Object.keys(CONTRACTS_V2) as ContractRole[]).map(role => {
+    const definition = CONTRACTS_V2[role];
+    const source = readStableContract(
+      definition.sourceUrl,
+      definition.expectedSha256Hex,
+      definition.relativePath,
+    );
+    return [role, Object.freeze({
+      source,
+      identity: Object.freeze({
+        relativePath: definition.relativePath,
+        sizeBytes: Buffer.byteLength(source, 'utf8'),
+        sha256Hex: definition.expectedSha256Hex,
+      }),
+    })] as const;
+  });
+  const artifacts = Object.freeze(Object.fromEntries(entries.map(
+    ([role, value]) => [role, value.identity],
+  )) as Record<ContractRole, Readonly<ContractArtifactIdentityV1>>);
+  const templates = Object.freeze(Object.fromEntries(entries.map(
+    ([role, value]) => [role, value.source],
+  )) as Record<ContractRole, string>);
+  const body = {
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CONTRACT_ARTIFACTS_V2_SCHEMA,
+    version: 2 as const,
+    status: 'exact_reviewed_contract_templates_collected' as const,
+    artifacts,
+    checks: {
+      fixedRepositoryPathsOnly: true as const,
+      boundedRegularSingleLinkFilesOnly: true as const,
+      stableFileIdentityBeforeAndAfterRead: true as const,
+      strictUtf8AndLfOnlySource: true as const,
+      exactReviewedSha256Matched: true as const,
+      immutableSourceTextReturned: true as const,
+    },
+    boundaries: falseBoundaries(),
+  };
+  const receipt = deepFreeze({
+    ...body,
+    receiptDigestHex: sha256CanonicalJson(body, RECEIPT_DIGEST_DOMAIN_V2),
+  });
+  const result = Object.freeze({ receipt, templates });
+  REPORTS_V2.add(result);
+  return result;
+}
+
+export function assertSubstrateFederatedIsolatedDevnetContractArtifactsV2Provenance(
+  value: unknown,
+): asserts value is Readonly<SubstrateFederatedIsolatedDevnetContractArtifactsV2> {
+  if (value === null || typeof value !== 'object' || !REPORTS_V2.has(value)) {
+    throw new Error('isolated-devnet V2 contract artifacts lack process provenance');
+  }
+  const result = value as SubstrateFederatedIsolatedDevnetContractArtifactsV2;
+  const { receiptDigestHex, ...body } = result.receipt;
+  if (
+    sha256CanonicalJson(body, RECEIPT_DIGEST_DOMAIN_V2) !== receiptDigestHex
+  ) {
+    throw new Error('isolated-devnet V2 contract artifact receipt drifted');
+  }
+  for (const role of Object.keys(CONTRACTS_V2) as ContractRole[]) {
+    const source = result.templates[role];
+    const identity = result.receipt.artifacts[role];
+    if (
+      typeof source !== 'string'
+      || Buffer.byteLength(source, 'utf8') !== identity.sizeBytes
+      || sha256(Buffer.from(source, 'utf8')) !== identity.sha256Hex
+      || identity.relativePath !== CONTRACTS_V2[role].relativePath
+      || identity.sha256Hex !== CONTRACTS_V2[role].expectedSha256Hex
+    ) {
+      throw new Error(`isolated-devnet V2 ${role} contract artifact drifted`);
+    }
+  }
+}
+
 function readStableContract(
   url: URL,
   expectedSha256Hex: string,

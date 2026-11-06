@@ -30,7 +30,7 @@ class BridgeSubstrateFederatedTrackerV1AcceptanceSpec
   private val FixtureProperty =
     "bridge.substrate.federated.tracker.v1.context.fixture"
   private val ExpectedFixtureSha256 =
-    "65fc196a98c4ce25ed72d4bea1f61425f51908970e6f6b09ea0b0a39f604c77a"
+    "0d9657b8e3e64e8249d2b5f49e2a0ddd35af46eaba70e4bbe9c373b52b4ebee4"
   private val ExpectedContractId =
     "4fbcc5372efb4338b6f150ee5455a7a0cebd1f07c6cb0cc2929e17155086af8c"
   private val ExpectedTransactionId =
@@ -415,7 +415,7 @@ class BridgeSubstrateFederatedTrackerV1AcceptanceSpec
               (2.toByte -> IntConstant(selected)))))
     }
 
-    val changedRoot = contextHeaders(anchorIndex).extensionRoot.toArray
+    val changedRoot = contextHeaders(anchorIndex).extensionRoot.toArray.clone()
     changedRoot(0) = (changedRoot(0) ^ 1).toByte
     assertVmFalse(
       "selected anchor extension root",
@@ -429,9 +429,60 @@ class BridgeSubstrateFederatedTrackerV1AcceptanceSpec
       headers = mutateAnchorHeader(_.copy(
         timestamp = contextHeaders(anchorIndex).timestamp + 1L,
         _bytes = null)))
+    reduceTransaction(transaction) shouldBe Right(expectedThreshold)
+  }
+
+  test("one descendant header invalidates the frozen anchor selector, not the checkpoint") {
+    require(anchorIndex > 0 && anchorIndex + 1 < contextHeaders.length,
+      "header advancement needs the anchor and its predecessor in the window")
+    val headers = contextHeaders.clone()
+    val anchor = headers(anchorIndex)
+    // Model a miner repeating the same extension commitment in every new block.
+    var index = anchorIndex - 1
+    while (index >= 0) {
+      headers(index) = new CHeader(headers(index).ergoHeader.copy(
+        parentId = bytesToId(headers(index + 1).id.toArray),
+        extensionRoot = Digest32 @@ anchor.extensionRoot.toArray,
+        _bytes = null))
+      index -= 1
+    }
+    val frozenBytes = ErgoLikeTransactionSerializer.toBytes(transaction)
+    val frozenInput = ErgoBox.sigmaSerializer.toBytes(trackerSelf)
+    reduceTransaction(transaction, headers = headers) shouldBe Right(expectedThreshold)
+    transactionContext(transaction, trackerSelf, headers, currentHeight + 1)
+      .preHeader.height shouldBe currentHeight + 1
+    reduceTransaction(transaction, headers = headers,
+      height = currentHeight + 1) shouldBe Right(expectedThreshold)
+
+    val tip = headers.head
+    val descendant = new CHeader(tip.ergoHeader.copy(
+      parentId = bytesToId(tip.id.toArray),
+      height = tip.height + 1,
+      timestamp = tip.timestamp + 1L,
+      _bytes = null))
+    val advancedHeaders = (Array(descendant) ++ headers).take(headers.length)
+    advancedHeaders(anchorIndex + 1).id shouldBe anchor.id
+    advancedHeaders(anchorIndex).id should not be anchor.id
+    advancedHeaders(anchorIndex).extensionRoot shouldBe anchor.extensionRoot
+    transactionContext(transaction, trackerSelf, advancedHeaders, currentHeight + 1)
+      .preHeader.height shouldBe currentHeight + 1
+    assertVmFalse("unchanged bytes after one descendant header", transaction,
+      headers = advancedHeaders, height = currentHeight + 1)
+
+    // Unsigned diagnostic control only: retained signed candidates are immutable.
+    val reselected = withInputExtension(transaction, ContextExtension(
+      extension.values + (2.toByte -> IntConstant(anchorIndex + 1))))
+    reselected.id should not be transaction.id
+    reduceTransaction(reselected, headers = advancedHeaders,
+      height = currentHeight + 1) shouldBe Right(expectedThreshold)
+    ErgoLikeTransactionSerializer.toBytes(transaction) should
+      contain theSameElementsInOrderAs frozenBytes
+    ErgoBox.sigmaSerializer.toBytes(trackerSelf) should
+      contain theSameElementsInOrderAs frozenInput
   }
 
   test("tracker authority and complete successor lineage fail closed") {
+    reduceTransaction(transaction) shouldBe Right(expectedThreshold)
     val wrongInputToken =
       (Digest32Coll @@ Colls.fromArray(Array.fill[Byte](32)(0x43.toByte))) -> 1L
     val inputTokenMutations = Vector(
@@ -572,8 +623,8 @@ class BridgeSubstrateFederatedTrackerV1AcceptanceSpec
       if (index < 9)
         assertSparseRegisterFailure(s"missing successor R$index", missing, index)
       else
-        assertVmFalse(s"missing successor R$index", missing)
-      assertVmFalse(
+        assertAbsentTypedValueFailure(s"missing successor R$index", missing)
+      assertInvalidTypeFailure(
         s"wrong successor R$index type",
         withOutput(
           transaction,
@@ -581,6 +632,7 @@ class BridgeSubstrateFederatedTrackerV1AcceptanceSpec
             register,
             wrongRegisterTypes(register)))))
     }
+    reduceTransaction(transaction) shouldBe Right(expectedThreshold)
   }
 
   test("successor creation height is monotonic, nonfuture and fresh") {
@@ -638,6 +690,9 @@ class BridgeSubstrateFederatedTrackerV1AcceptanceSpec
   }
 
   test("the fixture records only local construction and JVM reduction inputs") {
+    requiredString(transitionCursor.downField("anchorContextProvenance"),
+      "anchor context provenance") shouldBe
+        "eip0045-validity-tracker-canonical-synthetic-header-context"
     anchorIndex should be >= 0
     anchorIndex should be < contextHeaders.length
     trackerSelf.ergoTree shouldBe trackerTree
@@ -779,7 +834,7 @@ class BridgeSubstrateFederatedTrackerV1AcceptanceSpec
       tip.id,
       tip.timestamp + 1L,
       tip.nBits,
-      tip.height + 1,
+      height,
       tip.minerPk,
       Colls.emptyColl[Byte])
     val suppliedExtension = tx.inputs.head.extension

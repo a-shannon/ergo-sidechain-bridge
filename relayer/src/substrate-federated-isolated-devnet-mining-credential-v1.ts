@@ -16,6 +16,105 @@ export interface SubstrateFederatedIsolatedDevnetMiningCredentialV1 {
 
 const CREDENTIALS = new WeakMap<object, CredentialState>();
 
+export interface SubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1 {
+  readonly schema: 'e2s.substrate-federated-isolated-devnet-native-continuation-mining-authority.v1';
+  readonly version: 1;
+}
+
+interface ContinuationAuthorityState {
+  readonly publicKeyHex: string;
+  readonly setupTarget: object;
+  readonly confirmationTarget: object;
+  readonly assertCustody: () => void;
+  readonly checkpointMiningCredential: Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
+  readonly trackerAdmissionMiningCredential: Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
+  readonly trackerConfirmationMiningCredential: Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
+  claimed: boolean;
+  revoked: boolean;
+}
+
+const CONTINUATION_AUTHORITIES = new WeakMap<object, ContinuationAuthorityState>();
+
+/** Internal setup issuer. The three fresh tokens never replace consumed tokens. */
+export function issueSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1(input: Readonly<{
+  mnemonic: string;
+  publicKeyHex: string;
+  setupTarget: object;
+  confirmationTarget: object;
+  assertCustody: () => void;
+}>): Readonly<SubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1> {
+  const mnemonic = validMnemonic(input.mnemonic);
+  const publicKeyHex = compressedPublicKey(input.publicKeyHex);
+  if (input.setupTarget === null || typeof input.setupTarget !== 'object'
+    || input.confirmationTarget === null || typeof input.confirmationTarget !== 'object'
+    || input.setupTarget === input.confirmationTarget || typeof input.assertCustody !== 'function') {
+    throw new Error('native continuation mining authority requires distinct parent targets and custody');
+  }
+  input.assertCustody();
+  const token = Object.freeze({
+    schema: 'e2s.substrate-federated-isolated-devnet-native-continuation-mining-authority.v1' as const,
+    version: 1 as const,
+  });
+  CONTINUATION_AUTHORITIES.set(token, {
+    publicKeyHex, setupTarget: input.setupTarget, confirmationTarget: input.confirmationTarget,
+    assertCustody: input.assertCustody,
+    checkpointMiningCredential: issueSubstrateFederatedIsolatedDevnetMiningCredentialV1(mnemonic, publicKeyHex),
+    trackerAdmissionMiningCredential: issueSubstrateFederatedIsolatedDevnetMiningCredentialV1(mnemonic, publicKeyHex),
+    trackerConfirmationMiningCredential: issueSubstrateFederatedIsolatedDevnetMiningCredentialV1(mnemonic, publicKeyHex),
+    claimed: false, revoked: false,
+  });
+  return token;
+}
+
+/** Internal process consumer. A failed claim also destroys the fresh triplet. */
+export function claimSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1(
+  authority: Readonly<SubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1>,
+  publicKeyHex: string,
+  setupTarget: object,
+  confirmationTarget: object,
+) {
+  const retained = CONTINUATION_AUTHORITIES.get(authority);
+  if (retained === undefined || retained.claimed || retained.revoked) {
+    throw new Error('native continuation mining authority is absent, claimed, or revoked');
+  }
+  retained.claimed = true;
+  const assertCustody = () => {
+    if (retained.revoked) throw new Error('native continuation mining authority is revoked');
+    retained.assertCustody();
+  };
+  try {
+    if (retained.publicKeyHex !== compressedPublicKey(publicKeyHex)
+      || retained.setupTarget !== setupTarget || retained.confirmationTarget !== confirmationTarget) {
+      throw new Error('native continuation mining authority parent or signer differs');
+    }
+    assertCustody();
+    for (const credential of [retained.checkpointMiningCredential,
+      retained.trackerAdmissionMiningCredential, retained.trackerConfirmationMiningCredential]) {
+      assertSubstrateFederatedIsolatedDevnetMiningCredentialV1(credential, publicKeyHex);
+    }
+    return Object.freeze({ checkpointMiningCredential: retained.checkpointMiningCredential,
+      trackerAdmissionMiningCredential: retained.trackerAdmissionMiningCredential,
+      trackerConfirmationMiningCredential: retained.trackerConfirmationMiningCredential,
+      assertCustody });
+  } catch (error) {
+    revokeSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1(authority);
+    throw error;
+  }
+}
+
+export function revokeSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1(
+  authority: Readonly<SubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1>,
+): void {
+  const retained = CONTINUATION_AUTHORITIES.get(authority);
+  if (retained === undefined) return;
+  retained.revoked = true;
+  for (const credential of [retained.checkpointMiningCredential,
+    retained.trackerAdmissionMiningCredential, retained.trackerConfirmationMiningCredential]) {
+    revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(credential);
+  }
+  CONTINUATION_AUTHORITIES.delete(authority);
+}
+
 /** Internal one-shot handoff. The token never contains or serializes the phrase. */
 export function issueSubstrateFederatedIsolatedDevnetMiningCredentialV1(
   mnemonicValue: string,

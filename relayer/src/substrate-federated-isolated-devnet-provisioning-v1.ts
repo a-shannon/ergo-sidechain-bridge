@@ -10,7 +10,9 @@ import {
 } from './substrate-federated-genesis-issuance-materialization-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetGenerationV1Provenance,
+  assertSubstrateFederatedIsolatedDevnetGenerationV2Provenance,
   type SubstrateFederatedIsolatedDevnetGenerationV1,
+  type SubstrateFederatedIsolatedDevnetGenerationV2,
   type SubstrateFederatedIsolatedDevnetGenesisPayloadV1,
 } from './substrate-federated-isolated-devnet-generation-v1.js';
 import {
@@ -21,9 +23,13 @@ import {
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PROVISIONING_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-provisioning.v1' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PROVISIONING_V2_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-provisioning.v2' as const;
 
 const PLAN_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PROVISIONING_V1';
+const PLAN_V2_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PROVISIONING_V2';
 const INPUT_SET_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_INPUT_SET_V1';
 const IDENTITY_DIGEST_DOMAIN =
@@ -35,6 +41,7 @@ const TRANSACTION_BODY_DIGEST_DOMAIN =
 const MATERIALIZED_TRANSACTION_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MATERIALIZED_TX_V1';
 const provisionings = new WeakSet<object>();
+const provisioningsV2 = new WeakSet<object>();
 
 export type ProvisioningRole =
   'tracker' | 'duplicate-prevention' | 'pooled-reserve';
@@ -148,6 +155,19 @@ export interface BuildSubstrateFederatedIsolatedDevnetProvisioningV1Input {
     Readonly<SubstrateFederatedIsolatedDevnetGenesisInputsV1>;
 }
 
+export interface SubstrateFederatedIsolatedDevnetProvisioningV2
+  extends Omit<SubstrateFederatedIsolatedDevnetProvisioningV1, 'schema' | 'version' | 'generation'> {
+  readonly schema: typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PROVISIONING_V2_SCHEMA;
+  readonly version: 2;
+  readonly generation: Readonly<Omit<SubstrateFederatedIsolatedDevnetProvisioningV1['generation'],
+    'settlementNetworkId'> & { readonly settlementNetworkId: 'ergo-local-devnet' }>;
+}
+
+export interface BuildSubstrateFederatedIsolatedDevnetProvisioningV2Input
+  extends Omit<BuildSubstrateFederatedIsolatedDevnetProvisioningV1Input, 'generation'> {
+  readonly generation: Readonly<SubstrateFederatedIsolatedDevnetGenerationV2>;
+}
+
 export interface MaterializeSubstrateFederatedIsolatedDevnetProvisioningCoreV1Input {
   readonly genesisInputs:
     Readonly<SubstrateFederatedIsolatedDevnetGenesisInputsV1>;
@@ -169,20 +189,33 @@ export interface SubstrateFederatedIsolatedDevnetProvisioningCoreV1 {
 export async function buildSubstrateFederatedIsolatedDevnetProvisioningV1(
   input: Readonly<BuildSubstrateFederatedIsolatedDevnetProvisioningV1Input>,
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetProvisioningV1>> {
+  return buildProvisioning(input, 1) as Promise<Readonly<SubstrateFederatedIsolatedDevnetProvisioningV1>>;
+}
+
+export async function buildSubstrateFederatedIsolatedDevnetProvisioningV2(
+  input: Readonly<BuildSubstrateFederatedIsolatedDevnetProvisioningV2Input>,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetProvisioningV2>> {
+  return buildProvisioning(input, 2) as Promise<Readonly<SubstrateFederatedIsolatedDevnetProvisioningV2>>;
+}
+
+async function buildProvisioning(
+  input: Readonly<BuildSubstrateFederatedIsolatedDevnetProvisioningV1Input
+    | BuildSubstrateFederatedIsolatedDevnetProvisioningV2Input>,
+  version: 1 | 2,
+) {
   const capturedInput = exactRecord(
     input,
     ['generation', 'genesisInputs'],
     'isolated-devnet provisioning input',
   );
   const generation = capturedInput.generation as Readonly<
-    SubstrateFederatedIsolatedDevnetGenerationV1
+    SubstrateFederatedIsolatedDevnetGenerationV1 | SubstrateFederatedIsolatedDevnetGenerationV2
   >;
   const historicalGenesisInputs = capturedInput.genesisInputs as Readonly<
     SubstrateFederatedIsolatedDevnetGenesisInputsV1
   >;
-  assertSubstrateFederatedIsolatedDevnetGenerationV1Provenance(
-    generation,
-  );
+  if (version === 1) assertSubstrateFederatedIsolatedDevnetGenerationV1Provenance(generation);
+  else assertSubstrateFederatedIsolatedDevnetGenerationV2Provenance(generation);
   const creationHeight = generation.launchBaseline.ergoSetupAnchor.height;
   const core =
     await materializeSubstrateFederatedIsolatedDevnetProvisioningCoreV1({
@@ -193,8 +226,9 @@ export async function buildSubstrateFederatedIsolatedDevnetProvisioningV1(
       inputMode: 'historical',
     });
   const binding = {
-    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PROVISIONING_V1_SCHEMA,
-    version: 1 as const,
+    schema: version === 1 ? SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PROVISIONING_V1_SCHEMA
+      : SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PROVISIONING_V2_SCHEMA,
+    version,
     status: 'authenticated_non_authorizing_unsigned_provisioning' as const,
     generation: {
       manifestDigestHex: generation.manifestDigestHex,
@@ -257,9 +291,9 @@ export async function buildSubstrateFederatedIsolatedDevnetProvisioningV1(
   };
   const plan = deepFreeze({
     ...binding,
-    planDigestHex: sha256CanonicalJson(binding, PLAN_DIGEST_DOMAIN),
+    planDigestHex: sha256CanonicalJson(binding, version === 1 ? PLAN_DIGEST_DOMAIN : PLAN_V2_DIGEST_DOMAIN),
   });
-  provisionings.add(plan);
+  (version === 1 ? provisionings : provisioningsV2).add(plan);
   return plan;
 }
 
@@ -268,6 +302,14 @@ export function assertSubstrateFederatedIsolatedDevnetProvisioningV1Provenance(
 ): asserts value is Readonly<SubstrateFederatedIsolatedDevnetProvisioningV1> {
   if (value === null || typeof value !== 'object' || !provisionings.has(value)) {
     throw new Error('isolated-devnet provisioning lacks process provenance');
+  }
+}
+
+export function assertSubstrateFederatedIsolatedDevnetProvisioningV2Provenance(
+  value: unknown,
+): asserts value is Readonly<SubstrateFederatedIsolatedDevnetProvisioningV2> {
+  if (value === null || typeof value !== 'object' || !provisioningsV2.has(value)) {
+    throw new Error('isolated-devnet V2 provisioning lacks process provenance');
   }
 }
 

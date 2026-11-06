@@ -1,3 +1,4 @@
+# This runner is digest-pinned; its repository and working-tree bytes use LF.
 $ErrorActionPreference = 'Stop'
 
 function ConvertFrom-BridgeBase64([string] $Value, [string] $Label) {
@@ -201,6 +202,17 @@ public static class E2SWindowsJobProcess
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr handle);
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr GetStdHandle(int identifier);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentProcess();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool DuplicateHandle(
+        IntPtr sourceProcess, IntPtr source, IntPtr targetProcess,
+        out IntPtr target, uint desiredAccess, bool inherit, uint options);
+
     public static int Run(
         string application,
         string[] arguments,
@@ -216,8 +228,8 @@ public static class E2SWindowsJobProcess
         bool assignedToJob = false;
         bool containmentVerified = false;
         AnonymousPipeServerStream standardInput = null;
-        AnonymousPipeServerStream standardOutput = null;
-        AnonymousPipeServerStream standardError = null;
+        IntPtr standardOutput = IntPtr.Zero;
+        IntPtr standardError = IntPtr.Zero;
 
         try
         {
@@ -242,19 +254,17 @@ public static class E2SWindowsJobProcess
             standardInput = new AnonymousPipeServerStream(
                 PipeDirection.Out,
                 HandleInheritability.Inheritable);
-            standardOutput = new AnonymousPipeServerStream(
-                PipeDirection.In,
-                HandleInheritability.Inheritable);
-            standardError = new AnonymousPipeServerStream(
-                PipeDirection.In,
-                HandleInheritability.Inheritable);
+            // Inherit the Node pipes directly: ConsoleStream forwarding can drop output.
+            // The target's EOF stdin stays separate from the wrapper cancellation pipe.
+            standardOutput = DuplicateStandardOutput(-11);
+            standardError = DuplicateStandardOutput(-12);
 
             STARTUPINFO startupInfo = new STARTUPINFO();
             startupInfo.cb = (uint) Marshal.SizeOf(typeof(STARTUPINFO));
             startupInfo.dwFlags = STARTF_USESTDHANDLES;
             startupInfo.hStdInput = ParseHandle(standardInput.GetClientHandleAsString());
-            startupInfo.hStdOutput = ParseHandle(standardOutput.GetClientHandleAsString());
-            startupInfo.hStdError = ParseHandle(standardError.GetClientHandleAsString());
+            startupInfo.hStdOutput = standardOutput;
+            startupInfo.hStdError = standardError;
 
             StringBuilder commandLine = new StringBuilder(BuildCommandLine(application, arguments));
             if (!CreateProcess(
@@ -272,8 +282,12 @@ public static class E2SWindowsJobProcess
             processCreated = true;
 
             standardInput.DisposeLocalCopyOfClientHandle();
-            standardOutput.DisposeLocalCopyOfClientHandle();
-            standardError.DisposeLocalCopyOfClientHandle();
+            if (!CloseHandle(standardOutput))
+                throw Win32Failure("CloseHandle inherited stdout");
+            standardOutput = IntPtr.Zero;
+            if (!CloseHandle(standardError))
+                throw Win32Failure("CloseHandle inherited stderr");
+            standardError = IntPtr.Zero;
             standardInput.Dispose();
             standardInput = null;
 
@@ -281,8 +295,6 @@ public static class E2SWindowsJobProcess
                 throw Win32Failure("AssignProcessToJobObject");
             assignedToJob = true;
 
-            Task outputCopy = standardOutput.CopyToAsync(Console.OpenStandardOutput());
-            Task errorCopy = standardError.CopyToAsync(Console.OpenStandardError());
             Task<int> cancellationRead = Task.Run(
                 () => Console.OpenStandardInput().ReadByte());
 
@@ -346,9 +358,6 @@ public static class E2SWindowsJobProcess
             }
             CloseHandle(job);
             job = IntPtr.Zero;
-            Task.WaitAll(new Task[] { outputCopy, errorCopy });
-            Console.OpenStandardOutput().Flush();
-            Console.OpenStandardError().Flush();
             if (cancellationRequested)
                 return CANCELLATION_EXIT_CODE;
             if (targetTimedOut)
@@ -389,11 +398,24 @@ public static class E2SWindowsJobProcess
                 Marshal.FreeHGlobal(limitInformation);
             if (standardInput != null)
                 standardInput.Dispose();
-            if (standardOutput != null)
-                standardOutput.Dispose();
-            if (standardError != null)
-                standardError.Dispose();
+            if (standardOutput != IntPtr.Zero)
+                CloseHandle(standardOutput);
+            if (standardError != IntPtr.Zero)
+                CloseHandle(standardError);
         }
+    }
+
+    private static IntPtr DuplicateStandardOutput(int identifier)
+    {
+        IntPtr source = GetStdHandle(identifier);
+        if (source == IntPtr.Zero || source == new IntPtr(-1))
+            throw new IOException("standard output handle is unavailable");
+        IntPtr current = GetCurrentProcess();
+        IntPtr target;
+        const uint DUPLICATE_SAME_ACCESS = 2;
+        if (!DuplicateHandle(current, source, current, out target, 0, true, DUPLICATE_SAME_ACCESS))
+            throw Win32Failure("DuplicateHandle standard output");
+        return target;
     }
 
     private static bool TryVerifyExceptionalContainment(

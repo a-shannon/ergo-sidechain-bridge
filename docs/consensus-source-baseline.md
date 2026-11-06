@@ -9,8 +9,70 @@ machine-readable identity is `sources/consensus-source-lock.json`.
 | Component | Public source | Immutable identity | Bridge-owned material | Current role |
 |---|---|---|---|---|
 | Substrate/Frontier | `https://github.com/polkadot-evm/frontier.git` | Base `75329a2df49e2cc7981485392c31160929d1bd48` | Superproject gitlink plus `sources/frontier/0001-bridge-runtime-commitment.patch` | EVM execution, bridge-native burn commitment production, GRANDPA proof serving, and native finalized-state verification |
-| Ergo node | `https://github.com/ergoplatform/ergo.git` | Base `2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1` (`v6.0.2`) | Versioned patch `sources/ergo-node/0001-sidechain-extension-fields.patch` | Devnet `0x04xx` extension producer from operator-provided bytes |
+| Ergo node | `https://github.com/ergoplatform/ergo.git` | Base `2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1` (`v6.0.2`) | Cumulative patch `sources/ergo-node/0002-sidechain-extension-fields-candidate-recovery.patch` | Devnet `0x04xx` extension producer with candidate context alignment, semantic-rejection recovery, exact transaction-gated tracker mining, and optional owned submission controls |
 | Solidity bridge/token | npm-locked `solc 0.8.35` and OpenZeppelin `5.6.1` | Package lock, exact compiler/settings, normalized source closure, and artifact manifest | `solidity/compile.js`, sources, settings, and generated identities | Reproducible local ABI, creation/runtime bytecode, metadata, and storage-layout closure |
+
+The Ergo patch applies directly to the pinned base. It includes the original
+extension overlay, limits candidate transaction scripts to the predecessor
+window used during full-block application, and clears a solved candidate only
+after a semantic rejection with the same full-block type and ID. Regeneration
+uses normal candidate polling; the rejected block is not retransmitted. A
+tracker-transport primary process can also receive one exact transaction ID.
+It refuses candidates until its current mempool reader contains that ID,
+rejects cached or newly generated candidates that omit it and releases the
+constraint only after the matching locally solved block is applied. Later
+transactions in the same custody session can then be mined normally. Other
+node starts do not receive this setting.
+`patchCommitProvenance` identifies the historical extension overlay's origin,
+not the complete cumulative patch. The cumulative patch SHA-256 and resulting
+Git blob IDs bind the current source.
+Historical compiler locks continue to reference the unchanged `0001` patch.
+
+Owned mining controls are opt-in at process launch. Set
+`ERGO_SIDECHAIN_OWNED_MINING_NONCE_SHA256` to the lowercase SHA-256 of a fresh
+64-character lowercase hexadecimal nonce's UTF-8 bytes. An optional
+`ERGO_SIDECHAIN_MAXIMUM_MINING_BLOCK_HEIGHT` sets an immutable nonnegative
+Scala integer ceiling. The ceiling applies to the completed block after
+selection of the current or previous cached candidate and before submission.
+It requires the nonce binding; omitted controls preserve the original miner.
+
+With the existing API key and matching `X-Ergo-Owned-Mining-Nonce`, one
+`POST /mining/ownedSubmissionPauseV1` carrying a fresh lowercase 64-character
+`X-Ergo-Owned-Mining-Operation` closes submission for that process. The reply
+waits for an already submitted block's exact application and reports
+`latestAppliedBlock`, `maximumBlockHeight` and the operation ID. Semantic
+rejection or conflicting application fails closed. Actor replacement retains
+the control; there is no resume operation. The process and its original
+mining configuration remain live after the barrier.
+
+`ERGO_SIDECHAIN_OWNED_TRANSACTION_PERMIT=1` additionally enables authenticated
+`POST /mining/ownedTransactionHoldV1`, `ownedTransactionArmV1` and
+`ownedTransactionStatusV1` controls. Hold drains the registered submitted block
+and joins the current history/state readers before returning its held parent.
+Arm binds a fresh operation ID, that exact parent and one transaction ID; the
+first candidate must include the transaction. It permits eleven contiguous
+matching block applications: inclusion plus ten successors. The wire value
+`confirmations: 10` follows the node's indexed depth, tip height minus inclusion
+height. Ten applications alone provide only nine confirmations.
+
+The control then remains held. Status reports completion only with fresh
+matching readers at the final watermark; the relayer additionally requires
+both nodes' exact fully indexed tip there before another Arm. Replay, conflicting
+application, actor replacement and immutable height ceilings retain their
+fail-closed checks. Permanent Pause dominates every permit and has no resume.
+Omitting this launch option preserves the legacy input and mining behavior.
+
+The reply is not an index-freshness observation. Before choosing an admission
+window, a consumer must obtain a common fully indexed tip at or above the
+applied watermark, verify its exact header ID at that height on both nodes,
+reobserve the reserve and distinct external fees, and recheck the same snapshot
+before attestation. A later checkpoint or admission miner receives a new
+process control with a ceiling of `admissionExpiresAtErgoHeight - 2`.
+
+Recovery after rejection of the initial full block remains outside this
+overlay: the upstream history can retain a pre-genesis best-block identifier
+that prevents a replacement from being applied. The recovery fixture starts
+from an applied first block and includes a stale-solution rejection case.
 
 The source lock v3 binds the Solidity build manifest. A clean local check is:
 
@@ -379,10 +441,33 @@ policy are required:
 
 ```bash
 mkdir -p .source-cache
-git -c core.autocrlf=false -C substrate-node worktree add ../.source-cache/frontier-patched 75329a2df49e2cc7981485392c31160929d1bd48
-git -c core.autocrlf=false -C .source-cache/frontier-patched apply --check --unidiff-zero --whitespace=error-all ../../sources/frontier/0001-bridge-runtime-commitment.patch
-git -c core.autocrlf=false -C .source-cache/frontier-patched apply --unidiff-zero --whitespace=error-all ../../sources/frontier/0001-bridge-runtime-commitment.patch
+git -c core.autocrlf=false -c core.eol=lf -C substrate-node worktree add ../.source-cache/frontier-patched 75329a2df49e2cc7981485392c31160929d1bd48
+git -c core.autocrlf=false -c core.eol=lf -C .source-cache/frontier-patched apply --check --unidiff-zero --whitespace=error-all ../../sources/frontier/0001-bridge-runtime-commitment.patch
+git -c core.autocrlf=false -c core.eol=lf -C .source-cache/frontier-patched apply --unidiff-zero --whitespace=error-all ../../sources/frontier/0001-bridge-runtime-commitment.patch
 ```
+
+Git configuration is a preparation input, not proof of the resulting bytes.
+The reproducible Frontier pin producer and authority-safe target acceptance
+select the raw checkout policy before Cargo and at their source rechecks.
+Unmodified files must match their raw HEAD blobs; declared patched and added
+files must match their exact locked result blobs. A CRLF-equivalent checkout
+can pass the general compatibility source check but fails these build checks.
+The preflight never rewrites a supplied checkout. Reproduce the exact base
+spec and embedded runtime before allocating a campaign owner; do not replace
+runtime pins merely because a differently materialized checkout builds.
+
+Raw source equality alone does not establish build-root independence. The
+pinned nested Cargo build references the original runtime outside its generated
+workspace; absolute path-dependency identity can remain relevant after source
+path remapping. A local control reproduced the full historical base spec at
+its original source root, while another raw-identical root produced a different,
+internally reproducible runtime. This is not a runtime-equivalence result.
+
+A distinct local campaign may select a separately reproduced profile only when
+its exact spec and runtime feed the derived genesis, network and proof-profile
+identities and are rechecked at acceptance. It cannot reuse the old profile's
+runtime evidence. Preserve the locked tools, source checks and fail-closed
+acceptance path; cross-root reproducibility remains a separate delivery task.
 
 Prepare the Ergo source from the locked public base. The cache directory is
 ignored by Git and can be deleted and recreated at any time.
@@ -393,7 +478,7 @@ git -C .source-cache/ergo-node init
 git -C .source-cache/ergo-node remote add origin https://github.com/ergoplatform/ergo.git
 git -C .source-cache/ergo-node fetch --depth=1 origin refs/tags/v6.0.2
 git -C .source-cache/ergo-node checkout --detach 2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1
-git -C .source-cache/ergo-node apply --unidiff-zero ../../sources/ergo-node/0001-sidechain-extension-fields.patch
+git -C .source-cache/ergo-node apply --unidiff-zero ../../sources/ergo-node/0002-sidechain-extension-fields-candidate-recovery.patch
 ```
 
 Validate the tracked identities first, then the complete source checkouts:
@@ -411,7 +496,8 @@ gitlink and public submodule path for either supported layout, plus manifests
 and both patch SHA-256 values. It deliberately reports that neither source
 checkout was validated. `sources:verify` additionally requires the pinned
 Frontier base with exactly the declared modified/added patch files and an Ergo
-checkout whose only changes are the two declared patch files. Every declared
+checkout whose only changes are the eight declared patch files: five modified
+files and three unstaged additions. Every declared
 result must match its exact Git blob identity.
 
 `sources:verify:workflow` parses the bridge-local GitHub Actions YAML and
@@ -743,7 +829,7 @@ by the Ergo source tree:
 ```bash
 cd <bridge-root>
 cd .source-cache/ergo-node
-sbt "testOnly org.ergoplatform.mining.CandidateGeneratorSpec"
+sbt "testOnly org.ergoplatform.mining.OwnedMiningSubmissionV1Spec" "testOnly org.ergoplatform.mining.OwnedMiningSubmissionActorSpec" "testOnly org.ergoplatform.http.routes.MiningApiRouteSpec" "testOnly org.ergoplatform.mining.CandidateGeneratorSpec"
 sbt assembly
 ```
 
@@ -808,7 +894,7 @@ Source validation reconstructs status from the raw `HEAD` tree, index tree,
 untracked paths, and working-file bytes. A reviewed text path may differ solely
 by CRLF insertion. Neither `git status` nor path-aware `git hash-object` is used,
 so clean filters cannot conceal content drift. Real byte changes, index drift,
-untracked files, and the two declared patch files retain their normal strict
+undeclared untracked files, and all declared patch files retain their strict
 treatment.
 
 The active-root workflow `.github/workflows/bridge-consensus-sources.yml`

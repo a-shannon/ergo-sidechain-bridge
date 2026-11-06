@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
 
 import blakejs from 'blakejs';
+import {
+  VALIDITY_APPLICATION_POOLED_RESERVE_SIGMASTATE_COMMIT,
+} from './validity-application-compiler-pins.js';
 
 import {
   encodeBridgeCausalApplicationBindingV2,
@@ -24,6 +27,9 @@ import {
   encodePooledReserveBurnApplicationBindingV4,
   encodePooledReserveBurnApplicationBindingV4Prefix,
 } from './pooled-reserve-burn-statement-v4.js';
+
+export { VALIDITY_APPLICATION_POOLED_RESERVE_SIGMASTATE_COMMIT };
+
 export const VALIDITY_APPLICATION_POOLED_RESERVE_INSTANCE_V4_SCHEMA =
   'e2s.validity-application-pooled-reserve-instance.v4' as const;
 export const VALIDITY_APPLICATION_POOLED_RESERVE_COMPILER_RECEIPT_V1_SCHEMA =
@@ -38,8 +44,6 @@ export const VALIDITY_APPLICATION_POOLED_RESERVE_SOURCE_COMMITMENT_POLICY_V1_DOM
   'E2S_POOLED_RESERVE_SOURCE_COMMITMENT_POLICY_V1' as const;
 export const VALIDITY_APPLICATION_POOLED_RESERVE_DEPOSIT_STATE_POLICY_V1_DOMAIN =
   'E2S_POOLED_RESERVE_DEPOSIT_STATE_POLICY_V1' as const;
-export const VALIDITY_APPLICATION_POOLED_RESERVE_SIGMASTATE_COMMIT =
-  'f78deadd668f801e7fae3bc884283f79c6f484fa' as const;
 export const VALIDITY_APPLICATION_POOLED_RESERVE_SCALA_VERSION =
   '2.13.18' as const;
 export const VALIDITY_APPLICATION_POOLED_RESERVE_SBT_VERSION =

@@ -1,5 +1,5 @@
 {
-  "schema": "e2s.authenticated-spv-tracker-jvm-avl-wasm-lock.v3",
+  "schema": "e2s.authenticated-spv-tracker-jvm-avl-wasm-lock.v4",
   "sourceFiles": [
     {
       "path": "wasm-avl/rust-toolchain.toml",
@@ -18,8 +18,40 @@
       "sha256": "0262c3987fea151e619003afd3ca2b435c5f03e80b9cb44244835ee160523b6d"
     },
     {
+      "path": "relayer/package.json",
+      "sha256": "3518c0893e86202d2a7c1e976bd3c3942c7423a978b3ff009d0c2f621abf0b8d"
+    },
+    {
+      "path": "relayer/package-lock.json",
+      "sha256": "86a5cce1af43afa594dcfc2b46d02f4b6a5fdb039547dda73c6d8a48a2a5aeba"
+    },
+    {
+      "path": "relayer/tsconfig.json",
+      "sha256": "12eda57b33d044f6472f35d2e959516e0ac69d004c981b9459dc501d3d1fb578"
+    },
+    {
       "path": "relayer/src/scripts/build-wasm-avl.ts",
-      "sha256": "20623c8d693214da686fa08f8a04a39abf745fb7769c2549b25519dd2d66f6ae"
+      "sha256": "4f6ad04a39c177d532ddc8829b00af9e402d4d985641038e701efafe805a8be5"
+    },
+    {
+      "path": "relayer/src/scripts/build-wasm-avl-pipeline-v2.ts",
+      "sha256": "569f7feda94dd5c074b6f30b833aa1a3b04ab3b65d6d78073b9a44492956182c"
+    },
+    {
+      "path": "relayer/src/substrate-federated-native-wasm-avl-build-tool-pins-v1.ts",
+      "sha256": "282e234a3cea76e6c0fef1134d0c972df8d3f21975af9a66b8c09ca5a2530fd5"
+    },
+    {
+      "path": "relayer/src/bounded-process-runner.ts",
+      "sha256": "553eaf56628879a11ed8e67b91378f22421f303efc47d47065df4bedf1639594"
+    },
+    {
+      "path": "relayer/src/scripts/windows-job-process.ps1",
+      "sha256": "47a08af66ef3134fefeee392e5578be9295e5171dca83c8861822d7e464ff627"
+    },
+    {
+      "path": "relayer/src/substrate-federated-native-wasm-avl-package-v1.ts",
+      "sha256": "64af0fedc9108df629810ad8f9e10c2b14e46e23b82b7cdc50d32527a364f87f"
     }
   ],
   "runtimeArtifacts": [
@@ -29,7 +61,7 @@
     },
     {
       "path": "wasm-avl/pkg/bridge_avl_bg.wasm",
-      "sha256": "be1134ff4052496eac6903dbc9a40bb6d164786de09e8c98488a81eedc151867"
+      "sha256": "28a1f941a16134921ac85c9f68d0feb3898534184f83a716c6e5e1f47eeee0b4"
     }
   ]
 }

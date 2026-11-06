@@ -148,12 +148,15 @@ import type {
   StableAggregateSettlementErgoObservation,
 } from './aggregate-settlement-ergo-observation.js';
 import {
+  assertReloadSubstrateFederatedIsolatedDevnetTrackerAdmissionV1ResultProvenance,
+  assertReserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1ResultProvenance,
   createLocalContinuityWitnessText,
   pegInLifecycleDigestHex,
   StateTracker,
   type AuthenticatedSettlementCandidateInput,
   type AuthenticatedSpvTrackerHistoryEntry,
   type SpvTrackerHistoryEntry,
+  type ReserveErgoOperationalTransactionAttemptInput,
 } from './state-tracker.js';
 import {
   createPegInCommitmentReceipt,
@@ -164,7 +167,13 @@ import {
 import {
   DUP_HEARTBEAT_OPERATION_PROFILE,
   SCS_ORACLE_UPDATE_OPERATION_PROFILE,
+  DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
+  PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE as TRACKER_FEE_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE as TRACKER_ADMISSION_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE as WITHDRAWAL_FEE_PROFILE,
 } from './relayer-core/ergo-operational-transaction-lifecycle.js';
 import {
   reconcileCompletePegOutBackingInventory,
@@ -176,6 +185,9 @@ import {
   PEG_IN_MINT_FEE_POLICY_ID,
   PEG_IN_MINT_TRANSPORT_SCHEMA,
 } from './relayer-core/peg-in-mint-transport-lifecycle.js';
+import type {
+  SubstrateFederatedIsolatedDevnetTrackerAdmissionReservationPersistencePortV1,
+} from './apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-admission-reservation-authorization-v1.js';
 
 function pegInCommitmentVerification(
   transactionIdHex: string,
@@ -245,6 +257,332 @@ function withTrackerDbPath(run: (dbPath: string) => void): void {
       retryDelay: 50,
     });
   }
+}
+
+describe('withdrawal fee funding journal', () => {
+  const hex = (byte: string): string => byte.repeat(32);
+  const TABLE = 'ergo_operational_transaction_attempts';
+  const INDEX = 'ergo_operational_active_singleton_profile';
+  const input = (
+    patch: Partial<ReserveErgoOperationalTransactionAttemptInput> = {},
+  ): ReserveErgoOperationalTransactionAttemptInput => ({
+    operationProfile: WITHDRAWAL_FEE_PROFILE,
+    expectedTxId: hex('11'), sourceBoxId: hex('12'), inputBoxIds: [hex('12'), hex('13')],
+    attemptedAtHeight: 100, reconciliationIdentityDigestHex: hex('14'),
+    targetSidechainHeight: null, targetSidechainBlockHashHex: null, heartbeatKeyHex: null,
+    bindingDigestHex: hex('21'), signedTransactionDigestHex: hex('22'),
+    checkResponseDigestHex: hex('23'), revalidationDigestHex: hex('24'),
+    authorizationDigestHex: hex('25'), ...patch,
+  });
+  const replacement = (
+    patch: Partial<ReserveErgoOperationalTransactionAttemptInput> = {},
+  ) => input({
+    expectedTxId: hex('31'), sourceBoxId: hex('32'), inputBoxIds: [hex('32'), hex('33')],
+    ...patch,
+  });
+  function fixture(run: (journal: {
+    state: () => StateTracker;
+    restart: () => void;
+    db: <T>(read: (db: Database.Database) => T) => T;
+    second: () => StateTracker;
+  }) => void): void {
+    withTrackerDbPath(dbPath => {
+      let state = new StateTracker(dbPath);
+      try {
+        run({
+          state: () => state,
+          restart: () => { state.close(); state = new StateTracker(dbPath); },
+          second: () => new StateTracker(dbPath),
+          db: read => {
+            const db = new Database(dbPath);
+            try { return read(db); } finally { db.close(); }
+          },
+        });
+      } finally { state.close(); }
+    });
+  }
+  function schema(db: Database.Database, name: string): string {
+    return (db.prepare('SELECT sql FROM sqlite_master WHERE name = ?').get(name) as { sql: string }).sql;
+  }
+  const readers = (state: StateTracker, profile = WITHDRAWAL_FEE_PROFILE as ReserveErgoOperationalTransactionAttemptInput['operationProfile']) => [
+    () => state.getErgoOperationalTransactionAttempts(profile),
+    () => state.getActiveErgoOperationalTransactionAttempts(profile),
+    () => state.getReconcilableErgoOperationalTransactionAttempts(profile),
+    () => state.getConfirmedErgoOperationalTransactionAttempts(profile),
+    () => state.getQuarantinedErgoOperationalTransactionAttempts(profile),
+  ];
+
+  it.each([
+    { reconciliationIdentityDigestHex: undefined },
+    { reconciliationIdentityDigestHex: null },
+    { reconciliationIdentityDigestHex: 'not-hex' },
+    { reconciliationIdentityDigestHex: hex('14').slice(2) },
+    { targetSidechainHeight: 1 },
+    { targetSidechainBlockHashHex: hex('41') },
+    { heartbeatKeyHex: hex('42') },
+  ])('rejects missing identity or foreign context %j without a durable row', patch => {
+    fixture(j => {
+      expect(() => j.state().reserveErgoOperationalTransactionAttempt(input(patch)))
+        .toThrow(/reconciliation identity digest|invalid route context/);
+      expect(j.state().getErgoOperationalTransactionAttempts(WITHDRAWAL_FEE_PROFILE)).toEqual([]);
+    });
+  });
+
+  it.each([
+    'e2s.substrate-federated-local-devnet-withdrawal-fee-funding-operation.v2',
+    'e2s.substrate-federated-local-devnet-withdrawal-operation.v1',
+  ])('rejects unknown profile %s on admission and every selection path', value => {
+    fixture(j => {
+      const profile = value as ReserveErgoOperationalTransactionAttemptInput['operationProfile'];
+      expect(() => j.state().reserveErgoOperationalTransactionAttempt(input({ operationProfile: profile })))
+        .toThrow(/unknown Ergo operational transaction profile/);
+      for (const read of readers(j.state(), profile)) expect(read).toThrow(/unknown Ergo operational transaction profile/);
+    });
+  });
+
+  it.each(['pending', 'accepted', 'ambiguous'] as const)(
+    'retains exact %s state across restart and blocks duplicate active attempts on another connection', status => {
+      fixture(j => {
+        const reserved = j.state().reserveErgoOperationalTransactionAttempt(input());
+        if (status !== 'pending') j.state().finalizeErgoOperationalTransactionAttempt({
+          expectedTxId: reserved.expectedTxId, durableAttemptDigestHex: reserved.durableAttemptDigestHex,
+          disposition: status, submittedTxId: status === 'accepted' ? reserved.expectedTxId : null,
+          responseDigestHex: status === 'accepted' ? hex('26') : null,
+        });
+        const exact = j.state().getErgoOperationalTransactionAttempt(reserved.expectedTxId);
+        j.restart();
+        expect(j.state().getErgoOperationalTransactionAttempts(WITHDRAWAL_FEE_PROFILE)).toEqual([exact]);
+        expect(exact).toMatchObject({
+          status, inputBoxIds: input().inputBoxIds, reconciliationIdentityDigestHex: hex('14'),
+          durableAttemptDigestHex: reserved.durableAttemptDigestHex, fundsReleaseAuthorityEpochHex: null,
+          targetSidechainHeight: null, targetSidechainBlockHashHex: null, heartbeatKeyHex: null,
+        });
+        expect(j.state().getReconcilableErgoOperationalTransactionAttempts(WITHDRAWAL_FEE_PROFILE)).toEqual([exact]);
+        const second = j.second();
+        try {
+          expect(() => second.reserveErgoOperationalTransactionAttempt(replacement()))
+            .toThrow(/must be reconciled before replacement/);
+          expect(() => second.reserveErgoOperationalTransactionAttempt(input()))
+            .toThrow(/already exists; reconcile/);
+        } finally { second.close(); }
+        if (status === 'ambiguous') {
+          expect(() => j.state().finalizeErgoOperationalTransactionAttempt({
+            expectedTxId: reserved.expectedTxId, durableAttemptDigestHex: reserved.durableAttemptDigestHex,
+            disposition: 'accepted', submittedTxId: reserved.expectedTxId, responseDigestHex: hex('26'),
+          })).toThrow(/cannot be finalized/);
+          expect(j.state().getErgoOperationalTransactionAttempt(reserved.expectedTxId)).toEqual(exact);
+        }
+      });
+    },
+  );
+
+  it.each([
+    { operationProfile: TRACKER_FEE_PROFILE },
+    { reconciliationIdentityDigestHex: hex('51') },
+    { inputBoxIds: [hex('12'), hex('52')] },
+    { bindingDigestHex: hex('53') },
+    { signedTransactionDigestHex: hex('54') },
+    { checkResponseDigestHex: hex('55') },
+    { revalidationDigestHex: hex('56') },
+    { authorizationDigestHex: hex('57') },
+  ])('binds exact durable fields and rejects foreign finalization digest %j', patch => {
+    fixture(j => {
+      const original = j.state().reserveErgoOperationalTransactionAttempt(input());
+      withTrackerDb(other => {
+        const changed = other.reserveErgoOperationalTransactionAttempt(input(patch));
+        expect(changed.durableAttemptDigestHex).not.toBe(original.durableAttemptDigestHex);
+        expect(() => j.state().finalizeErgoOperationalTransactionAttempt({
+          expectedTxId: original.expectedTxId, durableAttemptDigestHex: changed.durableAttemptDigestHex,
+          disposition: 'accepted', submittedTxId: original.expectedTxId, responseDigestHex: hex('26'),
+        })).toThrow(/cannot be finalized/);
+      });
+      j.restart();
+      expect(j.state().getErgoOperationalTransactionAttempt(original.expectedTxId)).toEqual(original);
+    });
+  });
+
+  it.each(['pending', 'accepted', 'ambiguous', 'confirmed', 'abandoned', 'quarantined'] as const)(
+    'holds every journaled input after %s across profiles in both directions', status => {
+      const context = (operationProfile: ReserveErgoOperationalTransactionAttemptInput['operationProfile']) => ({
+        operationProfile,
+        reconciliationIdentityDigestHex: operationProfile === PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE
+          || operationProfile === SCS_ORACLE_UPDATE_OPERATION_PROFILE || operationProfile === DUP_HEARTBEAT_OPERATION_PROFILE
+          ? null : hex('14'),
+        targetSidechainHeight: operationProfile === SCS_ORACLE_UPDATE_OPERATION_PROFILE ? 100 : null,
+        targetSidechainBlockHashHex: operationProfile === SCS_ORACLE_UPDATE_OPERATION_PROFILE ? hex('16') : null,
+        heartbeatKeyHex: operationProfile === DUP_HEARTBEAT_OPERATION_PROFILE ? hex('17') : null,
+      });
+      for (const otherProfile of [TRACKER_FEE_PROFILE, TRACKER_ADMISSION_PROFILE, PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
+        SCS_ORACLE_UPDATE_OPERATION_PROFILE, DUP_HEARTBEAT_OPERATION_PROFILE, DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE,
+        SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE, SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE]) {
+        for (const reverse of [false, true]) {
+          fixture(j => {
+            const priorProfile = reverse ? otherProfile : WITHDRAWAL_FEE_PROFILE;
+            const nextProfile = reverse ? WITHDRAWAL_FEE_PROFILE : otherProfile;
+            const prior = j.state().reserveErgoOperationalTransactionAttempt(input(context(priorProfile)));
+            if (status === 'accepted' || status === 'ambiguous') j.state().finalizeErgoOperationalTransactionAttempt({
+              expectedTxId: prior.expectedTxId, durableAttemptDigestHex: prior.durableAttemptDigestHex,
+              disposition: status, submittedTxId: status === 'accepted' ? prior.expectedTxId : null,
+              responseDigestHex: status === 'accepted' ? hex('26') : null,
+            });
+            if (status === 'confirmed') j.state().confirmErgoOperationalTransactionAttempt({
+              expectedTxId: prior.expectedTxId, confirmationHeight: 103, confirmationHeaderId: hex('15'),
+            });
+            if (status === 'abandoned') j.state().abandonErgoOperationalTransactionAttempt(prior.expectedTxId, 'synthetic absent source');
+            if (status === 'quarantined') j.state().quarantineErgoOperationalTransactionAttempt(prior.expectedTxId, 'synthetic rollback');
+            j.restart();
+            for (const oldInput of prior.inputBoxIds) {
+              for (const sourcePosition of [true, false]) {
+                expect(() => j.state().reserveErgoOperationalTransactionAttempt(replacement({
+                  ...context(nextProfile),
+                  sourceBoxId: sourcePosition ? oldInput : hex('32'),
+                  inputBoxIds: sourcePosition ? [oldInput, hex('33')] : [hex('32'), oldInput],
+                }))).toThrow(/previously journaled .* box/);
+              }
+            }
+            expect(j.state().reserveErgoOperationalTransactionAttempt(replacement(context(nextProfile))).status).toBe('pending');
+          });
+        }
+      }
+    },
+  );
+
+  it('never reopens a confirmed withdrawal fee attempt and preserves quarantine on restart', () => {
+    fixture(j => {
+      const prior = j.state().reserveErgoOperationalTransactionAttempt(input());
+      j.state().confirmErgoOperationalTransactionAttempt({
+        expectedTxId: prior.expectedTxId, confirmationHeight: 103, confirmationHeaderId: hex('15'),
+      });
+      expect(() => j.state().reopenConfirmedErgoOperationalTransactionAttempt(prior.expectedTxId))
+        .toThrow(/cannot be reopened; quarantine on rollback/);
+      const held = j.state().quarantineErgoOperationalTransactionAttempt(prior.expectedTxId, 'synthetic rollback');
+      j.restart();
+      expect(j.state().getQuarantinedErgoOperationalTransactionAttempts(WITHDRAWAL_FEE_PROFILE)).toEqual([held]);
+      expect(j.state().getReconcilableErgoOperationalTransactionAttempts(WITHDRAWAL_FEE_PROFILE)).toEqual([]);
+      expect(() => j.state().reserveErgoOperationalTransactionAttempt(replacement({ inputBoxIds: [hex('32'), hex('13')] })))
+        .toThrow(/previously journaled withdrawal fee funding box/);
+    });
+  });
+
+  it.each([
+    ['target_sidechain_height', 1], ['target_sidechain_block_hash', hex('61')],
+    ['heartbeat_key_hex', hex('62')], ['reconciliation_identity_digest', null],
+    ['operation_profile', 'unknown-profile'],
+  ] as const)('enforces the SQL constraint independently for %s', (column, value) => {
+    fixture(j => {
+      const original = j.state().reserveErgoOperationalTransactionAttempt(input());
+      expect(() => j.db(db => db.prepare(`UPDATE ${TABLE} SET ${column} = ? WHERE expected_tx_id = ?`)
+        .run(value, original.expectedTxId))).toThrow(/CHECK constraint failed/);
+      expect(j.state().getErgoOperationalTransactionAttempt(original.expectedTxId)).toEqual(original);
+    });
+  });
+
+  it('enforces the SQL singleton independently of API checks', () => {
+    fixture(j => {
+      j.state().reserveErgoOperationalTransactionAttempt(input());
+      expect(() => j.db(db => {
+        const row = db.prepare(`SELECT * FROM ${TABLE}`).get() as Record<string, string | number | null>;
+        const changed = { ...row, expected_tx_id: hex('71'), source_box_id: hex('72'),
+          input_box_ids_json: JSON.stringify([hex('72')]), durable_attempt_digest: hex('73') };
+        db.prepare(`INSERT INTO ${TABLE} (${Object.keys(changed).join(',')}) VALUES (${Object.keys(changed).map(() => '?').join(',')})`)
+          .run(...Object.values(changed));
+      })).toThrow(/UNIQUE constraint failed: ergo_operational_transaction_attempts.operation_profile/);
+    });
+  });
+
+  it.each([
+    ['profile allowlist', 'table', (sql: string) => sql.replace(`,\n  '${WITHDRAWAL_FEE_PROFILE}'`, '')],
+    ['route context', 'table', (sql: string) => sql.replace(
+      `operation_profile = '${WITHDRAWAL_FEE_PROFILE}'\n  AND target_sidechain_height IS NULL`,
+      `operation_profile = '${WITHDRAWAL_FEE_PROFILE}'\n  AND target_sidechain_height IS NOT NULL`,
+    )],
+    ['index profile', 'index', (sql: string) => sql.replace(`,\n    '${WITHDRAWAL_FEE_PROFILE}'`, '')],
+    ['index statuses', 'index', (sql: string) => sql.replace("'pending', 'accepted', 'ambiguous'", "'pending', 'accepted'")],
+    ['index uniqueness', 'index', (sql: string) => sql.replace('CREATE UNIQUE INDEX', 'CREATE INDEX')],
+  ] as const)('rejects isolated %s schema drift after restart on every selection path', (_name, kind, mutate) => {
+    fixture(j => {
+      j.db(db => {
+        const name = kind === 'table' ? TABLE : INDEX;
+        const original = schema(db, name);
+        const changed = mutate(original);
+        expect(changed).not.toBe(original);
+        db.exec(`DROP ${kind} ${name}; ${changed};`);
+      });
+      j.restart();
+      expect(() => j.state().reserveErgoOperationalTransactionAttempt(input())).toThrow(/schema is unsupported/);
+      for (const read of readers(j.state())) expect(read).toThrow(/schema is unsupported/);
+    });
+  });
+
+  it.each([false, true])('preserves old rows without migrating withdrawal authority (pre-V2=%s)', preV2 => {
+    fixture(j => {
+      j.db(db => {
+        let table = schema(db, TABLE);
+        let index = schema(db, INDEX);
+        for (const profile of [WITHDRAWAL_FEE_PROFILE, ...(preV2 ? [TRACKER_ADMISSION_PROFILE] : [])]) {
+          table = table.replace(`,\n  '${profile}'`, '').replace(
+            `OR (\n  operation_profile = '${profile}'\n  AND target_sidechain_height IS NULL\n  AND target_sidechain_block_hash IS NULL\n  AND heartbeat_key_hex IS NULL\n  AND reconciliation_identity_digest IS NOT NULL\n)`, '',
+          );
+          index = index.replace(`,\n    '${profile}'`, '');
+          expect(table).not.toContain(profile);
+        }
+        db.exec(`DROP TABLE ${TABLE}; ${table}; ${index};`);
+      });
+      const profiles = [TRACKER_FEE_PROFILE, ...(preV2 ? [] : [TRACKER_ADMISSION_PROFILE])];
+      const prior = profiles.map((operationProfile, index) => j.state().reserveErgoOperationalTransactionAttempt(
+        index === 0 ? input({ operationProfile }) : replacement({ operationProfile }),
+      ));
+      const before = j.db(db => ({ table: schema(db, TABLE), index: schema(db, INDEX), rows: db.prepare(`SELECT * FROM ${TABLE}`).all() }));
+      j.restart();
+      for (const row of prior) expect(j.state().getErgoOperationalTransactionAttempt(row.expectedTxId)).toEqual(row);
+      for (const read of readers(j.state())) expect(read).toThrow(/schema is unsupported/);
+      expect(() => j.state().reserveErgoOperationalTransactionAttempt(input()))
+        .toThrow(/schema is unsupported; a fresh LAB database is required/);
+      expect(j.db(db => ({ table: schema(db, TABLE), index: schema(db, INDEX), rows: db.prepare(`SELECT * FROM ${TABLE}`).all() }))).toEqual(before);
+    });
+  });
+});
+
+function isolatedDevnetTrackerAdmissionReservationInput(offset = 0) {
+  const digest = (value: number): string =>
+    (offset + value).toString(16).padStart(64, '0');
+  return {
+    reservationIdentityHex: digest(1),
+    operationProfileDigestHex: digest(2),
+    rootReceiptDigestHex: digest(3),
+    authorizationDigestHex: digest(4),
+    sourceProfileDigestHex: digest(5),
+    trackerSetupDigestHex: digest(6),
+    checkpointAnchorDigestHex: digest(7),
+    frozenTargetDigestHex: digest(8),
+    trackerCandidateDigestHex: digest(9),
+    jvmCheckDigestHex: digest(10),
+    statementIdHex: digest(11),
+    trackerInputBoxIdHex: digest(12),
+    unsignedTransactionIdHex: digest(13),
+    anchorHeaderIdHex: digest(14),
+    targetIdentityDigestHex: digest(15),
+  };
+}
+
+function isolatedDevnetTrackerTransportAttemptInput(
+  reservation: ReturnType<typeof isolatedDevnetTrackerAdmissionReservationInput>,
+) {
+  return {
+    reservationIdentityHex: reservation.reservationIdentityHex,
+    durableReservationDigestHex: '',
+    expectedTransactionIdHex: reservation.unsignedTransactionIdHex,
+    inputBoxIdsHex: [reservation.trackerInputBoxIdHex],
+    attemptedAtHeight: 123,
+    reservationFreshnessReceiptDigestHex: '31'.repeat(32),
+    processBindingDigestHex: '32'.repeat(32),
+    executionTargetIdentityDigestHex: '33'.repeat(32),
+    signedTransactionDigestHex: '34'.repeat(32),
+    signedTransactionBytesSha256Hex: '35'.repeat(32),
+    signedTransactionBytesLength: 226_795,
+    checkResponseDigestHex: '36'.repeat(32),
+    authorizationDigestHex: '37'.repeat(32),
+  };
 }
 
 const readOnlyError = /read-only mode/;
@@ -428,6 +766,568 @@ const authenticatedTransportAuthority = Object.freeze({
       recipientErgoTreeHex: authenticatedTransportRecipientErgoTree,
       vaultBoxId: '7b'.repeat(32),
     }),
+});
+
+describe('isolated-devnet tracker admission durable reservation V1', () => {
+  it('rejects in-memory and constructor-bypassed persistence owners', () => {
+    const input = isolatedDevnetTrackerAdmissionReservationInput();
+    const inMemory = new StateTracker(':memory:');
+    try {
+      expect(() =>
+        inMemory
+          .reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1(input)
+      ).toThrow(/constructor-proven file-backed StateTracker store/);
+      expect(() =>
+        inMemory
+          .reloadSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+            input.reservationIdentityHex,
+          )
+      ).toThrow(/constructor-proven file-backed StateTracker store/);
+    } finally {
+      inMemory.close();
+    }
+
+    const constructorBypassed = Object.create(
+      StateTracker.prototype,
+    ) as StateTracker;
+    (constructorBypassed as unknown as { isReadOnly: boolean }).isReadOnly =
+      false;
+    expect(() =>
+      constructorBypassed
+        .reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1(input)
+    ).toThrow(/constructor-proven file-backed StateTracker store/);
+    expect(() =>
+      constructorBypassed
+        .reloadSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+          input.reservationIdentityHex,
+        )
+    ).toThrow(/constructor-proven file-backed StateTracker store/);
+  });
+
+  it('rejects a persistence database replaced after construction', () => {
+    withTrackerDb((tracker) => {
+      const input = isolatedDevnetTrackerAdmissionReservationInput();
+      tracker.reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1(input);
+      const holder = tracker as unknown as { db: Database.Database };
+      const original = holder.db;
+      const replacement = new Database(':memory:');
+      holder.db = replacement;
+      try {
+        expect(() =>
+          tracker.reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1(
+            input,
+          )
+        ).toThrow(/persistence database changed after construction/);
+        expect(() =>
+          tracker
+            .reloadSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+              input.reservationIdentityHex,
+            )
+        ).toThrow(/persistence database changed after construction/);
+      } finally {
+        holder.db = original;
+        replacement.close();
+      }
+    });
+  });
+
+  it('uses the constructor-registered database for the complete reservation transaction', () => {
+    withTrackerDb((tracker) => {
+      const holder = tracker as unknown as { db: Database.Database };
+      const registered = holder.db;
+      const inMemoryTracker = new StateTracker(':memory:');
+      const inMemory = (
+        inMemoryTracker as unknown as { db: Database.Database }
+      ).db;
+      let reads = 0;
+      Object.defineProperty(tracker, 'db', {
+        configurable: true,
+        get: () => {
+          reads += 1;
+          return reads === 1 ? registered : inMemory;
+        },
+      });
+      try {
+        const result = tracker
+          .reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1(
+            isolatedDevnetTrackerAdmissionReservationInput(),
+          );
+        assertReserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1ResultProvenance(
+          result,
+          tracker,
+        );
+        expect(
+          registered.prepare(`
+            SELECT COUNT(*) AS count
+            FROM substrate_federated_isolated_devnet_tracker_admission_reservations_v1
+          `).pluck().get(),
+        ).toBe(1);
+        expect(
+          inMemory.prepare(`
+            SELECT COUNT(*) AS count
+            FROM substrate_federated_isolated_devnet_tracker_admission_reservations_v1
+          `).pluck().get(),
+        ).toBe(0);
+      } finally {
+        Object.defineProperty(tracker, 'db', {
+          configurable: true,
+          writable: true,
+          value: registered,
+        });
+        inMemoryTracker.close();
+      }
+    });
+  });
+
+  it('persists one exact reservation idempotently across restart', () => {
+    withTrackerDbPath((dbPath) => {
+      const input = isolatedDevnetTrackerAdmissionReservationInput();
+      const first = new StateTracker(dbPath);
+      const persistencePort:
+        SubstrateFederatedIsolatedDevnetTrackerAdmissionReservationPersistencePortV1 =
+          first;
+      const created = persistencePort
+        .reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1(input);
+      assertReserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1ResultProvenance(
+        created,
+        first,
+      );
+      expect(() =>
+        assertReserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1ResultProvenance(
+          structuredClone(created),
+          first,
+        )
+      ).toThrow(/lacks exact StateTracker persistence provenance/);
+      expect(created).toMatchObject({
+        created: true,
+        reservation: input,
+      });
+      expect(created.reservation.durableReservationDigestHex).toMatch(
+        /^[0-9a-f]{64}$/,
+      );
+      const duplicate = first
+        .reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1(input);
+      assertReserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1ResultProvenance(
+        duplicate,
+        first,
+      );
+      expect(duplicate).toEqual({
+        created: false,
+        reservation: created.reservation,
+      });
+      first.close();
+
+      const reopened = new StateTracker(dbPath);
+      try {
+        expect(
+          reopened
+            .getSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+              input.reservationIdentityHex,
+            ),
+        ).toEqual(created.reservation);
+        const reloaded = reopened
+          .reloadSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+            input.reservationIdentityHex,
+          );
+        assertReloadSubstrateFederatedIsolatedDevnetTrackerAdmissionV1ResultProvenance(
+          reloaded,
+          reopened,
+        );
+        expect(reloaded.reservation).toEqual(created.reservation);
+        expect(() =>
+          assertReloadSubstrateFederatedIsolatedDevnetTrackerAdmissionV1ResultProvenance(
+            structuredClone(reloaded),
+            reopened,
+          )
+        ).toThrow(/reload lacks exact StateTracker persistence provenance/);
+        expect(() =>
+          assertReloadSubstrateFederatedIsolatedDevnetTrackerAdmissionV1ResultProvenance(
+            reloaded,
+            first,
+          )
+        ).toThrow(/reload lacks exact StateTracker persistence provenance/);
+        const reopenedDuplicate = reopened
+          .reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1(input);
+        assertReserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1ResultProvenance(
+          reopenedDuplicate,
+          reopened,
+        );
+        expect(reopenedDuplicate).toEqual({
+          created: false,
+          reservation: created.reservation,
+        });
+        expect(() =>
+          assertReserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1ResultProvenance(
+            reopenedDuplicate,
+            first,
+          )
+        ).toThrow(/lacks exact StateTracker persistence provenance/);
+      } finally {
+        reopened.close();
+      }
+    });
+  });
+
+  it('supports migrated read-only lookup while rejecting reservation writes', () => {
+    withTrackerDbPath((dbPath) => {
+      const input = isolatedDevnetTrackerAdmissionReservationInput();
+      const writable = new StateTracker(dbPath);
+      const created = writable
+        .reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1(input);
+      writable.close();
+
+      const readOnly = new StateTracker(dbPath, { readOnly: true });
+      try {
+        expect(
+          readOnly
+            .getSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+              input.reservationIdentityHex,
+            ),
+        ).toEqual(created.reservation);
+        expect(() =>
+          readOnly
+            .reloadSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+              input.reservationIdentityHex,
+            )
+        ).toThrow(/constructor-proven file-backed StateTracker store/);
+        expect(() =>
+          readOnly
+            .reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1(input)
+        ).toThrow(readOnlyError);
+      } finally {
+        readOnly.close();
+      }
+    });
+  });
+
+  it('fails closed when a pre-B1 database is opened read-only without migration', () => {
+    withTrackerDbPath((dbPath) => {
+      const legacy = new Database(dbPath);
+      legacy.exec('CREATE TABLE legacy_state (id INTEGER PRIMARY KEY)');
+      legacy.close();
+
+      const readOnly = new StateTracker(dbPath, { readOnly: true });
+      try {
+        expect(() =>
+          readOnly
+            .getSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+              '01'.repeat(32),
+            )
+        ).toThrow(/no such table.*tracker_admission_reservations_v1/);
+      } finally {
+        readOnly.close();
+      }
+    });
+  });
+
+  it('rejects an absent reservation from the proven persistence store', () => {
+    withTrackerDb((tracker) => {
+      expect(() =>
+        tracker
+          .reloadSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+            '01'.repeat(32),
+          )
+      ).toThrow(/reservation is absent from the proven persistence store/);
+    });
+  });
+
+  it('rejects binding drift under an existing reservation identity', () => {
+    withTrackerDb((tracker) => {
+      const input = isolatedDevnetTrackerAdmissionReservationInput();
+      tracker.reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1(input);
+      expect(() =>
+        tracker.reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1({
+          ...input,
+          anchorHeaderIdHex: 'ff'.repeat(32),
+        })
+      ).toThrow(/identity conflicts with persisted bindings/);
+    });
+  });
+
+  it.each([
+    'rootReceiptDigestHex',
+    'authorizationDigestHex',
+    'statementIdHex',
+    'trackerInputBoxIdHex',
+    'unsignedTransactionIdHex',
+  ] as const)(
+    'rejects a competing reservation that reuses %s',
+    (field) => {
+      withTrackerDb((tracker) => {
+        const first = isolatedDevnetTrackerAdmissionReservationInput();
+        const competing = isolatedDevnetTrackerAdmissionReservationInput(32);
+        tracker
+          .reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1(first);
+        expect(() =>
+          tracker.reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1({
+            ...competing,
+            [field]: first[field],
+          })
+        ).toThrow(/conflicting.*must be reconciled before replacement/);
+      });
+    },
+  );
+
+  it.each([
+    'reservationIdentityHex',
+    'operationProfileDigestHex',
+    'rootReceiptDigestHex',
+    'authorizationDigestHex',
+    'sourceProfileDigestHex',
+    'trackerSetupDigestHex',
+    'checkpointAnchorDigestHex',
+    'frozenTargetDigestHex',
+    'trackerCandidateDigestHex',
+    'jvmCheckDigestHex',
+    'statementIdHex',
+    'trackerInputBoxIdHex',
+    'unsignedTransactionIdHex',
+    'anchorHeaderIdHex',
+    'targetIdentityDigestHex',
+  ] as const)('rejects malformed %s before persistence', (field) => {
+    withTrackerDb((tracker) => {
+      const input = isolatedDevnetTrackerAdmissionReservationInput();
+      expect(() =>
+        tracker.reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1({
+          ...input,
+          [field]: 'zz'.repeat(32),
+        })
+      ).toThrow(/must be even-length hex/);
+    });
+  });
+
+  it('keeps persisted reservation rows append-only', () => {
+    withTrackerDb((tracker) => {
+      const input = isolatedDevnetTrackerAdmissionReservationInput();
+      tracker.reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1(input);
+      const rawDb = (tracker as unknown as { db: Database.Database }).db;
+      expect(() => rawDb.prepare(`
+        UPDATE substrate_federated_isolated_devnet_tracker_admission_reservations_v1
+        SET anchor_header_id = ?
+        WHERE reservation_identity = ?
+      `).run('ff'.repeat(32), input.reservationIdentityHex)).toThrow(
+        /append-only/,
+      );
+      expect(() => rawDb.prepare(`
+        DELETE FROM substrate_federated_isolated_devnet_tracker_admission_reservations_v1
+        WHERE reservation_identity = ?
+      `).run(input.reservationIdentityHex)).toThrow(/append-only/);
+    });
+  });
+
+  it('rejects a reservation whose durable bindings were corrupted outside the API', () => {
+    withTrackerDbPath((dbPath) => {
+      const input = isolatedDevnetTrackerAdmissionReservationInput();
+      const first = new StateTracker(dbPath);
+      const rawDb = (first as unknown as { db: Database.Database }).db;
+      first.reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1(input);
+      rawDb.exec(`
+        DROP TRIGGER substrate_federated_isolated_devnet_tracker_admission_reservation_no_update_v1;
+      `);
+      rawDb.prepare(`
+        UPDATE substrate_federated_isolated_devnet_tracker_admission_reservations_v1
+        SET anchor_header_id = ?
+        WHERE reservation_identity = ?
+      `).run('ff'.repeat(32), input.reservationIdentityHex);
+      first.close();
+
+      const reopened = new StateTracker(dbPath);
+      try {
+        expect(() =>
+          reopened
+            .reloadSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+              input.reservationIdentityHex,
+            )
+        ).toThrow(/durable digest changed/);
+      } finally {
+        reopened.close();
+      }
+    });
+  });
+});
+
+describe('isolated-devnet tracker one-attempt transport journal V1', () => {
+  it('persists one pending attempt before transport and reloads it after restart', () => {
+    withTrackerDbPath((dbPath) => {
+      const reservationInput = isolatedDevnetTrackerAdmissionReservationInput();
+      const first = new StateTracker(dbPath);
+      const reservation = first
+        .reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1(
+          reservationInput,
+        ).reservation;
+      const input = {
+        ...isolatedDevnetTrackerTransportAttemptInput(reservationInput),
+        durableReservationDigestHex: reservation.durableReservationDigestHex,
+      };
+      const created = first
+        .reserveSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1(input);
+      expect(created.created).toBe(true);
+      expect(created.attempt).toMatchObject({
+        status: 'pending',
+        expectedTransactionIdHex: input.expectedTransactionIdHex,
+        inputBoxIdsHex: input.inputBoxIdsHex,
+        submittedTransactionIdHex: null,
+        responseDigestHex: null,
+      });
+      const duplicate = first
+        .reserveSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1(input);
+      expect(duplicate.created).toBe(false);
+      expect(duplicate.attempt).toEqual(created.attempt);
+      first.close();
+
+      const reopened = new StateTracker(dbPath);
+      try {
+        expect(
+          reopened
+            .getSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1(
+              reservationInput.reservationIdentityHex,
+            ),
+        ).toEqual(created.attempt);
+        expect(
+          reopened
+            .reserveSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1(
+              input,
+            ).created,
+        ).toBe(false);
+      } finally {
+        reopened.close();
+      }
+    });
+  });
+
+  it.each(['accepted', 'ambiguous'] as const)(
+    'allows exactly one pending-to-%s outcome transition',
+    disposition => {
+      withTrackerDb((tracker) => {
+        const reservationInput = isolatedDevnetTrackerAdmissionReservationInput();
+        const reservation = tracker
+          .reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1(
+            reservationInput,
+          ).reservation;
+        const pending = tracker
+          .reserveSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1({
+            ...isolatedDevnetTrackerTransportAttemptInput(reservationInput),
+            durableReservationDigestHex:
+              reservation.durableReservationDigestHex,
+          }).attempt;
+        const finalize = {
+          expectedTransactionIdHex: pending.expectedTransactionIdHex,
+          durableAttemptDigestHex: pending.durableAttemptDigestHex,
+          disposition,
+          submittedTransactionIdHex: disposition === 'accepted'
+            ? pending.expectedTransactionIdHex
+            : null,
+          responseDigestHex: '41'.repeat(32),
+        };
+        const finalized = tracker
+          .finalizeSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1(
+            finalize,
+          );
+        expect(finalized).toMatchObject({
+          status: disposition,
+          submittedTransactionIdHex: finalize.submittedTransactionIdHex,
+          responseDigestHex: finalize.responseDigestHex,
+        });
+        expect(
+          tracker
+            .finalizeSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1(
+              finalize,
+            ),
+        ).toEqual(finalized);
+        expect(() =>
+          tracker
+            .finalizeSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1({
+              ...finalize,
+              disposition: disposition === 'accepted'
+                ? 'ambiguous'
+                : 'accepted',
+              submittedTransactionIdHex: disposition === 'accepted'
+                ? null
+                : pending.expectedTransactionIdHex,
+            })
+        ).toThrow(/already finalized/);
+      });
+    },
+  );
+
+  it('rejects missing reservation, binding drift, duplicate inputs, and outcome mismatch', () => {
+    withTrackerDb((tracker) => {
+      const reservationInput = isolatedDevnetTrackerAdmissionReservationInput();
+      const base = isolatedDevnetTrackerTransportAttemptInput(reservationInput);
+      expect(() =>
+        tracker
+          .reserveSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1({
+            ...base,
+            durableReservationDigestHex: '30'.repeat(32),
+          })
+      ).toThrow(/lacks its exact durable reservation/);
+      const reservation = tracker
+        .reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1(
+          reservationInput,
+        ).reservation;
+      expect(() =>
+        tracker
+          .reserveSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1({
+            ...base,
+            durableReservationDigestHex:
+              reservation.durableReservationDigestHex,
+            inputBoxIdsHex: [
+              reservationInput.trackerInputBoxIdHex,
+              reservationInput.trackerInputBoxIdHex,
+            ],
+          })
+      ).toThrow(/must not contain duplicate box IDs/);
+      const pending = tracker
+        .reserveSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1({
+          ...base,
+          durableReservationDigestHex: reservation.durableReservationDigestHex,
+        }).attempt;
+      expect(() =>
+        tracker
+          .reserveSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1({
+            ...base,
+            durableReservationDigestHex: reservation.durableReservationDigestHex,
+            attemptedAtHeight: base.attemptedAtHeight + 1,
+          })
+      ).toThrow(/conflicts with a durable attempt/);
+      expect(() =>
+        tracker
+          .finalizeSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1({
+            expectedTransactionIdHex: pending.expectedTransactionIdHex,
+            durableAttemptDigestHex: pending.durableAttemptDigestHex,
+            disposition: 'accepted',
+            submittedTransactionIdHex: null,
+            responseDigestHex: '41'.repeat(32),
+          })
+      ).toThrow(/does not match its disposition/);
+    });
+  });
+
+  it('enforces immutable attempt bindings and prevents deletion below the API', () => {
+    withTrackerDb((tracker) => {
+      const reservationInput = isolatedDevnetTrackerAdmissionReservationInput();
+      const reservation = tracker
+        .reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1(
+          reservationInput,
+        ).reservation;
+      tracker.reserveSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1({
+        ...isolatedDevnetTrackerTransportAttemptInput(reservationInput),
+        durableReservationDigestHex: reservation.durableReservationDigestHex,
+      });
+      const rawDb = (tracker as unknown as { db: Database.Database }).db;
+      expect(() => rawDb.prepare(`
+        UPDATE substrate_federated_isolated_devnet_tracker_transport_attempts_v1
+        SET attempted_at_height = attempted_at_height + 1
+        WHERE reservation_identity = ?
+      `).run(reservationInput.reservationIdentityHex)).toThrow(
+        /transition is invalid/,
+      );
+      expect(() => rawDb.prepare(`
+        DELETE FROM substrate_federated_isolated_devnet_tracker_transport_attempts_v1
+        WHERE reservation_identity = ?
+      `).run(reservationInput.reservationIdentityHex)).toThrow(/append-only/);
+    });
+  });
 });
 
 function seedAuthenticatedTransportAuthority(

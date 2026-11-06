@@ -295,7 +295,7 @@ export async function observeRewardConsolidationTransaction(
     throw new Error('reward consolidation transaction has an invalid inclusion height');
   }
   const confirmationHeight = rawConfirmationHeight as number;
-  const derivedConfirmations = identity.fullHeight - confirmationHeight + 1;
+  const derivedConfirmations = identity.fullHeight - confirmationHeight;
   if (
     derivedConfirmations !== confirmations
     || derivedConfirmations < DEVNET_REWARD_CONSOLIDATION_FINAL_CONFIRMATIONS

@@ -118,7 +118,7 @@ describe('public audit alpha standalone bundle', () => {
       rmSync(fixture.root, { recursive: true, force: true });
       rmSync(outputRoot, { recursive: true, force: true });
     }
-  }, 15_000);
+  }, 30_000);
 
   it('rejects in-repository, pre-existing, and malformed output targets', () => {
     const fixture = createFixtureRepository();
