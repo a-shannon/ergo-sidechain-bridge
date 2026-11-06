@@ -34,6 +34,12 @@ const workerDomain =
 const parentDomain =
   'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_PARENT_DEPOSIT_FUNDING_SUBSTAGE_V1';
 const text = (value: unknown) => `${json.canonicalJson(value)}\n`;
+const legacySubstages = Object.freeze([
+  'owned-transaction-hold', 'post-hold-owner-custody-guard',
+  'prior-confirmation-revalidation', 'post-revalidation-owner-custody-guard',
+  'owned-reward-input-discovery', 'post-discovery-owner-custody-guard',
+  'owned-reward-input-provenance', 'held-funding-equality',
+] as const);
 
 function primary(cycle: Cycle = 'cycle-1'): Error {
   return stepTag(rootTag(new Error('opaque'), cycle), cycle, 'deposit-funding');
@@ -76,9 +82,29 @@ function resign(value: object, domain: string): Record<string, unknown> {
 }
 
 describe('source-invocation deposit-funding substage metadata', () => {
-  it('has exactly eight frozen substages', () => {
+  it('has exactly twenty-eight frozen substages after the explicit Hold vocabulary extension', () => {
     expect(substages).toEqual([
       'owned-transaction-hold',
+      'owned-transaction-hold-target-admission',
+      'owned-transaction-hold-owner-precondition',
+      'owned-transaction-hold-control-precondition',
+      'owned-transaction-hold-operation-reservation',
+      'owned-transaction-hold-request',
+      'owned-transaction-hold-response-policy',
+      'owned-transaction-hold-response-body',
+      'owned-transaction-hold-response-decode',
+      'owned-transaction-hold-control-postactive',
+      'owned-transaction-hold-wire-parse',
+      'owned-transaction-hold-owner-post-control-active',
+      'owned-transaction-hold-paired-snapshot-read',
+      'owned-transaction-hold-paired-watermark-validation',
+      'owned-transaction-hold-paired-canonical-read',
+      'owned-transaction-hold-ancestry-validation',
+      'owned-transaction-hold-lag-poll',
+      'owned-transaction-hold-stability-wait',
+      'owned-transaction-hold-stability-validation',
+      'owned-transaction-hold-owner-post-snapshot-active',
+      'owned-transaction-hold-post-hold-active',
       'post-hold-owner-custody-guard',
       'prior-confirmation-revalidation',
       'post-revalidation-owner-custody-guard',
@@ -88,6 +114,31 @@ describe('source-invocation deposit-funding substage metadata', () => {
       'held-funding-equality',
     ]);
     expect(Object.isFrozen(substages)).toBe(true);
+  });
+
+  it.each(legacySubstages)('retains the previous worker and Parent canonical bytes for %s', substage => {
+    const f = fixture(substage);
+    const workerBody = {
+      schema: 'e2s.substrate-federated-native-two-cycle-worker-deposit-funding-substage.v1',
+      version: 1, status: 'deposit_funding_substage_failed', ...bindings,
+      workerFailureReceiptDigestHex: f.failure.receiptDigestHex,
+      workerRootPhaseV2ReceiptDigestHex: f.root.receiptDigestHex,
+      workerCycleStepReceiptDigestHex: f.step.receiptDigestHex,
+      cycle: 'cycle-1', step: 'deposit-funding', depositFundingSubstage: substage,
+      operationCompletionEstablished: false, rootCleanupEstablished: false, rawCausePublished: false,
+    };
+    const worker = { ...workerBody, receiptDigestHex: json.sha256CanonicalJson(workerBody, workerDomain) };
+    const parentBody = {
+      ...workerBody,
+      schema: 'e2s.substrate-federated-native-two-cycle-parent-deposit-funding-substage.v1',
+      status: 'deposit_funding_substage_diagnostics_validated',
+      failureReceiptDigestHex: terminal,
+      parentCycleStepReceiptDigestHex: f.parentStep.receiptDigestHex,
+      workerDepositFundingSubstageReceiptDigestHex: worker.receiptDigestHex,
+    };
+    expect(text(f.worker)).toBe(text(worker));
+    expect(text(f.parent)).toBe(text({ ...parentBody,
+      receiptDigestHex: json.sha256CanonicalJson(parentBody, parentDomain) }));
   });
 
   describe.each(['cycle-1', 'cycle-2'] as const)('%s', cycle => {

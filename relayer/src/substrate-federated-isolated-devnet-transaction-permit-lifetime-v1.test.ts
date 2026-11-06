@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 const path = new URL('./substrate-federated-isolated-devnet-ergo-node-process-v1.ts', import.meta.url);
 const source = readFileSync(path, 'utf8');
 const names = {
+  observe: 'observeOwnedMiningHoldBoundary',
   bind: 'bindOwnedMiningTransactionPermit',
   hold: 'holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1',
   arm: 'armSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1',
@@ -586,7 +587,7 @@ describe('transaction permit exact production target lifetime', () => {
 
   it.each(['hold', 'arm', 'complete'].flatMap(operation => [false, true].map(omit => ({ operation, omit })) ))(
     'isolates public $operation return guard after inner completion (omit guard=$omit)', async ({ operation, omit }) => {
-    const before = operation === 'hold' ? 'const snapshot = await binding.hold();\n  binding.assertActive();'
+    const before = operation === 'hold' ? "const snapshot = await binding.hold(observe);\n  observeOwnedMiningHoldBoundary(observe, 'post-hold-active');\n  binding.assertActive();"
       : operation === 'arm' ? 'await binding.arm(transactionIdHex);\n  binding.assertActive();'
         : 'await binding.complete(transactionIdHex, completionDeadline);\n  binding.assertActive();';
     const h = harness(omit ? { before, after: before.replace('\n  binding.assertActive();', '') } : undefined);

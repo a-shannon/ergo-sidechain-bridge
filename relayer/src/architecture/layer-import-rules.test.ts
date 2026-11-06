@@ -69,6 +69,28 @@ function staticAppFixture(file: string, source: string): Record<string, string> 
 }
 
 describe('layer import rules', () => {
+  describe.each(['SubstrateFederatedOwnedMiningHoldBoundaryV1',
+    'SubstrateFederatedOwnedMiningHoldObserverV1'])('owned Hold observation type %s', binding => {
+    const specifier = '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+    const declaration = `import type { ${binding} } from '${specifier}';`;
+    it('admits only the reviewed erased binding at the funding root', () => {
+      expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+        `${declaration} let value: ${binding};`))).toEqual([]);
+    });
+    it.each([GENESIS_SETUP_ROOT, FEDERATED_V3_OWNED_RESERVATION_ROOT])(
+      'refuses the same binding at another reviewed root %s', owner => {
+        expect(inspect(staticAppFixture(owner, `${declaration} let value: ${binding};`))
+          .map(item => item.message)).toContain(
+          `restricted capability import binding is not allowlisted: ${specifier}#${binding}`);
+      });
+    it('refuses aliases instead of expanding the reviewed type surface', () => {
+      expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+        `import type { ${binding} as Other } from '${specifier}'; let value: Other;`))
+        .map(item => item.message)).toContain(
+        `restricted capability import binding must not be aliased: ${specifier}#${binding}`);
+    });
+  });
+
   describe.each([
     [FEDERATED_GENESIS_TARGET_ROOT, 'substrate-federated-isolated-devnet-ergo-node-process-v1',
       'holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1'],

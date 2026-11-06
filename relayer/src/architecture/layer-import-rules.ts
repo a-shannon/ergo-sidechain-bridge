@@ -407,6 +407,8 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
     'assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1',
     'pauseSubstrateFederatedIsolatedDevnetOwnedMiningSubmissionV1',
     'holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1',
+    'SubstrateFederatedOwnedMiningHoldBoundaryV1',
+    'SubstrateFederatedOwnedMiningHoldObserverV1',
     'revalidateSubstrateFederatedIsolatedDevnetMiningPauseObservationV1',
     'projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1',
     'SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2',

@@ -51,6 +51,8 @@ import { createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2, assertSubstrat
   type SubstrateFederatedIsolatedDevnetNativeTrackerCycleV1,
   pauseSubstrateFederatedIsolatedDevnetOwnedMiningSubmissionV1,
   holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1,
+  type SubstrateFederatedOwnedMiningHoldBoundaryV1,
+  type SubstrateFederatedOwnedMiningHoldObserverV1,
   revalidateSubstrateFederatedIsolatedDevnetMiningPauseObservationV1,
   projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1 } from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import { discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1,
@@ -144,6 +146,35 @@ export interface RunSubstrateFederatedGenesisTargetRootV2Input
 }
 
 /** The optional observer exports only a finite stage; signer and transport stay private. */
+function createOwnedHoldFundingStageObserver(
+  mark: (substage: NativeDepositFundingSubstageV1) => void,
+): SubstrateFederatedOwnedMiningHoldObserverV1 {
+  const stages: Readonly<Record<SubstrateFederatedOwnedMiningHoldBoundaryV1,
+    NativeDepositFundingSubstageV1>> = Object.freeze({
+    'target-admission': 'owned-transaction-hold-target-admission',
+    'owner-precondition': 'owned-transaction-hold-owner-precondition',
+    'control-precondition': 'owned-transaction-hold-control-precondition',
+    'operation-reservation': 'owned-transaction-hold-operation-reservation',
+    'hold-request': 'owned-transaction-hold-request',
+    'hold-response-policy': 'owned-transaction-hold-response-policy',
+    'hold-response-body': 'owned-transaction-hold-response-body',
+    'hold-response-decode': 'owned-transaction-hold-response-decode',
+    'control-postactive': 'owned-transaction-hold-control-postactive',
+    'hold-wire-parse': 'owned-transaction-hold-wire-parse',
+    'owner-post-control-active': 'owned-transaction-hold-owner-post-control-active',
+    'paired-snapshot-read': 'owned-transaction-hold-paired-snapshot-read',
+    'paired-watermark-validation': 'owned-transaction-hold-paired-watermark-validation',
+    'paired-canonical-read': 'owned-transaction-hold-paired-canonical-read',
+    'ancestry-validation': 'owned-transaction-hold-ancestry-validation',
+    'lag-poll': 'owned-transaction-hold-lag-poll',
+    'stability-wait': 'owned-transaction-hold-stability-wait',
+    'stability-validation': 'owned-transaction-hold-stability-validation',
+    'owner-post-snapshot-active': 'owned-transaction-hold-owner-post-snapshot-active',
+    'post-hold-active': 'owned-transaction-hold-post-hold-active',
+  });
+  return boundary => { mark(stages[boundary]); return undefined; };
+}
+
 export async function runSubstrateFederatedGenesisTargetRootV1(
   input: RunSubstrateFederatedGenesisTargetRootV1Input,
   onDepositFundingStage?: NativeDepositFundingStageObserverV2,
@@ -473,7 +504,8 @@ async function runSelectedGenesisTargetRoot(
           // Issuance funding is spent. Discover a new owned input for this deposit.
           markStep('deposit-funding');
           markDepositFundingSubstage('owned-transaction-hold');
-          const heldDepositSnapshot = await holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(target);
+          const heldDepositSnapshot = await holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(
+            target, createOwnedHoldFundingStageObserver(markDepositFundingSubstage));
           markDepositFundingSubstage('post-hold-owner-custody-guard');
           assertActive();
           markDepositFundingSubstage('prior-confirmation-revalidation');
@@ -1074,7 +1106,8 @@ async function completeFirstNativeReturn(input: Readonly<{
       // confirmation target and its retained signer are still current.
       markStep('deposit-funding');
       markDepositFundingSubstage('owned-transaction-hold');
-      const heldDepositSnapshot = await holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(target);
+      const heldDepositSnapshot = await holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(
+        target, createOwnedHoldFundingStageObserver(markDepositFundingSubstage));
       markDepositFundingSubstage('post-hold-owner-custody-guard');
       readCustody();
       markDepositFundingSubstage('prior-confirmation-revalidation');

@@ -15,6 +15,28 @@ import { parseNativeTwoCycleWorkerRootPhaseV2 }
 
 export const NATIVE_DEPOSIT_FUNDING_SUBSTAGES_V1 = Object.freeze([
   'owned-transaction-hold',
+  // Additive vocabulary revision: older readers reject these finite values.
+  // Existing values retain their bytes; source identity is bound by expectedBridgeCommit.
+  'owned-transaction-hold-target-admission',
+  'owned-transaction-hold-owner-precondition',
+  'owned-transaction-hold-control-precondition',
+  'owned-transaction-hold-operation-reservation',
+  'owned-transaction-hold-request',
+  'owned-transaction-hold-response-policy',
+  'owned-transaction-hold-response-body',
+  'owned-transaction-hold-response-decode',
+  'owned-transaction-hold-control-postactive',
+  'owned-transaction-hold-wire-parse',
+  'owned-transaction-hold-owner-post-control-active',
+  'owned-transaction-hold-paired-snapshot-read',
+  'owned-transaction-hold-paired-watermark-validation',
+  'owned-transaction-hold-paired-canonical-read',
+  'owned-transaction-hold-ancestry-validation',
+  'owned-transaction-hold-lag-poll',
+  'owned-transaction-hold-stability-wait',
+  'owned-transaction-hold-stability-validation',
+  'owned-transaction-hold-owner-post-snapshot-active',
+  'owned-transaction-hold-post-hold-active',
   'post-hold-owner-custody-guard',
   'prior-confirmation-revalidation',
   'post-revalidation-owner-custody-guard',

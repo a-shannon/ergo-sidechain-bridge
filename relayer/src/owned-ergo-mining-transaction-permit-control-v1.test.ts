@@ -12,6 +12,8 @@ vi.mock('node:crypto', async importOriginal => {
 });
 
 import { assertOwnedErgoMiningTransactionPermitControlV1, createOwnedErgoMiningTransactionPermitControlV1 } from './owned-ergo-mining-transaction-permit-control-v1.js';
+import type { OwnedErgoMiningTransactionHoldBoundaryV1,
+  OwnedErgoMiningTransactionHoldObserverV1 } from './owned-ergo-mining-transaction-permit-control-v1.js';
 import { createOwnedErgoMiningSubmissionControlV1 } from './owned-ergo-mining-submission-control-v1.js';
 import * as receiptParsers from './owned-ergo-mining-transaction-permit-v1.js';
 
@@ -26,6 +28,13 @@ let timeoutSpy: MockInstance<typeof AbortSignal.timeout>;
 type Control = ReturnType<typeof createOwnedErgoMiningTransactionPermitControlV1>;
 type Arm = Awaited<ReturnType<Control['arm']>>;
 type Stage = 'hold' | 'arm' | 'status';
+
+function observerTypeContract(): void {
+  // @ts-expect-error Async observation is outside the synchronous internal contract.
+  const asynchronous: OwnedErgoMiningTransactionHoldObserverV1 = async () => undefined;
+  void asynchronous; // Type-check only; never invoke an async observer.
+}
+void observerTypeContract;
 
 function id(height: number): string { return height.toString(16).padStart(64, '0'); }
 
@@ -456,6 +465,79 @@ describe('owned mining transaction permit transport with synthetic HTTP', () => 
     respond(cap, height); const control = createOwnedErgoMiningTransactionPermitControlV1(nonce, cap, () => false);
     await control.hold(); await refusal(() => control.arm(transaction)); await closed(control);
     expect(fetchMock).toHaveBeenCalledTimes(1); expect(entropy.randomBytes).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('finite Hold transport observations', () => {
+  it('observes only finite operation boundaries without changing request budget or wire', async () => {
+    respond();
+    const stages: OwnedErgoMiningTransactionHoldBoundaryV1[] = [];
+    const control = createOwnedErgoMiningTransactionPermitControlV1(nonce, null, () => false);
+    await expect(control.hold(stage => { stages.push(stage); return undefined; }))
+      .resolves.toMatchObject({ submissionHeld: true });
+    expect(stages).toEqual(['control-precondition', 'operation-reservation', 'hold-request',
+      'hold-response-policy', 'hold-response-body', 'hold-response-decode',
+      'control-postactive', 'hold-wire-parse']);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(entropy.randomBytes).toHaveBeenCalledTimes(1);
+    expect(timeoutSpy.mock.calls).toEqual([[3_000]]);
+    const count = stages.length;
+    const arm = await control.arm(transaction);
+    await control.status(arm);
+    expect(stages).toHaveLength(count);
+  });
+
+  it.each<OwnedErgoMiningTransactionHoldBoundaryV1>([
+    'control-precondition', 'operation-reservation', 'hold-request',
+    'hold-response-policy', 'hold-response-body', 'hold-response-decode',
+    'control-postactive', 'hold-wire-parse',
+  ])('retains the original generic refusal at %s', async expected => {
+    respond();
+    let paused = expected === 'control-precondition';
+    const control = createOwnedErgoMiningTransactionPermitControlV1(nonce, null, () => paused);
+    const stages: OwnedErgoMiningTransactionHoldBoundaryV1[] = [];
+    if (expected === 'operation-reservation') entropy.randomBytes.mockImplementationOnce(() => {
+      throw new Error('synthetic entropy failure');
+    });
+    if (expected === 'hold-request') fetchMock.mockRejectedValueOnce(new Error('synthetic transport failure'));
+    if (expected === 'hold-response-policy') fetchMock.mockResolvedValueOnce(new Response('{}', { status: 503 }));
+    if (expected === 'hold-response-body') fetchMock.mockResolvedValueOnce(new Response(new ReadableStream({
+      start(controller) { controller.error(new Error('synthetic reader failure')); },
+    })));
+    if (expected === 'hold-response-decode') fetchMock.mockResolvedValueOnce(streaming([Buffer.from([0xff])]));
+    if (expected === 'hold-wire-parse') fetchMock.mockResolvedValueOnce(new Response('{}'));
+    if (expected === 'control-postactive') {
+      fetchMock.mockImplementationOnce(async (url, init) => {
+        const response = new Response(JSON.stringify(wire(url, init)));
+        const reader = response.body!.getReader();
+        const release = reader.releaseLock.bind(reader);
+        vi.spyOn(reader, 'releaseLock').mockImplementation(() => { release(); paused = true; });
+        vi.spyOn(response.body!, 'getReader').mockReturnValue(reader);
+        return response;
+      });
+    }
+    await refusal(() => control.hold(stage => { stages.push(stage); return undefined; }));
+    expect(stages.at(-1)).toBe(expected);
+    await closed(control);
+  });
+
+  it.each([false, true])('ignores synchronous observer exceptions on failure=%s', async failed => {
+    respond();
+    if (failed) fetchMock.mockRejectedValueOnce(new Error('synthetic private failure'));
+    const control = createOwnedErgoMiningTransactionPermitControlV1(nonce, null, () => false);
+    const observe = (): never => { throw new Error('synthetic diagnostic exception'); };
+    if (failed) await refusal(() => control.hold(observe));
+    else await expect(control.hold(observe)).resolves.toMatchObject({ submissionHeld: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not inspect or await a hostile callback return value', async () => {
+    respond();
+    const then = vi.fn(() => { throw new Error('must not inspect then'); });
+    const result = Object.defineProperty({}, 'then', { get: then });
+    const control = createOwnedErgoMiningTransactionPermitControlV1(nonce, null, () => false);
+    await expect(control.hold(() => result as never)).resolves.toMatchObject({ submissionHeld: true });
+    expect(then).not.toHaveBeenCalled();
   });
 });
 

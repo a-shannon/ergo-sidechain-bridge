@@ -18,8 +18,17 @@ const MAX_RESPONSE_BYTES = 16 * 1024;
 const URL_PREFIX = 'http://127.0.0.1:9051/mining/';
 const CONTROL_OPEN_GUARDS = new WeakMap<object, () => void>();
 
+export type OwnedErgoMiningTransactionHoldBoundaryV1 =
+  | 'control-precondition' | 'operation-reservation' | 'hold-request'
+  | 'hold-response-policy' | 'hold-response-body' | 'hold-response-decode'
+  | 'hold-wire-parse' | 'control-postactive';
+
+/** Internal synchronous observation only; async callbacks are not supported. */
+export type OwnedErgoMiningTransactionHoldObserverV1 =
+  (boundary: OwnedErgoMiningTransactionHoldBoundaryV1) => undefined;
+
 export interface OwnedErgoMiningTransactionPermitControlV1 {
-  readonly hold: () => Promise<HoldReceipt>;
+  readonly hold: (observe?: OwnedErgoMiningTransactionHoldObserverV1) => Promise<HoldReceipt>;
   readonly arm: (transactionIdHex: string) => Promise<ArmReceipt>;
   readonly status: (receipt: ArmReceipt, maximumRequestDurationMs?: number) => Promise<StatusReceipt>;
 }
@@ -66,10 +75,12 @@ export function createOwnedErgoMiningTransactionPermitControlV1(
     operationIdHex: string,
     binding?: Readonly<{ transactionIdHex: string; parent: Watermark }>,
     maximumRequestDurationMs = REQUEST_TIMEOUT_MS,
+    observe?: OwnedErgoMiningTransactionHoldObserverV1,
   ): Promise<string> => {
     let response: Response | undefined;
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     try {
+      observeHoldBoundary(observe, 'hold-request');
       open();
       const signal = AbortSignal.timeout(maximumRequestDurationMs);
       response = await fetch(URL_PREFIX + endpoint, {
@@ -87,9 +98,11 @@ export function createOwnedErgoMiningTransactionPermitControlV1(
         },
       });
       open();
+      observeHoldBoundary(observe, 'hold-response-policy');
       if (signal.aborted || response.ok !== true || response.redirected || response.body === null) fail();
       const encoding = response.headers.get('content-encoding');
       if (encoding !== null && encoding.trim().toLowerCase() !== 'identity') fail();
+      observeHoldBoundary(observe, 'hold-response-body');
       reader = response.body.getReader();
       const chunks: Buffer[] = [];
       let byteLength = 0;
@@ -103,6 +116,7 @@ export function createOwnedErgoMiningTransactionPermitControlV1(
         chunks.push(Buffer.from(chunk.value));
       }
       if (signal.aborted) fail();
+      observeHoldBoundary(observe, 'hold-response-decode');
       return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
         .decode(Buffer.concat(chunks, byteLength));
     } catch {
@@ -116,14 +130,19 @@ export function createOwnedErgoMiningTransactionPermitControlV1(
     }
   };
 
-  const hold = async (): Promise<HoldReceipt> => {
+  const hold = async (observe?: OwnedErgoMiningTransactionHoldObserverV1): Promise<HoldReceipt> => {
     try {
+      observeHoldBoundary(observe, 'control-precondition');
       open();
       if (phase !== 'fresh') fail();
       phase = 'holding';
+      observeHoldBoundary(observe, 'operation-reservation');
       const operationIdHex = operation();
-      const wireText = await request('ownedTransactionHoldV1', operationIdHex);
+      const wireText = await request('ownedTransactionHoldV1', operationIdHex,
+        undefined, REQUEST_TIMEOUT_MS, observe);
+      observeHoldBoundary(observe, 'control-postactive');
       open();
+      observeHoldBoundary(observe, 'hold-wire-parse');
       const receipt = parseOwnedErgoMiningTransactionHoldReceiptV1({
         wireText, expectedOperationIdHex: operationIdHex,
         expectedMaximumBlockHeight: maximumBlockHeight,
@@ -204,6 +223,14 @@ export function createOwnedErgoMiningTransactionPermitControlV1(
 
 function lowerHex(value: unknown): value is string {
   return typeof value === 'string' && value.length === 64 && /^[0-9a-f]{64}$/u.test(value);
+}
+
+function observeHoldBoundary(
+  observe: OwnedErgoMiningTransactionHoldObserverV1 | undefined,
+  boundary: OwnedErgoMiningTransactionHoldBoundaryV1,
+): void {
+  try { observe?.(boundary); }
+  catch { /* Observations never replace the original operation or its failure. */ }
 }
 
 function fail(): never { throw new Error(ERROR_MESSAGE); }

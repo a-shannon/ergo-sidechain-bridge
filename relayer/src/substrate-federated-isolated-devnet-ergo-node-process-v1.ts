@@ -38,6 +38,7 @@ import type {
   OwnedErgoMiningSubmissionPauseReceiptV1,
 } from './owned-ergo-mining-submission-v1.js';
 import { assertOwnedErgoMiningTransactionPermitControlV1,
+  type OwnedErgoMiningTransactionHoldBoundaryV1,
   type OwnedErgoMiningTransactionPermitControlV1 }
   from './owned-ergo-mining-transaction-permit-control-v1.js';
 import {
@@ -155,7 +156,7 @@ const OWNED_MINING_SUBMISSION_PAUSE_OBSERVATIONS = new WeakMap<
 >();
 const OWNED_MINING_TRANSACTION_PERMIT_TARGETS = new WeakMap<object, Readonly<{
   assertActive: () => void;
-  hold: () => Promise<Readonly<TargetSnapshot>>;
+  hold: (observe?: SubstrateFederatedOwnedMiningHoldObserverV1) => Promise<Readonly<TargetSnapshot>>;
   arm: (transactionIdHex: string) => Promise<void>;
   complete: (transactionIdHex: string, completionDeadline: number) => Promise<void>;
 }>>();
@@ -966,12 +967,33 @@ export async function revalidateSubstrateFederatedIsolatedDevnetMiningPauseObser
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
 }
 
+export type SubstrateFederatedOwnedMiningHoldBoundaryV1 = OwnedErgoMiningTransactionHoldBoundaryV1
+  | 'target-admission' | 'owner-precondition' | 'owner-post-control-active'
+  | 'paired-snapshot-read' | 'paired-watermark-validation' | 'paired-canonical-read'
+  | 'ancestry-validation' | 'lag-poll' | 'stability-wait' | 'stability-validation'
+  | 'owner-post-snapshot-active' | 'post-hold-active';
+
+/** Internal synchronous observation; nested lifetime checks remain part of each boundary. */
+export type SubstrateFederatedOwnedMiningHoldObserverV1 =
+  (boundary: SubstrateFederatedOwnedMiningHoldBoundaryV1) => undefined;
+
+function observeOwnedMiningHoldBoundary(
+  observe: SubstrateFederatedOwnedMiningHoldObserverV1 | undefined,
+  boundary: SubstrateFederatedOwnedMiningHoldBoundaryV1,
+): void {
+  try { observe?.(boundary); }
+  catch { /* Observations never replace the original operation or its failure. */ }
+}
+
 /** Hold the original miner before capturing a native deposit's height context. */
 export async function holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  observe?: SubstrateFederatedOwnedMiningHoldObserverV1,
 ): Promise<Readonly<TargetSnapshot>> {
+  observeOwnedMiningHoldBoundary(observe, 'target-admission');
   const binding = requireOwnedMiningTransactionPermitTarget(target);
-  const snapshot = await binding.hold();
+  const snapshot = await binding.hold(observe);
+  observeOwnedMiningHoldBoundary(observe, 'post-hold-active');
   binding.assertActive();
   return snapshot;
 }
@@ -4159,7 +4181,9 @@ function bindOwnedMiningTransactionPermit(
     await delay(duration);
     assertOriginalTarget();
   };
-  const readExact = async (watermark: Readonly<{ headerId: string; height: number }>) => {
+  const readExact = async (watermark: Readonly<{ headerId: string; height: number }>,
+    observe?: SubstrateFederatedOwnedMiningHoldObserverV1) => {
+    observeOwnedMiningHoldBoundary(observe, 'paired-snapshot-read');
     assertOriginalTarget();
     const startedReads: Promise<unknown>[] = [];
     const pendingSnapshots = [
@@ -4172,6 +4196,7 @@ function bindOwnedMiningTransactionPermit(
     });
     assertOriginalTarget();
     if (primaryRead === undefined || witnessRead === undefined) return undefined;
+    observeOwnedMiningHoldBoundary(observe, 'paired-watermark-validation');
     const primarySnapshot = primaryRead.snapshot;
     const witnessSnapshot = witnessRead.snapshot;
     for (const snapshot of [primarySnapshot, witnessSnapshot]) {
@@ -4187,6 +4212,7 @@ function bindOwnedMiningTransactionPermit(
     transactionPermitHeaderProofWidthV1(watermark.height, witnessRead.bestHeader.height);
     const primaryCanonicalPath = `/blocks/chainSlice?fromHeight=${watermark.height - 1}&toHeight=${primaryRead.bestHeader.height}`;
     const witnessCanonicalPath = `/blocks/chainSlice?fromHeight=${watermark.height - 1}&toHeight=${witnessRead.bestHeader.height}`;
+    observeOwnedMiningHoldBoundary(observe, 'paired-canonical-read');
     const [primaryHeaderIdsAtWatermark, witnessHeaderIdsAtWatermark,
       primaryCanonicalHeaders, witnessCanonicalHeaders] = await settleCopiedErgoReads([
       getJson(SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN, path, deadline, assertOriginalTarget),
@@ -4195,6 +4221,7 @@ function bindOwnedMiningTransactionPermit(
       getJson(SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN, witnessCanonicalPath, deadline, assertOriginalTarget),
     ]);
     assertOriginalTarget();
+    observeOwnedMiningHoldBoundary(observe, 'ancestry-validation');
     const primaryHeldHeader = assertTransactionPermitHeaderAncestryV1(
       primaryCanonicalHeaders, watermark, primaryRead.bestHeader,
     );
@@ -4208,15 +4235,21 @@ function bindOwnedMiningTransactionPermit(
     return Object.freeze({ snapshot: primarySnapshot, canonicalHeader,
       primaryBestHeader: primaryRead.bestHeader, witnessBestHeader: witnessRead.bestHeader });
   };
-  const stableExact = async (watermark: Readonly<{ headerId: string; height: number }>) => {
+  const stableExact = async (watermark: Readonly<{ headerId: string; height: number }>,
+    observe?: SubstrateFederatedOwnedMiningHoldObserverV1) => {
     for (;;) {
-      const snapshot = await readExact(watermark);
+      const snapshot = await readExact(watermark, observe);
       assertOriginalTarget();
-      if (snapshot === undefined) { await pausePoll(250); assertOriginalTarget(); continue; }
+      if (snapshot === undefined) {
+        observeOwnedMiningHoldBoundary(observe, 'lag-poll');
+        await pausePoll(250); assertOriginalTarget(); continue;
+      }
+      observeOwnedMiningHoldBoundary(observe, 'stability-wait');
       await pausePoll(STABILITY_DELAY_MS);
       assertOriginalTarget();
-      const after = await readExact(watermark);
+      const after = await readExact(watermark, observe);
       assertOriginalTarget();
+      observeOwnedMiningHoldBoundary(observe, 'stability-validation');
       if (after === undefined) throw new Error('isolated Ergo transaction permit indexed watermark regressed');
       assertExactSnapshot(after.snapshot, snapshot.snapshot, 'primary');
       assertSubstrateFederatedIsolatedDevnetTransactionPermitCanonicalHeaderStableV1(
@@ -4233,16 +4266,19 @@ function bindOwnedMiningTransactionPermit(
   };
   OWNED_MINING_TRANSACTION_PERMIT_TARGETS.set(target, Object.freeze({
     assertActive: assertOriginalTarget,
-    hold: async () => {
+    hold: async (observe?: SubstrateFederatedOwnedMiningHoldObserverV1) => {
       try {
+        observeOwnedMiningHoldBoundary(observe, 'owner-precondition');
         assertOriginalTarget();
         if (phase !== 'fresh') throw new Error('isolated Ergo transaction permit Hold was consumed');
         phase = 'holding';
         deadline = performance.now() + MINING_TIMEOUT_MS;
         assertOriginalTarget();
-        const receipt = await control.hold();
+        const receipt = await control.hold(observe);
+        observeOwnedMiningHoldBoundary(observe, 'owner-post-control-active');
         assertOriginalTarget();
-        const snapshot = await stableExact(receipt.parent);
+        const snapshot = await stableExact(receipt.parent, observe);
+        observeOwnedMiningHoldBoundary(observe, 'owner-post-snapshot-active');
         assertOriginalTarget();
         phase = 'held';
         deadline = Infinity;

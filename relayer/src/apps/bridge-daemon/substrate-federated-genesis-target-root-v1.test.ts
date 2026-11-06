@@ -180,6 +180,9 @@ import { NATIVE_DEPOSIT_FUNDING_SUBSTAGES_V1,
   projectNativeDepositFundingSubstageV1,
   type NativeDepositFundingSubstageV1 }
   from '../../substrate-federated-native-deposit-funding-substage-v1.js';
+import type { SubstrateFederatedOwnedMiningHoldBoundaryV1,
+  SubstrateFederatedOwnedMiningHoldObserverV1 }
+  from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import { tagSubstrateFederatedTrackerV2BuildFailurePhaseV1,
   projectSubstrateFederatedTrackerV2BuildFailurePhaseV1,
   tagSubstrateFederatedTrackerV2StatementFailureCheckV1,
@@ -307,6 +310,44 @@ function assertDisposed() {
   if (setup) expect(() => assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(setup!.signer)).toThrow(/active process provenance/);
 }
 function stageMock(stage: DownstreamStage) { return stage === 'funding' ? mocked.discover : mocked[stage]; }
+const legacyFundingOrder: readonly NativeDepositFundingSubstageV1[] = Object.freeze([
+  'owned-transaction-hold', 'post-hold-owner-custody-guard',
+  'prior-confirmation-revalidation', 'post-revalidation-owner-custody-guard',
+  'owned-reward-input-discovery', 'post-discovery-owner-custody-guard',
+  'owned-reward-input-provenance', 'held-funding-equality',
+]);
+const holdStageCases = [
+  ['target-admission', 'owned-transaction-hold-target-admission'],
+  ['owner-precondition', 'owned-transaction-hold-owner-precondition'],
+  ['control-precondition', 'owned-transaction-hold-control-precondition'],
+  ['operation-reservation', 'owned-transaction-hold-operation-reservation'],
+  ['hold-request', 'owned-transaction-hold-request'],
+  ['hold-response-policy', 'owned-transaction-hold-response-policy'],
+  ['hold-response-body', 'owned-transaction-hold-response-body'],
+  ['hold-response-decode', 'owned-transaction-hold-response-decode'],
+  ['control-postactive', 'owned-transaction-hold-control-postactive'],
+  ['hold-wire-parse', 'owned-transaction-hold-wire-parse'],
+  ['owner-post-control-active', 'owned-transaction-hold-owner-post-control-active'],
+  ['paired-snapshot-read', 'owned-transaction-hold-paired-snapshot-read'],
+  ['paired-watermark-validation', 'owned-transaction-hold-paired-watermark-validation'],
+  ['paired-canonical-read', 'owned-transaction-hold-paired-canonical-read'],
+  ['ancestry-validation', 'owned-transaction-hold-ancestry-validation'],
+  ['lag-poll', 'owned-transaction-hold-lag-poll'],
+  ['stability-wait', 'owned-transaction-hold-stability-wait'],
+  ['stability-validation', 'owned-transaction-hold-stability-validation'],
+  ['owner-post-snapshot-active', 'owned-transaction-hold-owner-post-snapshot-active'],
+  ['post-hold-active', 'owned-transaction-hold-post-hold-active'],
+] as const satisfies readonly (readonly [SubstrateFederatedOwnedMiningHoldBoundaryV1, NativeDepositFundingSubstageV1])[];
+// A synthetic successful Hold with one lagged read, convergence and the two stable reads.
+const holdBoundaryTrace: readonly SubstrateFederatedOwnedMiningHoldBoundaryV1[] = Object.freeze([
+  'target-admission', 'owner-precondition', 'control-precondition', 'operation-reservation',
+  'hold-request', 'hold-response-policy', 'hold-response-body', 'hold-response-decode',
+  'control-postactive', 'hold-wire-parse', 'owner-post-control-active',
+  'paired-snapshot-read', 'lag-poll',
+  'paired-snapshot-read', 'paired-watermark-validation', 'paired-canonical-read', 'ancestry-validation',
+  'stability-wait', 'paired-snapshot-read', 'paired-watermark-validation', 'paired-canonical-read',
+  'ancestry-validation', 'stability-validation', 'owner-post-snapshot-active', 'post-hold-active',
+]);
 function injectDepositFundingSubstageFailure(
   second: boolean,
   substage: NativeDepositFundingSubstageV1,
@@ -315,9 +356,20 @@ function injectDepositFundingSubstageFailure(
   const executionTarget = second ? phaseTargets.confirmation : target;
   const originalHold = mocked.hold.getMockImplementation()!;
   let held = false;
+  const holdCase = holdStageCases.find(([, expected]) => expected === substage);
+  let holdBoundaryInjected = false;
   mocked.hold.mockImplementation(async (...args) => {
     if (args[0] !== executionTarget) return originalHold(...args);
     if (substage === 'owned-transaction-hold') throw trigger;
+    if (holdCase !== undefined) {
+      const observe = args[1] as SubstrateFederatedOwnedMiningHoldObserverV1;
+      expect(typeof observe).toBe('function');
+      for (const boundary of holdBoundaryTrace) {
+        expect(observe(boundary)).toBeUndefined();
+        if (boundary === holdCase[0]) { holdBoundaryInjected = true; throw trigger; }
+      }
+      throw new Error('synthetic Hold fault boundary was not reached');
+    }
     const snapshot = await originalHold(...args);
     held = true;
     return snapshot;
@@ -380,6 +432,7 @@ function injectDepositFundingSubstageFailure(
   });
 
   return () => {
+    if (holdCase !== undefined) expect(holdBoundaryInjected).toBe(true);
     if (substage === 'post-hold-owner-custody-guard'
       || substage === 'post-revalidation-owner-custody-guard'
       || substage === 'post-discovery-owner-custody-guard') expect(guardInjected).toBe(true);
@@ -691,11 +744,14 @@ function prepareRootFixture() {
     order.push('discover');
     return discovery;
   });
-  mocked.hold.mockImplementation(async value => {
+  mocked.hold.mockImplementation(async (value, observe?: SubstrateFederatedOwnedMiningHoldObserverV1) => {
     assertCustodyActive();
     const second = value === phaseTargets.confirmation;
     if (second) { expect(phase).toBe('confirmation'); expect(mocked.continuationPacket).not.toHaveBeenCalled(); }
     else { expect(value).toBe(target); expect(active).toBe(true); expect(mocked.packet).not.toHaveBeenCalled(); }
+    if (observe !== undefined) {
+      for (const boundary of holdBoundaryTrace) expect(observe(boundary)).toBeUndefined();
+    }
     const observation = (second ? continuationFunding : funding).observation;
     heldDepositTip = Object.freeze({ height: observation.target.tipHeight, id: observation.target.tipHeaderIdHex });
     return Object.freeze({ network: 'devnet', fullHeight: observation.target.tipHeight,
@@ -2845,7 +2901,15 @@ describe('fresh FED target composition', () => {
       'recovery-capture', 'nodes-stop', 'stop']);
     expect(nativeAction).toHaveBeenCalledTimes(3);
     expect(mocked.pause.mock.calls).toEqual([[target], [phaseTargets.confirmation]]);
-    expect(mocked.hold.mock.calls).toEqual([[target], [phaseTargets.confirmation]]);
+    expect(mocked.hold.mock.calls).toHaveLength(2);
+    for (const [index, expectedTarget] of [target, phaseTargets.confirmation].entries()) {
+      const args = mocked.hold.mock.calls[index]!;
+      expect(args).toHaveLength(2);
+      expect(args[0]).toBe(expectedTarget);
+      expect(typeof args[1]).toBe('function');
+      expect(args[1].constructor).toBe(Function);
+    }
+    expect(mocked.hold.mock.calls[0]![1]).not.toBe(mocked.hold.mock.calls[1]![1]);
     expect(mocked.pauseRevalidate.mock.calls).toEqual([[target, returnValues.pause],
       [phaseTargets.confirmation, returnValues.secondPause]]);
     expect(mocked.wait.mock.calls.filter(args => args[3].includes('checkpoint-admission')).map(args => [args[1], args[3]]))
@@ -3199,6 +3263,14 @@ describe('fresh FED target composition', () => {
     assertDisposed();
   });
 
+  it('covers exactly the twenty added Hold stages with an explicit finite callback trace', () => {
+    expect(holdStageCases).toHaveLength(20);
+    expect(new Set(holdStageCases.map(([boundary]) => boundary)).size).toBe(20);
+    expect(new Set(holdBoundaryTrace)).toEqual(new Set(holdStageCases.map(([boundary]) => boundary)));
+    expect(holdStageCases.map(([, stage]) => stage).sort()).toEqual(
+      NATIVE_DEPOSIT_FUNDING_SUBSTAGES_V1.filter(stage => !legacyFundingOrder.includes(stage)).sort());
+  });
+
   it.each(([false, true] as const).flatMap(second =>
     NATIVE_DEPOSIT_FUNDING_SUBSTAGES_V1.map(substage => ({ second, substage }))))(
     'attributes the last entered deposit-funding substage $substage through the actual root (continuation=$second)',
@@ -3221,7 +3293,7 @@ describe('fresh FED target composition', () => {
       });
       expect(projectNativeDepositFundingSubstageV1(failure)).toBe(substage);
       assertInjection();
-      const substageIndex = NATIVE_DEPOSIT_FUNDING_SUBSTAGES_V1.indexOf(substage);
+      const substageIndex = legacyFundingOrder.indexOf(substage);
       expect(mocked.discover).toHaveBeenCalledTimes(1 + Number(second) + Number(substageIndex >= 4));
       expect(mocked.packet).toHaveBeenCalledTimes(Number(second));
       expect(mocked.continuationPacket).not.toHaveBeenCalled();
