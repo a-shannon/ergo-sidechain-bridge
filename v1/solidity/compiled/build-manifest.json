@@ -1,0 +1,147 @@
+{
+  "schema": "ergo-sidechain-bridge/solidity-build-closure/v1",
+  "compiler": {
+    "package": "solc",
+    "packageVersion": "0.8.35",
+    "longVersion": "0.8.35+commit.47b9dedd.Emscripten.clang"
+  },
+  "dependencyClosure": {
+    "packageJsonPath": "package.json",
+    "packageJsonSha256Hex": "69657eeb93bd67d1e5360e8d40589014ec5f430f74500c7e438f3df3ffdbcb6d",
+    "packageLockPath": "package-lock.json",
+    "packageLockSha256Hex": "131b7827fdbd0eaf142a81be0931c0394b22b17ca43524838c9484453f96199f",
+    "packages": [
+      {
+        "name": "@openzeppelin/contracts",
+        "version": "5.6.1",
+        "integrity": "sha512-Ly6SlsVJ3mj+b18W3R8gNufB7dTICT105fJhodGAGgyC2oqnBAhqSiNDJ8V8DLY05cCz81GLI0CU5vNYA1EC/w=="
+      },
+      {
+        "name": "solc",
+        "version": "0.8.35",
+        "integrity": "sha512-OaP/4zyoKRo2CjqZDxbtkeRlEo6MxP4FLCxntw1Agf9OSoecmwYKoFBSB34UcSKBFBucrTh3Mb0nRoJou62ibw=="
+      }
+    ]
+  },
+  "compilerInput": {
+    "buildDriverPath": "compile.js",
+    "buildDriverSha256Hex": "55435593310e2982007513a7ccbddc5a24543190031dd1355944d67d84a69016",
+    "lineEndings": "lf",
+    "settingsPath": "solc-settings.json",
+    "settingsSha256Hex": "97adbcf796a61e85c7d5d49faa894dbda8bf6812599dd24be8bfb259ea310541",
+    "inputClosureSha256Hex": "883c6747bd2ddb7ffc148c4492cff75725f8c6d14c0672128fb3a00934a9bd7f",
+    "sources": [
+      {
+        "path": "@openzeppelin/contracts/access/Ownable.sol",
+        "compilerInputSha256Hex": "38578bd71c0a909840e67202db527cc6b4e6b437e0f39f0c909da32c1e30cb81"
+      },
+      {
+        "path": "@openzeppelin/contracts/interfaces/draft-IERC6093.sol",
+        "compilerInputSha256Hex": "fa7068f56bc180571a6095be6eaef06d51dbe81e30cb128397d993c9599ecc30"
+      },
+      {
+        "path": "@openzeppelin/contracts/token/ERC20/ERC20.sol",
+        "compilerInputSha256Hex": "50f34ae16a067a41c2c1091445d11d63788e54c717677cb6d6b0e4cdea2ad21d"
+      },
+      {
+        "path": "@openzeppelin/contracts/token/ERC20/IERC20.sol",
+        "compilerInputSha256Hex": "01b6f5c4fa45fd38822b286ecef6daf983d27306dd6362496fa71b3e4600b72c"
+      },
+      {
+        "path": "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol",
+        "compilerInputSha256Hex": "0b7132f17d14d1d84b41b0bb429be62dafdff00fd3470f68724d8018eb07f57a"
+      },
+      {
+        "path": "@openzeppelin/contracts/utils/Context.sol",
+        "compilerInputSha256Hex": "847fda5460fee70f56f4200f59b82ae622bb03c79c77e67af010e31b7e2cc5b6"
+      },
+      {
+        "path": "ErgoBridge.sol",
+        "compilerInputSha256Hex": "82d67fc8a70b56ca68f33a4b820f5b559a78022a2551d3855674a584ebe38163"
+      },
+      {
+        "path": "SERG.sol",
+        "compilerInputSha256Hex": "2fe881f15d354dd4c497a2e5b61b95a2856b829b2541f5675448da5b0002a569"
+      }
+    ]
+  },
+  "contracts": {
+    "SERG": {
+      "source": "SERG.sol",
+      "abi": {
+        "path": "compiled/SERG.abi",
+        "fileByteLength": 7763,
+        "fileSha256Hex": "98e33cee794fdbae76d815c023327adf8abe2ee97fd64a4f3501012861da58b4"
+      },
+      "creationBytecode": {
+        "path": "compiled/SERG.bin",
+        "fileByteLength": 5940,
+        "fileSha256Hex": "8812c6efb7f905d0d259975c3779f72b289870e770f78ffe4cc683b97abc42f0",
+        "encoding": "lowercase-hex-no-prefix",
+        "bytecodeByteLength": 2970,
+        "bytecodeSha256Hex": "2e95a75176c0d59991db8a897f8e674d079943a2568c48c16bb717ca35cf66a1"
+      },
+      "runtimeBytecode": {
+        "path": "compiled/SERG.runtime.bin",
+        "fileByteLength": 4696,
+        "fileSha256Hex": "ee8e5c830927920266ebb6d826d7ae4cdc29829ca71bf984e60bd64a29fda14e",
+        "encoding": "lowercase-hex-no-prefix",
+        "bytecodeByteLength": 2348,
+        "bytecodeSha256Hex": "b07e33c6bbc9d5d1948a7371a33bb8a24428ace1becbb3f7ad2ae232a1352c87"
+      },
+      "metadata": {
+        "path": "compiled/SERG.metadata.json",
+        "fileByteLength": 12568,
+        "fileSha256Hex": "9210626da6fabf1d7c014aef9352c7e540f0b275c0585efdbc3bc5560e7b20c7"
+      },
+      "storageLayout": {
+        "path": "compiled/SERG.storage-layout.json",
+        "fileByteLength": 1872,
+        "fileSha256Hex": "b44ee384f828fc2d34f3d0d1df03318b2d48d27f421ec85443e2b26334a30ee7"
+      }
+    },
+    "ErgoBridge": {
+      "source": "ErgoBridge.sol",
+      "abi": {
+        "path": "compiled/ErgoBridge.abi",
+        "fileByteLength": 7658,
+        "fileSha256Hex": "48720672b361bdd61656eafc3d32e1459835f325d398ee00e75beb1bf339188c"
+      },
+      "creationBytecode": {
+        "path": "compiled/ErgoBridge.bin",
+        "fileByteLength": 10440,
+        "fileSha256Hex": "c857192f517dd4cf6195db473d032fae037cf8b722eb07bd3dc20ae2a7a77b87",
+        "encoding": "lowercase-hex-no-prefix",
+        "bytecodeByteLength": 5220,
+        "bytecodeSha256Hex": "1a7d19aa3128718d2ce122a1520f2631359003f659a0fe132889ce32d94b2074"
+      },
+      "runtimeBytecode": {
+        "path": "compiled/ErgoBridge.runtime.bin",
+        "fileByteLength": 9734,
+        "fileSha256Hex": "ab1a464b8277040cc27be998a1b6949a2ff7c0a2fa0604e7b60e27a5498a0063",
+        "encoding": "lowercase-hex-no-prefix",
+        "bytecodeByteLength": 4867,
+        "bytecodeSha256Hex": "df66f690c9a473d5344e4dc8c009550c94286e12ea0124595d47eb0904239e9d"
+      },
+      "metadata": {
+        "path": "compiled/ErgoBridge.metadata.json",
+        "fileByteLength": 9916,
+        "fileSha256Hex": "6a3f61aff02e1ecbad06735a42ca9d98f5f4d8fa5fd80f7b9ebe1cd1c1cf1a4c"
+      },
+      "storageLayout": {
+        "path": "compiled/ErgoBridge.storage-layout.json",
+        "fileByteLength": 2474,
+        "fileSha256Hex": "7c9c9f578223e0010b1ceb5249ac0e771c6d5a8a4cdbcf8dab60781d07742dda"
+      }
+    }
+  },
+  "scope": {
+    "proves": "reproducible local source-to-artifact closure",
+    "doesNotProve": [
+      "deployed runtime code or address identity",
+      "bridge-to-token ownership or historical mint state",
+      "sidechain finality or Gate 5 closure",
+      "production readiness"
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "optimizer": {
+    "enabled": true,
+    "runs": 200
+  },
+  "evmVersion": "osaka",
+  "viaIR": false,
+  "metadata": {
+    "bytecodeHash": "ipfs",
+    "appendCBOR": true,
+    "useLiteralContent": false
+  },
+  "libraries": {},
+  "remappings": [],
+  "outputSelection": {
+    "*": {
+      "*": [
+        "abi",
+        "metadata",
+        "storageLayout",
+        "evm.bytecode.object",
+        "evm.deployedBytecode.object"
+      ]
+    }
+  }
+}
