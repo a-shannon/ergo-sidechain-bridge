@@ -62,9 +62,15 @@ function ensureJvmClassesDir(): { classesDir: string; classpath: string } {
     'v1',
     'BridgeJvmTool.class',
   );
+  const hashMarkerFile = path.join(classesDir, '.src-sha256');
+  const precompiledHashMatches =
+    fs.existsSync(classFile) &&
+    fs.existsSync(hashMarkerFile) &&
+    fs.readFileSync(hashMarkerFile, 'utf8').trim() === srcHash;
   const needsCompile =
-    !fs.existsSync(classFile) ||
-    fs.statSync(classFile).mtimeMs < fs.statSync(JVM_SOURCE_PATH).mtimeMs;
+    !precompiledHashMatches &&
+    (!fs.existsSync(classFile) ||
+      fs.statSync(classFile).mtimeMs < fs.statSync(JVM_SOURCE_PATH).mtimeMs);
   if (needsCompile) {
     // Compile into a private staging dir first, then atomically copy to prevent concurrent races
     const stagingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ergo-bridge-v1-javac-'));
@@ -77,6 +83,7 @@ function ensureJvmClassesDir(): { classesDir: string; classpath: string } {
       for (const file of fs.readdirSync(stagedPkgDir)) {
         fs.copyFileSync(path.join(stagedPkgDir, file), path.join(path.dirname(classFile), file));
       }
+      fs.writeFileSync(hashMarkerFile, srcHash, 'utf8');
     } finally {
       fs.rmSync(stagingDir, { recursive: true, force: true });
     }

@@ -4,14 +4,18 @@ on:
   pull_request:
     paths:
       - ".github/workflows/v1-bridge-checks.yml"
+      - ".github/workflows/relayer-checks.yml"
+      - "README.md"
       - "v1/**"
       - "wasm-avl/**"
   push:
     branches:
       - main
-      - "release/bridge-v1"
+      - "release/**"
     paths:
       - ".github/workflows/v1-bridge-checks.yml"
+      - ".github/workflows/relayer-checks.yml"
+      - "README.md"
       - "v1/**"
       - "wasm-avl/**"
 
@@ -113,8 +117,42 @@ jobs:
         working-directory: v1
         run: npm run build
 
-      - name: Run full V1 test suite (SigmaState 6.0.2 JVM matrix, distributed 2-of-3 multisig, codecs & DB)
+      - name: Run full V1 test suite (SigmaState 6.0.2 JVM matrix, multi-host ceremony, Web API, codecs & DB)
         working-directory: v1
         env:
           BRIDGE_SIGMA_JARS_DIR: ${{ github.workspace }}/v1/jvm/target/dependency
         run: npm test
+
+      - name: Build and smoke-test V1 Docker container (precompiled JVM + non-root runtime)
+        run: |
+          docker build -f v1/Dockerfile -t ergo-bridge-v1-ci .
+          docker run --rm ergo-bridge-v1-ci --help | grep -q "signer-node"
+          # Prove precompiled BridgeJvmTool.class + SigmaState 6.0.2 JARs execute cleanly under JRE-only (no javac!)
+          docker run --rm --entrypoint ./node_modules/.bin/tsx ergo-bridge-v1-ci -e "
+            import fs from 'node:fs';
+            import { compileBridgeV1Family } from './src/core/contracts.ts';
+            const f = JSON.parse(fs.readFileSync('./config.testnet.live.json', 'utf8')).family;
+            const fam = compileBridgeV1Family({
+              networkPrefix: f.networkPrefix,
+              sourceNetworkIdHex: f.sourceNetworkIdHex,
+              sidechainIdHex: f.sidechainIdHex,
+              bridgeAddressHex: f.bridgeAddressHex,
+              tokenAddressHex: f.tokenAddressHex,
+              trackerNftIdHex: f.trackerNftIdHex,
+              dupNftIdHex: f.dupNftIdHex,
+              reserveNftIdHex: f.reserveNftIdHex,
+              committeePubKeysHex: f.committeePubKeysHex,
+              committeeThreshold: f.committeeThreshold,
+              committeeEpoch: BigInt(f.committeeEpoch),
+              escapeTimeoutBlocks: f.escapeTimeoutBlocks,
+              minConfirmations: BigInt(f.minConfirmations),
+              upgradeTimelockBlocks: BigInt(f.upgradeTimelockBlocks),
+              maxAdmissionLagBlocks: BigInt(f.maxAdmissionLagBlocks),
+              minDepositNanoErg: f.minDepositNanoErg ? BigInt(f.minDepositNanoErg) : undefined,
+              minRefreshAgeBlocks: f.minRefreshAgeBlocks,
+            });
+            if (fam.familyIdHex !== '8e839ab9614f2c6611d5d430b08f63b522c847ba6ab550e50f6f0bd6675803ca' || fam.reserve.ergoTreeHex.length < 100) {
+              throw new Error('Unexpected family compilation result in JRE container');
+            }
+            console.log('Docker JRE-only SigmaState 6.0.2 compilation verified OK:', fam.familyIdHex);
+          "

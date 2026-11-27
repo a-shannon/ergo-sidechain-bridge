@@ -1,0 +1,124 @@
+# Example multi-host Ergo Sidechain Bridge V1 stack:
+#   - 3 isolated committee signer nodes (each holds ONLY its own single key,
+#     independently verifies Frontier checkpoints, and binds private internal TLS/network)
+#   - 1 coordinator relayer daemon (holds ZERO committee keys, persistent SQLite volume)
+#   - 1 read-only Bridge Web Console on http://127.0.0.1:3000
+#
+# Supply secrets & Frontier RPC URL via an ignored `.env` file before running.
+# For production, mount TLS/mTLS certs (BRIDGE_SIGNER_TLS_KEY/CERT/CA); for
+# private Docker-network local testing only, set BRIDGE_ALLOW_INSECURE_HTTP=true.
+#   docker compose -f v1/docker-compose.yml up --build
+
+services:
+  signer-1:
+    build:
+      context: ..
+      dockerfile: v1/Dockerfile
+    command: ["signer-node", "--config", "config.testnet.live.json", "--host", "0.0.0.0", "--port", "7101"]
+    environment:
+      BRIDGE_SIGNER_SECRET_HEX: ${SIGNER_1_SECRET_HEX:?set SIGNER_1_SECRET_HEX}
+      BRIDGE_SIGNER_AUTH_SECRET: ${SIGNER_1_AUTH_SECRET:?set SIGNER_1_AUTH_SECRET}
+      BRIDGE_EVM_RPC_URL: ${BRIDGE_EVM_RPC_URL:?set reachable Frontier RPC URL}
+      BRIDGE_SIGNER_TLS_KEY: ${SIGNER_1_TLS_KEY:-}
+      BRIDGE_SIGNER_TLS_CERT: ${SIGNER_1_TLS_CERT:-}
+      BRIDGE_SIGNER_TLS_CA: ${SIGNER_1_TLS_CA:-}
+      BRIDGE_ALLOW_INSECURE_HTTP: ${BRIDGE_ALLOW_INSECURE_HTTP:-false}
+    healthcheck:
+      test: ["CMD-SHELL", "if [ -n \"$$BRIDGE_SIGNER_TLS_CERT\" ]; then curl -kfsS https://127.0.0.1:7101/health; else curl -fsS http://127.0.0.1:7101/health; fi"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - bridge-internal
+
+  signer-2:
+    build:
+      context: ..
+      dockerfile: v1/Dockerfile
+    command: ["signer-node", "--config", "config.testnet.live.json", "--host", "0.0.0.0", "--port", "7101"]
+    environment:
+      BRIDGE_SIGNER_SECRET_HEX: ${SIGNER_2_SECRET_HEX:?set SIGNER_2_SECRET_HEX}
+      BRIDGE_SIGNER_AUTH_SECRET: ${SIGNER_2_AUTH_SECRET:?set SIGNER_2_AUTH_SECRET}
+      BRIDGE_EVM_RPC_URL: ${BRIDGE_EVM_RPC_URL:?set reachable Frontier RPC URL}
+      BRIDGE_SIGNER_TLS_KEY: ${SIGNER_2_TLS_KEY:-}
+      BRIDGE_SIGNER_TLS_CERT: ${SIGNER_2_TLS_CERT:-}
+      BRIDGE_SIGNER_TLS_CA: ${SIGNER_2_TLS_CA:-}
+      BRIDGE_ALLOW_INSECURE_HTTP: ${BRIDGE_ALLOW_INSECURE_HTTP:-false}
+    healthcheck:
+      test: ["CMD-SHELL", "if [ -n \"$$BRIDGE_SIGNER_TLS_CERT\" ]; then curl -kfsS https://127.0.0.1:7101/health; else curl -fsS http://127.0.0.1:7101/health; fi"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - bridge-internal
+
+  signer-3:
+    build:
+      context: ..
+      dockerfile: v1/Dockerfile
+    command: ["signer-node", "--config", "config.testnet.live.json", "--host", "0.0.0.0", "--port", "7101"]
+    environment:
+      BRIDGE_SIGNER_SECRET_HEX: ${SIGNER_3_SECRET_HEX:?set SIGNER_3_SECRET_HEX}
+      BRIDGE_SIGNER_AUTH_SECRET: ${SIGNER_3_AUTH_SECRET:?set SIGNER_3_AUTH_SECRET}
+      BRIDGE_EVM_RPC_URL: ${BRIDGE_EVM_RPC_URL:?set reachable Frontier RPC URL}
+      BRIDGE_SIGNER_TLS_KEY: ${SIGNER_3_TLS_KEY:-}
+      BRIDGE_SIGNER_TLS_CERT: ${SIGNER_3_TLS_CERT:-}
+      BRIDGE_SIGNER_TLS_CA: ${SIGNER_3_TLS_CA:-}
+      BRIDGE_ALLOW_INSECURE_HTTP: ${BRIDGE_ALLOW_INSECURE_HTTP:-false}
+    healthcheck:
+      test: ["CMD-SHELL", "if [ -n \"$$BRIDGE_SIGNER_TLS_CERT\" ]; then curl -kfsS https://127.0.0.1:7101/health; else curl -fsS http://127.0.0.1:7101/health; fi"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - bridge-internal
+
+  relayer:
+    build:
+      context: ..
+      dockerfile: v1/Dockerfile
+    depends_on:
+      signer-1:
+        condition: service_healthy
+      signer-2:
+        condition: service_healthy
+      signer-3:
+        condition: service_healthy
+    command: ["daemon", "--config", "config.testnet.live.json"]
+    environment:
+      BRIDGE_FEE_PAYER_SECRET_HEX: ${BRIDGE_FEE_PAYER_SECRET_HEX:?set BRIDGE_FEE_PAYER_SECRET_HEX}
+      BRIDGE_EVM_RELAYER_KEY: ${BRIDGE_EVM_RELAYER_KEY:?set BRIDGE_EVM_RELAYER_KEY}
+      BRIDGE_EVM_RPC_URL: ${BRIDGE_EVM_RPC_URL:?set reachable Frontier RPC URL}
+      BRIDGE_TIMELOCK_ADDRESS: ${BRIDGE_TIMELOCK_ADDRESS:-}
+      BRIDGE_DB_PATH: /app/v1/data/bridge-relayer.db
+      BRIDGE_REMOTE_SIGNERS_JSON: ${BRIDGE_REMOTE_SIGNERS_JSON:?set BRIDGE_REMOTE_SIGNERS_JSON}
+      BRIDGE_BROADCAST_ENABLED: ${BRIDGE_BROADCAST_ENABLED:-false}
+    volumes:
+      - relayer-state:/app/v1/data
+    networks:
+      - bridge-internal
+
+  web-ui:
+    build:
+      context: ..
+      dockerfile: v1/Dockerfile
+    command: ["ui", "--config", "config.testnet.live.json", "--host", "0.0.0.0", "--port", "3000"]
+    environment:
+      BRIDGE_EVM_RPC_URL: ${BRIDGE_EVM_RPC_URL:-}
+      BRIDGE_UI_ALLOWED_HOSTS: ${BRIDGE_UI_ALLOWED_HOSTS:-}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - bridge-internal
+
+volumes:
+  relayer-state:
+
+networks:
+  bridge-internal:
+    driver: bridge

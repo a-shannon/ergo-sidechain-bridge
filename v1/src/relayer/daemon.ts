@@ -28,6 +28,10 @@ import {
   signTransaction,
   signTransactionDistributedCommittee,
 } from '../crypto/signer.js';
+import {
+  RemoteCommitteeSignerEndpoint,
+  executeRemoteCommitteeCeremony,
+} from '../crypto/ceremony-client.js';
 import { ErgoIndexedBox, StockErgoNodeClient } from '../clients/ergo-node.js';
 import { FrontierEvmClient } from '../clients/evm-client.js';
 import {
@@ -41,8 +45,10 @@ export interface ActiveCommitteeEpochConfig {
   threshold: number;
   ergoKeySetDigestHex: string;
   allPubKeysHex: string[];
-  /** Subset of >= threshold committee member secrets (distributed signing, sliced to exact threshold) */
-  signingMemberSecretsHex: string[];
+  /** Single-host mode: >= threshold committee member secrets (sliced to exact threshold) */
+  signingMemberSecretsHex?: string[];
+  /** Production multi-host mode: isolated HTTP/HTTPS signer endpoints (zero committee secrets on coordinator!) */
+  remoteSigners?: RemoteCommitteeSignerEndpoint[];
 }
 
 export interface RelayerDaemonConfig {
@@ -611,15 +617,26 @@ export class BridgeRelayerDaemon {
             changeErgoTreeHex: this.feeKey.p2pkErgoTreeHex,
             creationHeight: ergoHeight,
           });
-          const signed = signTransactionDistributedCommittee({
-            ...built,
-            committeeMemberSecretsHex: committee.signingMemberSecretsHex,
-            allCommitteePubKeysHex: committee.allPubKeysHex,
-            threshold: committee.threshold,
-            feePayerSecretHex: this.cfg.feePayerSecretHex,
-            height: ergoHeight,
-            lastHeaders,
-          });
+          const signed =
+            committee.remoteSigners && committee.remoteSigners.length >= committee.threshold
+              ? await executeRemoteCommitteeCeremony({
+                  ...built,
+                  allCommitteePubKeysHex: committee.allPubKeysHex,
+                  threshold: committee.threshold,
+                  remoteSigners: committee.remoteSigners,
+                  feePayerSecretHex: this.cfg.feePayerSecretHex,
+                  height: ergoHeight,
+                  lastHeaders,
+                })
+              : signTransactionDistributedCommittee({
+                  ...built,
+                  committeeMemberSecretsHex: committee.signingMemberSecretsHex ?? [],
+                  allCommitteePubKeysHex: committee.allPubKeysHex,
+                  threshold: committee.threshold,
+                  feePayerSecretHex: this.cfg.feePayerSecretHex,
+                  height: ergoHeight,
+                  lastHeaders,
+                });
           const txId = await this.checkAndMaybeBroadcast(
             `admitCheckpoint(block=${blockNum}, burns=${leaves.length}, epoch=${gov.epoch})`,
             signed.signedTxJson,

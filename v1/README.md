@@ -6,13 +6,14 @@ Clean, self-contained, stock-Ergo-compatible V1 implementation of the Ergo L1 �
 
 - **Stock Ergo 6.0.3 Compatible**: Zero node patches, zero `0x0401` header extension requirement (`treeVersion = 0`, `scriptVersion = 3`). Works identically on stock devnet, public Ergo Testnet, and Mainnet.
 - **5 Canonical ErgoScript Contracts (`contracts/`)**:
-  - `BridgeDepositLock.es` (1,533 B) — refundable peg-in staging with permissionless timeout escape
-  - `BridgeReserve.es` (2,556 B) — pooled ERG reserve with append-only deposit AVL, liability tracking, and permissionless `rentRefresh` (+ optional ERG top-up)
-  - `BridgeDup.es` (3,719 B) — burn Merkle inclusion, confirmation depth, replay-prevention AVL, and `rentRefresh`; authenticates `BridgeTracker` via singleton `trackerNftId` + unified 370-byte AVL schema
-  - `BridgeTracker.es` (2,505 B) — distributed `atLeast(t, n)` checkpoint admission, permissionless `rentRefresh`, timelocked committee rotation (`mode=1`), and timelocked irreversible EIP-0045 graduation (`mode=2`)
+  - `BridgeDepositLock.es` (1,506 B) — refundable peg-in staging with permissionless timeout escape
+  - `BridgeReserve.es` (2,587 B) — pooled ERG reserve with append-only deposit AVL, liability tracking, and permissionless `rentRefresh` (+ optional ERG top-up)
+  - `BridgeDup.es` (3,770 B) — burn Merkle inclusion, confirmation depth, replay-prevention AVL, and `rentRefresh`; authenticates `BridgeTracker` via singleton `trackerNftId` + unified 370-byte AVL schema
+  - `BridgeTracker.es` (2,526 B) — distributed `atLeast(t, n)` checkpoint admission, permissionless `rentRefresh`, timelocked committee rotation (`mode=1`), and timelocked irreversible EIP-0045 graduation (`mode=2`)
   - `BridgeTrackerStark.es` (1,668 B) — preactivation EIP-0045 (`verifyStark`, RISC Zero 3.1.0+) graduation target sharing the exact 370-byte tracker AVL schema (zero migration on `BridgeReserve` / `BridgeDup`)
-- **Hardened V1 Solidity (`solidity/`)**: On-curve `secp256k1` validation in `ErgoBridge.pegOut()` via EVM precompile `0x05`, `renounceOwnership()` disabled on both `ErgoBridge` and `SERG`, reproducible `solc 0.8.35` build closure.
-- **True Distributed Signing**: Uses `ergo-lib-wasm-nodejs` (sigma-rust) `TransactionHintsBag` multi-party signing (`signTransactionDistributedCommittee`) — no single wallet holds `> 1` committee secret, never uses Fleet Prover or Ergo node wallet signing.
+- **Hardened V1 Solidity (`solidity/`)**: `SERG.sol`, `ErgoBridge.sol` (on-curve `secp256k1` validation via EIP-198 `0x05`, `MAX_PEGOUTS_PER_BLOCK = 256`, `renounceOwnership()` disabled, no public `burn()`), and `BridgeCommitteeTimelock.sol` (`t`-of-`n` multisig + timelocked admin + 7-day grace period + delegated `mintOperator` + zero-delay `emergencyPause`), reproducible `solc 0.8.35` build closure.
+- **True Multi-Host Distributed Signing**: `src/crypto/ceremony-server.ts` + `src/crypto/ceremony-client.ts` (`cli.ts signer-node` + `BRIDGE_REMOTE_SIGNERS_JSON`) run isolated single-key committee hosts with HMAC-SHA256 + optional mTLS, independent Frontier RPC burn-root verification, cryptographic AVL insert verification, governance opt-in lockouts, and single-use Schnorr nonces.
+- **Operator CLI & Web Console**: `status`, `reconstruct`, `ui`, `signer-node`, `deposit`, `refund`, `pegout`, `daemon`, `rent-refresh`, `propose-rotate`, `propose-graduate-stark`, `cancel-upgrade`, `execute-upgrade`.
 - **100% Stateless Chain Reconstruction**: SQLite (`src/state/db.ts`) is purely a cache. After a crash or full DB deletion, `reconstructFromErgoNode()` replays all three singleton NFT chains directly from a stock Ergo node (`extraIndex = true`) and verifies exact 33-byte AVL digest equality against live on-chain `R5` registers.
 
 ## Layout

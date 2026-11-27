@@ -1,7 +1,7 @@
 {
   "storage": [
     {
-      "astId": 847,
+      "astId": 2052,
       "contract": "SERG.sol:SERG",
       "label": "_balances",
       "offset": 0,
@@ -9,7 +9,7 @@
       "type": "t_mapping(t_address,t_uint256)"
     },
     {
-      "astId": 853,
+      "astId": 2058,
       "contract": "SERG.sol:SERG",
       "label": "_allowances",
       "offset": 0,
@@ -17,7 +17,7 @@
       "type": "t_mapping(t_address,t_mapping(t_address,t_uint256))"
     },
     {
-      "astId": 855,
+      "astId": 2060,
       "contract": "SERG.sol:SERG",
       "label": "_totalSupply",
       "offset": 0,
@@ -25,7 +25,7 @@
       "type": "t_uint256"
     },
     {
-      "astId": 857,
+      "astId": 2062,
       "contract": "SERG.sol:SERG",
       "label": "_name",
       "offset": 0,
@@ -33,7 +33,7 @@
       "type": "t_string_storage"
     },
     {
-      "astId": 859,
+      "astId": 2064,
       "contract": "SERG.sol:SERG",
       "label": "_symbol",
       "offset": 0,
@@ -41,7 +41,7 @@
       "type": "t_string_storage"
     },
     {
-      "astId": 685,
+      "astId": 1890,
       "contract": "SERG.sol:SERG",
       "label": "_owner",
       "offset": 0,
