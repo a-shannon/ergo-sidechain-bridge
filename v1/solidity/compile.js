@@ -12,6 +12,7 @@ const EXPECTED_OPENZEPPELIN_VERSION = '5.6.1';
 const CONTRACTS = Object.freeze([
   Object.freeze({ source: 'SERG.sol', name: 'SERG' }),
   Object.freeze({ source: 'ErgoBridge.sol', name: 'ErgoBridge' }),
+  Object.freeze({ source: 'BridgeCommitteeTimelock.sol', name: 'BridgeCommitteeTimelock' }),
 ]);
 const EXPECTED_SETTINGS = Object.freeze({
   optimizer: Object.freeze({ enabled: true, runs: 200 }),

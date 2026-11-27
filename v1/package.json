@@ -13,7 +13,12 @@
     "test": "vitest run",
     "test:contracts": "vitest run tests/contracts.test.ts",
     "test:e2e": "tsx scripts/e2e-live.ts",
-    "cli": "tsx src/cli.ts"
+    "test:timelock-frontier": "tsx scripts/test-timelock-frontier.ts",
+    "cli": "tsx src/cli.ts",
+    "status:testnet": "tsx src/cli.ts status --config config.testnet.live.json",
+    "reconstruct:testnet": "tsx src/cli.ts reconstruct --config config.testnet.live.json",
+    "ui:testnet": "tsx src/cli.ts ui --config config.testnet.live.json",
+    "signer-node": "tsx src/cli.ts signer-node"
   },
   "dependencies": {
     "better-sqlite3": "^12.0.0",

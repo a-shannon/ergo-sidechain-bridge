@@ -1,44 +1,9 @@
-name: Bridge public-audit candidate checks
+name: Legacy research candidate checks (manual archive)
 
+# Archived legacy Windows workflow for the historical pre-V1 research tree.
+# Active Bridge V1 CI runs via `.github/workflows/v1-bridge-checks.yml`.
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/relayer-checks.yml"
-      - ".gitattributes"
-      - ".gitignore"
-      - ".gitmodules"
-      - "README.md"
-      - "docs/**"
-      - "phases/**"
-      - "contracts/**"
-      - "relayer/**"
-      - "scripts/**"
-      - "solidity/**"
-      - "sources/**"
-      - "validity-proof/**"
-      - "wasm-avl/**"
-      - "substrate-node"
-  push:
-    branches:
-      - main
-      - master
-      - "fix/**"
-    paths:
-      - ".github/workflows/relayer-checks.yml"
-      - ".gitattributes"
-      - ".gitignore"
-      - ".gitmodules"
-      - "README.md"
-      - "docs/**"
-      - "phases/**"
-      - "contracts/**"
-      - "relayer/**"
-      - "scripts/**"
-      - "solidity/**"
-      - "sources/**"
-      - "validity-proof/**"
-      - "wasm-avl/**"
-      - "substrate-node"
+  workflow_dispatch:
 
 permissions:
   contents: read

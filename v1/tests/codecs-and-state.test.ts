@@ -186,13 +186,16 @@ describe('Bridge V1 Codecs, Odd-Width Merkle, Sigma Serialization, Solidity Clos
     expect(Array.from(stmt.slice(155, 159))).toEqual([0x2c, 0x01, 0x00, 0x00]);
   });
 
-  it('loads hardened V1 Solidity artifacts and initializes SQLite WAL store cleanly', () => {
+  it('loads hardened V1 Solidity artifacts (SERG, ErgoBridge, BridgeCommitteeTimelock) and initializes SQLite WAL store cleanly', () => {
     const serg = loadSolidityArtifact('SERG');
     const bridge = loadSolidityArtifact('ErgoBridge');
+    const timelock = loadSolidityArtifact('BridgeCommitteeTimelock');
     expect(serg.bytecode.startsWith('0x')).toBe(true);
     expect(bridge.bytecode.startsWith('0x')).toBe(true);
+    expect(timelock.bytecode.startsWith('0x')).toBe(true);
     expect(serg.bytecode.length).toBeGreaterThan(200);
     expect(bridge.bytecode.length).toBeGreaterThan(200);
+    expect(timelock.bytecode.length).toBeGreaterThan(200);
 
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-v1-db-test-'));
     try {

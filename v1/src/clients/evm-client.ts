@@ -12,7 +12,9 @@ export interface CompiledSolidityArtifact {
   bytecode: string;
 }
 
-export function loadSolidityArtifact(name: 'SERG' | 'ErgoBridge'): CompiledSolidityArtifact {
+export function loadSolidityArtifact(
+  name: 'SERG' | 'ErgoBridge' | 'BridgeCommitteeTimelock',
+): CompiledSolidityArtifact {
   const abi = JSON.parse(
     fs.readFileSync(path.join(SOLIDITY_COMPILED_DIR, `${name}.abi`), 'utf8'),
   ) as ethers.InterfaceAbi;
@@ -61,14 +63,17 @@ export class FrontierEvmClient {
   public readonly relayerWallet: ethers.Wallet;
   public readonly bridgeContract: ethers.Contract;
   public readonly sergContract: ethers.Contract;
+  public readonly timelockContract?: ethers.Contract;
   public readonly bridgeAddress: string;
   public readonly sergAddress: string;
+  public readonly timelockAddress?: string;
 
   constructor(opts: {
     rpcUrl: string;
     relayerPrivateKey: string;
     bridgeAddress: string;
     sergAddress: string;
+    timelockAddress?: string;
   }) {
     this.provider = new ethers.JsonRpcProvider(opts.rpcUrl);
     this.relayerWallet = new ethers.Wallet(opts.relayerPrivateKey, this.provider);
@@ -78,6 +83,14 @@ export class FrontierEvmClient {
     this.sergAddress = ethers.getAddress(opts.sergAddress);
     this.bridgeContract = new ethers.Contract(this.bridgeAddress, bridgeArt.abi, this.relayerWallet);
     this.sergContract = new ethers.Contract(this.sergAddress, sergArt.abi, this.relayerWallet);
+    if (opts.timelockAddress) {
+      this.timelockAddress = ethers.getAddress(opts.timelockAddress);
+      this.timelockContract = new ethers.Contract(
+        this.timelockAddress,
+        loadSolidityArtifact('BridgeCommitteeTimelock').abi,
+        this.relayerWallet,
+      );
+    }
   }
 
   static async deployFresh(opts: {
@@ -166,7 +179,10 @@ export class FrontierEvmClient {
   ): Promise<ethers.TransactionReceipt> {
     const key = ergoBoxIdHex.startsWith('0x') ? ergoBoxIdHex : `0x${ergoBoxIdHex}`;
     const nonce = await this.provider.getTransactionCount(this.relayerWallet.address, 'pending');
-    const tx = await this.bridgeContract.mintSERG(toAddress, amountNanoErg, key, { nonce });
+    // Route through BridgeCommitteeTimelock when configured ([H-5])
+    const tx = this.timelockContract
+      ? await this.timelockContract.relayMintSERG(toAddress, amountNanoErg, key, { nonce })
+      : await this.bridgeContract.mintSERG(toAddress, amountNanoErg, key, { nonce });
     const receipt = await waitReceipt(this.provider, tx.hash);
     if (receipt.status !== 1) {
       throw new Error(`mintSERG tx failed for box ${ergoBoxIdHex}`);
@@ -176,8 +192,14 @@ export class FrontierEvmClient {
 
   async emergencyPause(reason: string): Promise<void> {
     const nonce = await this.provider.getTransactionCount(this.relayerWallet.address, 'pending');
-    const tx = await this.bridgeContract.emergencyPause(reason, { nonce });
-    await waitReceipt(this.provider, tx.hash);
+    // Route through BridgeCommitteeTimelock when configured ([H-5])
+    const tx = this.timelockContract
+      ? await this.timelockContract.emergencyPause(reason, { nonce })
+      : await this.bridgeContract.emergencyPause(reason, { nonce });
+    const receipt = await waitReceipt(this.provider, tx.hash);
+    if (receipt.status !== 1) {
+      throw new Error(`emergencyPause tx failed (${tx.hash})`);
+    }
   }
 
   /**

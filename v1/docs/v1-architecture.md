@@ -46,13 +46,13 @@ flowchart LR
   Dup -->|"7. Atomic Reserve + DUP Payout"| UserErgo
 ```
 
-### 3.1 `BridgeDepositLock.es` (1,533 B)
+### 3.1 `BridgeDepositLock.es` (1,506 B)
 - **Registers**: `R4: Coll[Byte]` (229-byte `PegInIntentV2`), `R5: Coll[Byte]` (depositor ErgoTree for refund).
 - **Branches**:
   1. `commitToReserve` (permissionless while `HEIGHT < creationHeight + escapeTimeout`): atomically merges `SELF.value` into `BridgeReserve` (`OUTPUTS(0)`), checking `reserveNftId`, `familyId`, exact `+amount` value & liability preservation, and isolated fee + optional pure-ERG change (change script cannot match `BridgeDepositLock` or `BridgeReserve`).
   2. `refund` (permissionless once `HEIGHT >= creationHeight + escapeTimeout`): returns exact `SELF.value` to `SELF.R5` with `R4 == SELF.id` (even if `R4` intent bytes were malformed, preventing permanent user fund lock!).
 
-### 3.2 `BridgeReserve.es` (2,556 B)
+### 3.2 `BridgeReserve.es` (2,587 B)
 - **Singleton NFT**: `reserveNftId` (amount = 1).
 - **Registers**: `R4: Coll[Byte]` (`familyId`), `R5: AvlTree` (32B `sourceBoxId` → 32B deposit commitment, insert-only), `R6: Long` (outstanding nanoERG liability, `0 <= R6 <= SELF.value`).
 - **Branches** (mutually exclusive on `(dataInputs.size, INPUTS.size)`):
@@ -60,7 +60,7 @@ flowchart LR
   2. `payout` (`data=1, in=3`, 0 vars on Reserve): requires `INPUTS(1)` = exact `dupContractId` carrying `dupNftId`; decrements `value` and `R6` by `OUTPUTS(2).value`, preserves `R5` and reserve buffer `value - R6`.
   3. `rentRefresh` (`data=0, in=2`, permissionless): preserves script, NFT, `R4..R6`, allows ERG buffer top-up (`successor.value >= SELF.value`), refreshes `creationInfo._1`.
 
-### 3.3 `BridgeDup.es` (3,719 B) — Agnostic to Federated vs EIP-0045 Tracker
+### 3.3 `BridgeDup.es` (3,770 B) — Agnostic to Federated vs EIP-0045 Tracker
 - **Singleton NFT**: `dupNftId` (amount = 1).
 - **Registers**: `R4: Coll[Byte]` (`familyId`), `R5: AvlTree` (32B `burnId` → 1B `0x01`, insert-only).
 - **Critical EIP-0045 Seam**: Authenticates `DATA_INPUTS(0)` (`tracker`) by **`trackerNftId` + `R4 == familyId` + `R6 == sidechainId` + unified 370-byte AVL value (`authMode ∈ {1, 2}`)** — never hardcoding a single frozen tracker script hash.
@@ -68,7 +68,7 @@ flowchart LR
   1. `payout` (`data=1, in=3`, `Vars 0..3` = `trackerKey`, `trackerGetProof`, `205B encodedLeaf`, `proofBundle`): verifies tracker membership, `HEIGHT - admissionHeight >= minConfirmations`, odd-width Blake2b Merkle inclusion (`1..=256` leaves), exact recipient hash & payout amount, reserve conservation, burn non-membership, and atomic DUP AVL insert.
   2. `rentRefresh` (`data=0, in=2`, 0 vars, permissionless): preserves script, NFT, `R4..R5`, allows ERG top-up, refreshes `creationInfo._1`.
 
-### 3.4 `BridgeTracker.es` (2,505 B)
+### 3.4 `BridgeTracker.es` (2,526 B)
 - **Singleton NFT**: `trackerNftId` (amount = 1).
 - **Registers**: `R4` (`familyId`), `R5` (`AvlTree` 32B → 370B, insert-only), `R6` (`sidechainId`), `R7: Long` (`latestSourceHeight`), `R8: Int` (`lastAdmissionErgoHeight`), `R9: Coll[Byte]` (81-byte governance register: `epoch(8BE) || pendingMode(1B) || pendingTargetScriptHash(32B) || pendingActivatesAtHeight(8BE) || pendingTrustAnchorDigest(32B)`).
 - **Branches** (mutually exclusive on `Var(0)` action bytes):

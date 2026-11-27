@@ -1,0 +1,35 @@
+{
+  "ergoNodeUrl": "http://176.9.15.237:9052",
+  "evmRpcUrl": "http://127.0.0.1:19955",
+  "dbPath": "./bridge-testnet-verify.db",
+  "broadcastEnabled": false,
+  "ergoDepositConfirmations": 1,
+  "ergoReserveConfirmations": 1,
+  "evmBurnConfirmations": 0,
+  "evmStartBlock": 0,
+  "rentRefreshAgeBlocks": 10000,
+  "pollIntervalMs": 5000,
+  "family": {
+    "networkPrefix": 16,
+    "sourceNetworkIdHex": "88036d1aca6164ddf6e675d1f29ce755e1815ba0582a5035bfc8d66985eab9f8",
+    "sidechainIdHex": "3c5a1779511caccadad7c13283939cc10bb652cb738513614444a04388b37d5c",
+    "bridgeAddressHex": "970951a12f975e6762482aca81e57d5a2a4e73f4",
+    "tokenAddressHex": "c01ee7f10ea4af4673cfff62710e1d7792aba8f3",
+    "trackerNftIdHex": "bb18ce9facaea02c54639458cac6978a829bd585c8bd4fe357dbed09d94cc029",
+    "dupNftIdHex": "81db0a5a38849034bfb9e67db5e8590ecffedc0ecc3bf3129859d954e0439196",
+    "reserveNftIdHex": "527229f2a82a4fe0b3c72d693290a86140b2b0ac660fed4e3272d4881aff35a1",
+    "committeePubKeysHex": [
+      "0264e18fc4aa212cc7cf8f40f7a67da414ccccb1db6443867cc791370ad8ec0653",
+      "03f872b41094fae01be46d04a16f3e245483f49e3775e7bb09e8b91bd618429bb1",
+      "03288792e309b85199a384ea1510d96363717e2ea9e5fd68f7ce91b7045373d14c"
+    ],
+    "committeeThreshold": 2,
+    "committeeEpoch": 1,
+    "escapeTimeoutBlocks": 500,
+    "minConfirmations": 6,
+    "upgradeTimelockBlocks": 10,
+    "maxAdmissionLagBlocks": 5,
+    "minDepositNanoErg": "10000000",
+    "minRefreshAgeBlocks": 1
+  }
+}

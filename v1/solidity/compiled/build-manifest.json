@@ -25,11 +25,11 @@
   },
   "compilerInput": {
     "buildDriverPath": "compile.js",
-    "buildDriverSha256Hex": "55435593310e2982007513a7ccbddc5a24543190031dd1355944d67d84a69016",
+    "buildDriverSha256Hex": "4ebf4b4e87d59b25b99ecaef7ad632358b1093a6877ec6118351cfc829470a57",
     "lineEndings": "lf",
     "settingsPath": "solc-settings.json",
     "settingsSha256Hex": "97adbcf796a61e85c7d5d49faa894dbda8bf6812599dd24be8bfb259ea310541",
-    "inputClosureSha256Hex": "883c6747bd2ddb7ffc148c4492cff75725f8c6d14c0672128fb3a00934a9bd7f",
+    "inputClosureSha256Hex": "0dbd702ec0d164f21130b695d3ec8b9d753106325b219e8ba1ff78e2583abf07",
     "sources": [
       {
         "path": "@openzeppelin/contracts/access/Ownable.sol",
@@ -54,6 +54,18 @@
       {
         "path": "@openzeppelin/contracts/utils/Context.sol",
         "compilerInputSha256Hex": "847fda5460fee70f56f4200f59b82ae622bb03c79c77e67af010e31b7e2cc5b6"
+      },
+      {
+        "path": "@openzeppelin/contracts/utils/ReentrancyGuard.sol",
+        "compilerInputSha256Hex": "94e409e8f6e3184236651a6cc2b1a6a3ea0f0a25eb85b71e524ad5791bb2fbc8"
+      },
+      {
+        "path": "@openzeppelin/contracts/utils/StorageSlot.sol",
+        "compilerInputSha256Hex": "75704538dcb223239280c6726d9a31cf769a7816718517c997fc7d63bdb70778"
+      },
+      {
+        "path": "BridgeCommitteeTimelock.sol",
+        "compilerInputSha256Hex": "e170baf0a47c04121b56c130b77b292f225922c602f7df0e9455507ff16d48a6"
       },
       {
         "path": "ErgoBridge.sol",
@@ -96,8 +108,8 @@
       },
       "storageLayout": {
         "path": "compiled/SERG.storage-layout.json",
-        "fileByteLength": 1872,
-        "fileSha256Hex": "b44ee384f828fc2d34f3d0d1df03318b2d48d27f421ec85443e2b26334a30ee7"
+        "fileByteLength": 1878,
+        "fileSha256Hex": "ccf66393a6dc6468fdff5916a13700d59f21ef70dcc65ebf758a34b531dea720"
       }
     },
     "ErgoBridge": {
@@ -130,8 +142,42 @@
       },
       "storageLayout": {
         "path": "compiled/ErgoBridge.storage-layout.json",
-        "fileByteLength": 2474,
-        "fileSha256Hex": "7c9c9f578223e0010b1ceb5249ac0e771c6d5a8a4cdbcf8dab60781d07742dda"
+        "fileByteLength": 2491,
+        "fileSha256Hex": "68497ecd8d1999dacf4b0255f2a9cd57f16c638bec315783e2ddf7570cad1ab7"
+      }
+    },
+    "BridgeCommitteeTimelock": {
+      "source": "BridgeCommitteeTimelock.sol",
+      "abi": {
+        "path": "compiled/BridgeCommitteeTimelock.abi",
+        "fileByteLength": 12292,
+        "fileSha256Hex": "8fcdd061737eee9a5eb0487660f3ebcc2b0f99e3b127e5cc6c82f006e34353b7"
+      },
+      "creationBytecode": {
+        "path": "compiled/BridgeCommitteeTimelock.bin",
+        "fileByteLength": 18150,
+        "fileSha256Hex": "586ea1f702c5b65e5ab96eb2b5dfa6ffb6efb4a6d24eab790b8a12468d0c7ec3",
+        "encoding": "lowercase-hex-no-prefix",
+        "bytecodeByteLength": 9075,
+        "bytecodeSha256Hex": "13056d02af52f946fcdc127a98e7e9e5ff03b44d9cfc5af80991fb717645a9f9"
+      },
+      "runtimeBytecode": {
+        "path": "compiled/BridgeCommitteeTimelock.runtime.bin",
+        "fileByteLength": 15298,
+        "fileSha256Hex": "e23977c5e832f4a1b2e19677db5be4e05e8c5f1c9a51fbf66698c240a78989fc",
+        "encoding": "lowercase-hex-no-prefix",
+        "bytecodeByteLength": 7649,
+        "bytecodeSha256Hex": "2b7b153444040dd766a938cb89629f189cbed2a5873cbe76ea8d5ed9cabd335c"
+      },
+      "metadata": {
+        "path": "compiled/BridgeCommitteeTimelock.metadata.json",
+        "fileByteLength": 10947,
+        "fileSha256Hex": "9a1af3826a948a584eea05551e39744e4e45af6eec2c9167a7f7e4662e9a84fa"
+      },
+      "storageLayout": {
+        "path": "compiled/BridgeCommitteeTimelock.storage-layout.json",
+        "fileByteLength": 5515,
+        "fileSha256Hex": "0ecb711becd849ce56b8d794896264b80acdf3b49bbe1ce1b2588e31e49809c4"
       }
     }
   },
