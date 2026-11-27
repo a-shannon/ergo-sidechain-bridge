@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import https from 'node:https';
 import { describe, expect, it } from 'vitest';
 import {
   sigmaAvlTreeHex,
@@ -25,6 +26,7 @@ import {
   executeRemoteCommitteeCeremony,
 } from '../src/crypto/ceremony-client.js';
 import { deriveKeyPairFromSecretHex, makeSyntheticErgoBox } from '../src/crypto/signer.js';
+import { generateCommitteeMtlsPki, generatePrivateCa, issueSignedLeafCert } from '../src/crypto/x509.js';
 
 const SEC_C1 = '11'.repeat(32);
 const SEC_C2 = '22'.repeat(32);
@@ -311,6 +313,266 @@ describe('Multi-Host Distributed 2-of-3 Committee Ceremony Server & Client', () 
         // 8. [M-1] Consumed sessions do NOT occupy activeSessions quota!
         const healthAfter = (await (await fetch(`${url1}/health`)).json()) as { activeSessions: number };
         expect(healthAfter.activeSessions).toBe(0);
+      } finally {
+        await Promise.all([server1.stop(), server2.stop()]);
+      }
+    },
+    30_000,
+  );
+
+  it(
+    'executes full 2-of-3 mutual-TLS (mTLS) ceremony with dedicated loopback health/metrics probe port and rejects missing or rogue-CA client certificates',
+    async () => {
+      const pki = generateCommitteeMtlsPki({
+        signerNames: ['signer-1', 'signer-2'],
+        extraIps: ['127.0.0.1'],
+      });
+      const rogueCa = generatePrivateCa('Rogue Attacker CA', 365);
+      const rogueClient = issueSignedLeafCert({
+        ca: rogueCa,
+        commonName: 'rogue-coordinator',
+        role: 'client',
+        dnsNames: ['localhost'],
+        ipAddresses: ['127.0.0.1'],
+      });
+
+      const sourceNetworkIdHex = 'a1'.repeat(32);
+      const sidechainIdHex = 'b2'.repeat(32);
+      const trackerNftIdHex = 'e1'.repeat(32);
+      const dupNftIdHex = 'e2'.repeat(32);
+      const reserveNftIdHex = 'e3'.repeat(32);
+
+      const family = compileBridgeV1Family({
+        networkPrefix: 16,
+        sourceNetworkIdHex,
+        sidechainIdHex,
+        bridgeAddressHex: 'c3'.repeat(20),
+        tokenAddressHex: 'd4'.repeat(20),
+        trackerNftIdHex,
+        dupNftIdHex,
+        reserveNftIdHex,
+        committeePubKeysHex: [K_C1.pubKeyHex, K_C2.pubKeyHex, K_C3.pubKeyHex],
+        committeeThreshold: 2,
+        committeeEpoch: 1n,
+        escapeTimeoutBlocks: 50,
+        minConfirmations: 10n,
+        upgradeTimelockBlocks: 20n,
+        maxAdmissionLagBlocks: 5n,
+        minDepositNanoErg: 10_000_000n,
+        minRefreshAgeBlocks: 15,
+      });
+
+      const policy: CommitteePolicyConfig = {
+        trackerNftIdHex,
+        familyIdHex: family.familyIdHex,
+        sourceNetworkIdHex,
+        sidechainIdHex,
+        ergoKeySetDigestHex: family.ergoKeySetDigestHex,
+        expectedTrackerErgoTreeHex: family.tracker.ergoTreeHex,
+        minUpgradeTimelockBlocks: 20n,
+        maxAdmissionLagBlocks: 5n,
+        forbiddenExtraNftIdsHex: [dupNftIdHex, reserveNftIdHex],
+        checkpointVerifier: () => {},
+      };
+
+      const server1 = new CommitteeSignerServer({
+        memberSecretHex: SEC_C1,
+        authSecret: AUTH_C1,
+        policy,
+        host: '127.0.0.1',
+        port: 0,
+        healthPort: 0,
+        tls: {
+          keyPem: pki.servers['signer-1'].keyPem,
+          certPem: pki.servers['signer-1'].certPem,
+          caPem: pki.ca.certPem,
+          requireClientCert: true,
+        },
+      });
+      const server2 = new CommitteeSignerServer({
+        memberSecretHex: SEC_C2,
+        authSecret: AUTH_C2,
+        policy,
+        host: '127.0.0.1',
+        port: 0,
+        healthPort: 0,
+        tls: {
+          keyPem: pki.servers['signer-2'].keyPem,
+          certPem: pki.servers['signer-2'].certPem,
+          caPem: pki.ca.certPem,
+          requireClientCert: true,
+        },
+      });
+
+      const [url1, url2] = await Promise.all([server1.start(), server2.start()]);
+      try {
+        expect(url1.startsWith('https://127.0.0.1:')).toBe(true);
+        expect(server1.healthUrl?.startsWith('http://127.0.0.1:')).toBe(true);
+
+        const trackerBox = makeSyntheticErgoBox({
+          txIdHex: '03'.repeat(32),
+          index: 0,
+          value: 10_000_000n,
+          ergoTreeHex: family.tracker.ergoTreeHex,
+          assets: [{ tokenId: trackerNftIdHex, amount: 1n }],
+          additionalRegisters: {
+            R4: sigmaCollByteHex(hexToBytes(family.familyIdHex, 32)),
+            R5: sigmaAvlTreeHex(trackerEmptyDigestHex(), 370),
+            R6: sigmaCollByteHex(hexToBytes(sidechainIdHex, 32)),
+            R7: sigmaLongHex(0n),
+            R8: sigmaIntHex(100),
+            R9: sigmaCollByteHex(initialTrackerGovernanceR9(1n)),
+          },
+          creationHeight: 100,
+        });
+        const feeBox = makeSyntheticErgoBox({
+          txIdHex: 'f0'.repeat(32),
+          index: 0,
+          value: 50_000_000n,
+          ergoTreeHex: K_FEE.p2pkErgoTreeHex,
+          creationHeight: 100,
+        });
+        const admit = buildTrackerAdmitTx({
+          family,
+          trackerBox,
+          trackerHistory: [],
+          checkpoint: {
+            sourceNetworkIdHex,
+            sidechainIdHex,
+            sourceHeight: 77n,
+            sourceBlockHashHex: '50'.repeat(32),
+            executionBlockHashHex: '51'.repeat(32),
+            bridgeEventRootHex: '52'.repeat(32),
+            burnCount: 1,
+          },
+          currentR9Bytes: initialTrackerGovernanceR9(1n),
+          feeInBox: feeBox,
+          changeErgoTreeHex: K_FEE.p2pkErgoTreeHex,
+          creationHeight: 125,
+        });
+
+        // 1. Valid mTLS ceremony succeeds and verifies in SigmaState 6.0.2 JVM!
+        const signed = await executeRemoteCommitteeCeremony({
+          ...admit,
+          allCommitteePubKeysHex: [K_C1.pubKeyHex, K_C2.pubKeyHex, K_C3.pubKeyHex],
+          threshold: 2,
+          remoteSigners: [
+            {
+              id: 'signer-1-mtls',
+              url: url1,
+              pubKeyHex: K_C1.pubKeyHex,
+              authSecret: AUTH_C1,
+              tls: {
+                caPem: pki.ca.certPem,
+                certPem: pki.client.certPem,
+                keyPem: pki.client.keyPem,
+                rejectUnauthorized: true,
+              },
+            },
+            {
+              id: 'signer-2-mtls',
+              url: url2,
+              pubKeyHex: K_C2.pubKeyHex,
+              authSecret: AUTH_C2,
+              tls: {
+                caPem: pki.ca.certPem,
+                certPem: pki.client.certPem,
+                keyPem: pki.client.keyPem,
+                rejectUnauthorized: true,
+              },
+            },
+          ],
+          feePayerSecretHex: SEC_FEE,
+          height: 125,
+          timeoutMs: 5_000,
+        });
+        const [jvmRes] = verifyTransactionsJvm([
+          {
+            id: 'multihost_mtls_2of3_admit',
+            height: 125,
+            txBytesHex: signed.txBytesHex,
+            inputBoxesBytesHex: signed.inputBoxesBytesHex,
+            dataBoxesBytesHex: signed.dataBoxesBytesHex,
+          },
+        ]);
+        expect(jvmRes.ok).toBe(true);
+        expect(jvmRes.allPassed).toBe(true);
+
+        // 2. Missing client cert MUST fail TLS handshake against mTLS ceremony port!
+        const httpsProbe = (opts: https.RequestOptions) =>
+          new Promise<number>((resolve, reject) => {
+            const req = https.request(`${url1}/health`, { method: 'GET', ...opts }, (res) => {
+              res.resume();
+              resolve(res.statusCode ?? 0);
+            });
+            req.on('error', reject);
+            req.end();
+          });
+        await expect(httpsProbe({ ca: pki.ca.certPem, rejectUnauthorized: true })).rejects.toThrow();
+
+        // 3. Client cert signed by untrusted rogue CA MUST fail TLS handshake!
+        await expect(
+          httpsProbe({
+            ca: pki.ca.certPem,
+            cert: rogueClient.certPem,
+            key: rogueClient.keyPem,
+            rejectUnauthorized: true,
+          }),
+        ).rejects.toThrow();
+
+        // 4. Dedicated loopback health probe port serves /health & /metrics without breaking mTLS,
+        //    and NEVER exposes /v1/ceremony/* signing endpoints!
+        const healthRes = await fetch(`${server1.healthUrl}/health`);
+        expect(healthRes.status).toBe(200);
+        const healthJson = (await healthRes.json()) as { ok: boolean; tlsEnabled: boolean; mtlsRequired: boolean };
+        expect(healthJson.ok).toBe(true);
+        expect(healthJson.tlsEnabled).toBe(true);
+        expect(healthJson.mtlsRequired).toBe(true);
+
+        const metricsRes = await fetch(`${server1.healthUrl}/metrics`);
+        expect(metricsRes.status).toBe(200);
+        expect(metricsRes.headers.get('content-type')).toContain('text/plain');
+        const metricsText = await metricsRes.text();
+        expect(metricsText).toContain('bridge_signer_mtls_required');
+        expect(metricsText).toMatch(/endpoint="commit",result="ok"\} 1\b/);
+        expect(metricsText).toMatch(/endpoint="sign",result="ok"\} 1\b/);
+
+        const noSignOnHealth = await fetch(`${server1.healthUrl}/v1/ceremony/commit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        expect(noSignOnHealth.status).toBe(404);
+
+        // 5. [LOW-2] Non-loopback healthHost MUST be rejected fail-closed!
+        expect(
+          () =>
+            new CommitteeSignerServer({
+              memberSecretHex: SEC_C1,
+              authSecret: AUTH_C1,
+              policy,
+              host: '127.0.0.1',
+              port: 0,
+              healthPort: 0,
+              healthHost: '0.0.0.0',
+            }),
+        ).toThrow(/non-loopback/i);
+
+        // 6. [HIGH-2] X.509 GeneralizedTime >= 2050 & IPv4-mapped IPv6 SAN regression check
+        const futureCa = generatePrivateCa('Future CA 2055', 10_000);
+        const parsedFutureCa = new crypto.X509Certificate(futureCa.certPem);
+        expect(new Date(parsedFutureCa.validTo).getUTCFullYear()).toBeGreaterThanOrEqual(2050);
+
+        const mappedLeaf = issueSignedLeafCert({
+          ca: futureCa,
+          commonName: 'mapped-ip-signer',
+          role: 'server',
+          dnsNames: ['signer-1'],
+          ipAddresses: ['::ffff:127.0.0.1'],
+          validDays: 365,
+        });
+        const parsedMapped = new crypto.X509Certificate(mappedLeaf.certPem);
+        expect(parsedMapped.checkIP('::ffff:127.0.0.1')).toBe('::ffff:127.0.0.1');
       } finally {
         await Promise.all([server1.stop(), server2.stop()]);
       }

@@ -21,8 +21,12 @@ Clean, self-contained, stock-Ergo-compatible V1 implementation of the Ergo L1 â†
 ```text
 v1/
   contracts/                   5 canonical ErgoScript V1 contracts
-  solidity/                    Hardened SERG.sol + ErgoBridge.sol (solc 0.8.35 closure)
+  solidity/                    Hardened SERG.sol, ErgoBridge.sol, BridgeCommitteeTimelock.sol (solc 0.8.35 closure) + Foundry fuzz/invariant suite
+  ops/prometheus-alerts.yml    Prometheus alerting rules (solvency, storage rent, indexer lag, signer liveness/rejects)
   docs/v1-architecture.md      Full protocol spec, threat model, EIP-0045 & testnet runbooks
+  docs/audit-package.md        External security audit handoff, formal invariants & SHA-256 manifest (`npm run audit:verify`)
+  docs/operator-runbook.md     Multi-operator mTLS, Epoch rotation, storage-rent & incident-response runbook
+  docs/testnet-proof.md        Reproducible live public Ergo Testnet deployment proof
   jvm/BridgeJvmTool.java       SigmaState 6.0.2 JVM batch compiler & tx verifier
   jvm/pom.xml                  Maven descriptor to fetch exact sigma-state_2.12:6.0.2 JARs
   src/core/codecs.ts           Binary codecs (229B intent, 205B leaf, odd Merkle, 370B tracker, EIP-0045)
@@ -30,14 +34,25 @@ v1/
   src/core/contracts.ts        Template renderer, JVM family compiler, rotation & STARK seam
   src/core/tx-builders.ts      Deterministic EIP-12 builders for all lifecycle & governance txs
   src/crypto/signer.ts         sigma-rust single-key & true distributed atLeast(t,n) multi-party signer
+  src/crypto/ceremony-server.ts Isolated signer-node HTTP/mTLS server, policy verifier & loopback `--health-port`
+  src/crypto/ceremony-client.ts Multi-host mTLS ceremony client with Round-1 short-circuit & Round-2 failover
+  src/crypto/x509.ts           Pure Node.js ECDSA P-256 X.509 v3 CA/mTLS certificate generator
+  src/ops/metrics.ts           Zero-dependency Prometheus v0.0.4 exposition renderer
+  src/web/server.ts            Hardened local Web Console API, EIP-12 builder & `/metrics` exporter
   src/clients/ergo-node.ts     Stock Ergo 6.0.x REST API client
-  src/clients/evm-client.ts    Frontier/EVM ethers v6 client with instant-seal receipt polling
+  src/clients/evm-client.ts    Frontier/EVM ethers v6 client with instant-seal receipt polling & Timelock routing
   src/state/db.ts              SQLite store + 100% stateless Ergo L1 AVL chain reconstruction
   src/relayer/daemon.ts        Continuous peg-in / peg-out / solvency / storage-rent relayer daemon
-  src/cli.ts                   Operator CLI (status, reconstruct, daemon, rent-refresh, rotate, graduate-stark)
-  tests/contracts.test.ts      17-case SigmaState 6.0.2 JVM positive/negative + distributed multisig matrix
+  src/cli.ts                   Operator & user CLI (status, reconstruct, ui, signer-node, deposit, refund, pegout, daemon, governance)
+  tests/contracts.test.ts      SigmaState 6.0.2 JVM lifecycle, rotation, EIP-0045 seam & distributed multisig matrix
+  tests/ergoscript-mutations.test.ts 24 surgical 1-field adversarial ErgoScript mutations in SigmaState 6.0.2 JVM
+  tests/multihost-ceremony.test.ts HTTP + mutual-TLS (mTLS) ceremony, `--health-port`, `/metrics` & policy tests
+  tests/web-and-cli.test.ts    Hardened Web Console CSP, Host/Origin, Prometheus `/metrics` & P2PK tests
   tests/codecs-and-state.test.ts Codecs, odd-width Merkle, EIP-0045 statement, Sigma & SQLite unit tests
   scripts/e2e-live.ts          Live 3-cycle E2E + DB-wipe recovery + live committee rotation on stock Ergo 6.0.3 + Frontier
+  scripts/fuzz-evm-frontier.ts Deterministic 80-step stateful EVM fuzzer against live Frontier EVM
+  scripts/generate-mtls-certs.ts One-command mTLS PKI bundle generator (`npm run gen:mtls`)
+  scripts/verify-audit-manifest.ts Deterministic SHA-256 verifier for `docs/audit-package.md` (`npm run audit:verify`)
 ```
 
 ## Quickstart (Node 24.x + JDK 17+ + Rust wasm-pack)

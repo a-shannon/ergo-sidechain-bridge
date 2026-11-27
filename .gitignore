@@ -14,6 +14,16 @@ contracts/deployed_state.json
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
+# Foundry build caches & generated mTLS PKI artifacts (never commit)
+v1/solidity/foundry-out/
+v1/solidity/foundry-cache/
+mtls-certs/
+*.key
+*.pem
+*.crt
 # Local diagnostics and one-off debug scripts
 relayer/.devnet-diagnostics/
 relayer/src/scripts/debug-*.ts
