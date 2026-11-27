@@ -1,0 +1,90 @@
+# Prometheus alerting rules for Ergo <-> Frontier Sidechain Bridge V1/V1.2
+# Load this file under `rule_files:` in your Prometheus server configuration.
+
+groups:
+  - name: ergo_sidechain_bridge_solvency_and_liveness
+    interval: 30s
+    rules:
+      - alert: BridgeSolvencyViolation
+        expr: bridge_solvency_alert == 1
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "CRITICAL: Bridge solvency invariant violated (family {{ $labels.family_id }})"
+          description: "Either BridgeReserve ERG < R6 liability OR Frontier sERG totalSupply > BridgeReserve R6 liability. Execute emergencyPause immediately and investigate."
+
+      - alert: BridgeEvmUnverified
+        expr: bridge_solvency_status{status="unverified"} == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Frontier EVM RPC unreachable — solvency unverified"
+          description: "Bridge telemetry cannot read sERG totalSupply from the configured Frontier EVM RPC for > 5 minutes."
+
+      - alert: BridgeEvmPaused
+        expr: bridge_evm_paused == 1
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ErgoBridge.sol is currently PAUSED"
+          description: "Bridge mint/peg-out operations on Frontier EVM are paused. Verify whether this is an intentional operator incident response."
+
+      - alert: BridgeStorageRentDanger
+        expr: max by (network, family_id) ({__name__=~"bridge_(reserve|dup|tracker)_age_blocks"}) > 750000
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bridge singleton approaching Ergo 4-year storage rent threshold (>750k blocks)"
+          description: "Run `cli.ts rent-refresh --target <reserve|dup|tracker>` immediately before 1,051,200 blocks."
+
+      - alert: BridgeStorageRentWarning
+        expr: max by (network, family_id) ({__name__=~"bridge_(reserve|dup|tracker)_age_blocks"}) > 500000
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Bridge singleton age exceeded 500,000 blocks (~2 years)"
+          description: "Schedule permissionless `rent-refresh` maintenance for Reserve, Dup, or Tracker."
+
+      - alert: BridgeIndexerLagHigh
+        expr: bridge_ergo_indexer_lag_blocks > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Ergo node extra-index lagging behind fullHeight by > 5 blocks"
+          description: "Relayer deposit/payout indexing may stall until indexedHeight catches up."
+
+      - alert: BridgePendingUpgradeDetected
+        expr: bridge_tracker_pending_upgrade_mode > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "BridgeTracker has a pending timelocked governance upgrade (mode={{ $value }})"
+          description: "Verify that this committee rotation (mode=1) or EIP-0045 STARK graduation (mode=2) was intentionally authorized. If unauthorized, trigger `cancel-upgrade` before the timelock expires."
+
+  - name: ergo_sidechain_bridge_committee_signers
+    interval: 15s
+    rules:
+      - alert: BridgeSignerDown
+        expr: up{job="bridge-signers"} == 0 or bridge_signer_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Committee signer-node unreachable ({{ $labels.instance }})"
+          description: "An isolated committee signer-node has been down for > 2 minutes. Quorum fault tolerance is degraded."
+
+      - alert: BridgeSignerReplayOrPolicyReject
+        expr: increase(bridge_signer_requests_total{result=~"replay|policy_rejected|auth_rejected"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Committee signer rejected suspicious ceremony request ({{ $labels.result }})"
+          description: "Signer {{ $labels.signer_pubkey }} rejected {{ $value }} request(s) on {{ $labels.endpoint }} with result={{ $labels.result }}. Investigate coordinator host integrity immediately."

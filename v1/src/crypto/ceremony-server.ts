@@ -24,6 +24,7 @@ import {
   normalizeRecipientErgoTreeHex,
 } from '../core/codecs.js';
 import { loadSolidityArtifact } from '../clients/evm-client.js';
+import { SignerMetricOutcome, renderSignerPrometheusMetrics } from '../ops/metrics.js';
 import {
   ErgoBoxJson,
   MinimalHeaderJson,
@@ -133,6 +134,13 @@ export interface CommitteeSignerServerConfig {
   policy: CommitteePolicyConfig;
   host?: string;
   port?: number;
+  /**
+   * Optional dedicated loopback-only HTTP port serving ONLY `GET /health` and
+   * `GET /metrics` so container healthchecks & Prometheus scrapers work cleanly
+   * even when the main ceremony port requires mTLS client certificates.
+   */
+  healthPort?: number;
+  healthHost?: string;
   sessionTtlMs?: number;
   tls?: CeremonyTlsOptions;
   logger?: (msg: string) => void;
@@ -719,6 +727,17 @@ interface ActiveNonceSession {
   expiresAtMs: number;
 }
 
+function emptyOutcomeCounts(): Record<SignerMetricOutcome, number> {
+  return {
+    ok: 0,
+    auth_rejected: 0,
+    policy_rejected: 0,
+    replay: 0,
+    rate_limited: 0,
+    error: 0,
+  };
+}
+
 export class CommitteeSignerServer {
   private readonly cfg: CommitteeSignerServerConfig;
   private readonly keyPair: ReturnType<typeof deriveKeyPairFromSecretHex>;
@@ -726,8 +745,13 @@ export class CommitteeSignerServer {
   private readonly consumedSessions = new Map<string, number>();
   private readonly seenRequestNonces = new Map<string, number>();
   private readonly server: http.Server | https.Server;
+  private readonly healthServer: http.Server | null = null;
   private readonly log: (msg: string) => void;
+  private readonly startedAtMs = Date.now();
+  private readonly commitCounts = emptyOutcomeCounts();
+  private readonly signCounts = emptyOutcomeCounts();
   private boundUrl = '';
+  private boundHealthUrl: string | null = null;
 
   constructor(cfg: CommitteeSignerServerConfig) {
     if (!cfg.authSecret || cfg.authSecret.length < 16) {
@@ -757,6 +781,20 @@ export class CommitteeSignerServer {
     // Tight HTTP timeouts mitigating slow-body / Slowloris stalls ([H-1])
     this.server.headersTimeout = 10_000;
     this.server.requestTimeout = 15_000;
+
+    if (cfg.healthPort !== undefined) {
+      const hHost = (cfg.healthHost ?? '127.0.0.1').toLowerCase();
+      if (hHost !== '127.0.0.1' && hHost !== 'localhost' && hHost !== '::1') {
+        throw new Error(
+          `Refusing to bind unauthenticated signer health/metrics probe server on non-loopback host ${hHost}`,
+        );
+      }
+      this.healthServer = http.createServer((req, res) => {
+        this.handleHealthProbeRequest(req, res);
+      });
+      this.healthServer.headersTimeout = 5_000;
+      this.healthServer.requestTimeout = 10_000;
+    }
   }
 
   get pubKeyHex(): string {
@@ -765,6 +803,10 @@ export class CommitteeSignerServer {
 
   get url(): string {
     return this.boundUrl;
+  }
+
+  get healthUrl(): string | null {
+    return this.boundHealthUrl;
   }
 
   async start(): Promise<string> {
@@ -782,7 +824,29 @@ export class CommitteeSignerServer {
       throw new Error('Unexpected server bind address');
     }
     const proto = this.cfg.tls ? 'https' : 'http';
-    this.boundUrl = `${proto}://${host}:${addr.port}`;
+    const fmtHost = (h: string) => (h.includes(':') && !h.startsWith('[') ? `[${h}]` : h);
+    this.boundUrl = `${proto}://${fmtHost(host)}:${addr.port}`;
+
+    if (this.healthServer && this.cfg.healthPort !== undefined) {
+      const hHost = this.cfg.healthHost ?? '127.0.0.1';
+      try {
+        await new Promise<void>((resolve, reject) => {
+          this.healthServer!.once('error', reject);
+          this.healthServer!.listen(this.cfg.healthPort, hHost, () => {
+            this.healthServer!.removeListener('error', reject);
+            resolve();
+          });
+        });
+        const hAddr = this.healthServer.address();
+        if (hAddr && typeof hAddr !== 'string') {
+          this.boundHealthUrl = `http://${fmtHost(hHost)}:${hAddr.port}`;
+        }
+      } catch (err) {
+        await new Promise<void>((resolve) => this.server.close(() => resolve()));
+        throw err;
+      }
+    }
+
     this.log(`Committee signer (${this.pubKeyHex.slice(0, 12)}...) listening on ${this.boundUrl}`);
     return this.boundUrl;
   }
@@ -791,9 +855,19 @@ export class CommitteeSignerServer {
     this.activeSessions.clear();
     this.consumedSessions.clear();
     this.seenRequestNonces.clear();
-    await new Promise<void>((resolve, reject) => {
-      this.server.close((err) => (err ? reject(err) : resolve()));
-    });
+    const closes: Promise<void>[] = [
+      new Promise<void>((resolve, reject) => {
+        this.server.close((err) => (err ? reject(err) : resolve()));
+      }),
+    ];
+    if (this.healthServer) {
+      closes.push(
+        new Promise<void>((resolve, reject) => {
+          this.healthServer!.close((err) => (err ? reject(err) : resolve()));
+        }),
+      );
+    }
+    await Promise.all(closes);
   }
 
   private pruneExpired(nowMs: number): void {
@@ -921,6 +995,54 @@ export class CommitteeSignerServer {
     this.seenRequestNonces.set(headers.nonceHeader, authNowMs + CEREMONY_CLOCK_SKEW_MS * 2 + 1_000);
   }
 
+  private sendPrometheusMetrics(res: ServerResponse): void {
+    this.pruneExpired(Date.now());
+    const text = renderSignerPrometheusMetrics({
+      pubKeyHex: this.pubKeyHex,
+      familyIdHex: this.cfg.policy.familyIdHex.toLowerCase(),
+      tlsEnabled: Boolean(this.cfg.tls),
+      mtlsRequired: Boolean(this.cfg.tls?.requireClientCert),
+      activeSessions: this.activeSessions.size,
+      seenNonces: this.seenRequestNonces.size,
+      uptimeSeconds: (Date.now() - this.startedAtMs) / 1000,
+      commitCounts: this.commitCounts,
+      signCounts: this.signCounts,
+    });
+    res.writeHead(200, {
+      'Content-Type': 'text/plain; version=0.0.4; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    res.end(text);
+  }
+
+  private handleHealthProbeRequest(req: IncomingMessage, res: ServerResponse): void {
+    const reqPath = (req.url ?? '/').split('?')[0];
+    if (req.method === 'GET' && reqPath === '/health') {
+      this.pruneExpired(Date.now());
+      this.sendJson(res, 200, {
+        ok: true,
+        pubKeyHex: this.pubKeyHex,
+        trackerNftIdHex: this.cfg.policy.trackerNftIdHex.toLowerCase(),
+        familyIdHex: this.cfg.policy.familyIdHex.toLowerCase(),
+        activeSessions: this.activeSessions.size,
+        tlsEnabled: Boolean(this.cfg.tls),
+        mtlsRequired: Boolean(this.cfg.tls?.requireClientCert),
+      });
+      return;
+    }
+    if (req.method === 'GET' && reqPath === '/metrics') {
+      this.sendPrometheusMetrics(res);
+      return;
+    }
+    this.sendJson(res, 404, { error: 'Health probe port serves only GET /health and GET /metrics' });
+  }
+
+  private recordOutcome(reqPath: string, outcome: SignerMetricOutcome): void {
+    if (reqPath === '/v1/ceremony/commit') this.commitCounts[outcome] += 1;
+    else if (reqPath === '/v1/ceremony/sign') this.signCounts[outcome] += 1;
+  }
+
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const reqPath = (req.url ?? '/').split('?')[0];
 
@@ -933,7 +1055,14 @@ export class CommitteeSignerServer {
           trackerNftIdHex: this.cfg.policy.trackerNftIdHex.toLowerCase(),
           familyIdHex: this.cfg.policy.familyIdHex.toLowerCase(),
           activeSessions: this.activeSessions.size,
+          tlsEnabled: Boolean(this.cfg.tls),
+          mtlsRequired: Boolean(this.cfg.tls?.requireClientCert),
         });
+        return;
+      }
+
+      if (req.method === 'GET' && reqPath === '/metrics') {
+        this.sendPrometheusMetrics(res);
         return;
       }
 
@@ -958,6 +1087,7 @@ export class CommitteeSignerServer {
 
       if (reqPath === '/v1/ceremony/commit') {
         if (this.activeSessions.size >= CEREMONY_MAX_ACTIVE_SESSIONS) {
+          this.recordOutcome(reqPath, 'rate_limited');
           this.sendJson(res, 429, { error: 'Too many active signing sessions' });
           return;
         }
@@ -965,6 +1095,7 @@ export class CommitteeSignerServer {
         try {
           await verifyCommitteeTxPolicy(body, this.cfg.policy);
         } catch (policyErr) {
+          this.recordOutcome(reqPath, 'policy_rejected');
           this.sendJson(res, 403, {
             error: policyErr instanceof Error ? policyErr.message : String(policyErr),
           });
@@ -975,6 +1106,7 @@ export class CommitteeSignerServer {
         const postPolicyNow = Date.now();
         this.pruneExpired(postPolicyNow);
         if (this.activeSessions.size >= CEREMONY_MAX_ACTIVE_SESSIONS) {
+          this.recordOutcome(reqPath, 'rate_limited');
           this.sendJson(res, 429, { error: 'Too many active signing sessions' });
           return;
         }
@@ -1004,6 +1136,7 @@ export class CommitteeSignerServer {
           txDigest,
           publicCommitmentsJson: r1.publicCommitmentsJson,
         };
+        this.recordOutcome(reqPath, 'ok');
         this.sendJson(res, 200, resp);
         return;
       }
@@ -1011,10 +1144,12 @@ export class CommitteeSignerServer {
       if (reqPath === '/v1/ceremony/sign') {
         const body = JSON.parse(rawBody) as CeremonySignRequest;
         if (typeof body.sessionId !== 'string' || !body.sessionId) {
+          this.recordOutcome(reqPath, 'error');
           this.sendJson(res, 400, { error: 'Missing sessionId' });
           return;
         }
         if (this.consumedSessions.has(body.sessionId)) {
+          this.recordOutcome(reqPath, 'replay');
           this.sendJson(res, 409, {
             error: 'Session already consumed; Schnorr nonce reuse is strictly forbidden',
           });
@@ -1023,6 +1158,7 @@ export class CommitteeSignerServer {
         const session = this.activeSessions.get(body.sessionId);
         if (!session || session.expiresAtMs <= authNowMs) {
           this.activeSessions.delete(body.sessionId);
+          this.recordOutcome(reqPath, 'error');
           this.sendJson(res, 404, { error: 'Unknown or expired ceremony session' });
           return;
         }
@@ -1046,6 +1182,7 @@ export class CommitteeSignerServer {
           lastHeaders: body.lastHeaders,
         });
         if (!timingSafeHexEqual(txDigest, expectedTxDigest)) {
+          this.recordOutcome(reqPath, 'policy_rejected');
           this.sendJson(res, 403, {
             error: 'Policy reject: Round-2 transaction does not match Round-1 committed txDigest',
           });
@@ -1064,6 +1201,7 @@ export class CommitteeSignerServer {
             this.cfg.policy,
           );
         } catch (policyErr) {
+          this.recordOutcome(reqPath, 'policy_rejected');
           this.sendJson(res, 403, {
             error: policyErr instanceof Error ? policyErr.message : String(policyErr),
           });
@@ -1087,6 +1225,7 @@ export class CommitteeSignerServer {
           pubKeyHex: this.pubKeyHex,
           publicExtractedHintsJson,
         };
+        this.recordOutcome(reqPath, 'ok');
         this.sendJson(res, 200, resp);
         return;
       }
@@ -1095,6 +1234,10 @@ export class CommitteeSignerServer {
         typeof err === 'object' && err !== null && 'httpStatus' in err
           ? Number((err as { httpStatus: number }).httpStatus)
           : 400;
+      if (status === 401) this.recordOutcome(reqPath, 'auth_rejected');
+      else if (status === 409) this.recordOutcome(reqPath, 'replay');
+      else if (status === 429) this.recordOutcome(reqPath, 'rate_limited');
+      else this.recordOutcome(reqPath, 'error');
       this.sendJson(res, status, {
         error: err instanceof Error ? err.message : String(err),
       });

@@ -20,6 +20,7 @@ import { CompiledBridgeFamily } from '../core/contracts.js';
 import { p2sAddressFromErgoTreeHex } from '../crypto/signer.js';
 import { StockErgoNodeClient } from '../clients/ergo-node.js';
 import { loadSolidityArtifact } from '../clients/evm-client.js';
+import { BridgeMetricsSnapshot, renderBridgePrometheusMetrics } from '../ops/metrics.js';
 import {
   readLiveReserveLiability,
   readLiveTrackerLatestSourceHeight,
@@ -337,6 +338,135 @@ export class BridgeWebServer {
     }
   }
 
+  private async collectStatusSnapshot(): Promise<{
+    jsonPayload: Record<string, unknown>;
+    metricsSnapshot: BridgeMetricsSnapshot;
+  }> {
+    const family = this.cfg.family;
+    const [info, indexed, reserveBox, dupBox, trackerBox, evm] = await Promise.all([
+      this.cfg.ergo.getInfo(),
+      this.cfg.ergo.getIndexedHeight(),
+      this.cfg.ergo.getLiveSingletonBox(family.params.reserveNftIdHex),
+      this.cfg.ergo.getLiveSingletonBox(family.params.dupNftIdHex),
+      this.cfg.ergo.getLiveSingletonBox(family.params.trackerNftIdHex),
+      this.readEvmTelemetry(),
+    ]);
+
+    const liability = readLiveReserveLiability(reserveBox);
+    const reserveErg = BigInt(reserveBox.value);
+    const r9Raw = decodeSigmaCollByteHex(trackerBox.additionalRegisters.R9);
+    const trackerGov = r9Raw.length === 81 ? decodeTrackerGovernanceR9(r9Raw) : null;
+
+    const reserveAge = Math.max(0, info.fullHeight - reserveBox.creationHeight);
+    const dupAge = Math.max(0, info.fullHeight - dupBox.creationHeight);
+    const trackerAge = Math.max(0, info.fullHeight - trackerBox.creationHeight);
+    const latestSourceHeight = readLiveTrackerLatestSourceHeight(trackerBox);
+    const network: 'mainnet' | 'testnet' = family.params.networkPrefix === 0 ? 'mainnet' : 'testnet';
+
+    // Explicit tri-state solvency ([M-5]): never report green when EVM RPC is unreachable!
+    let solvencyStatus: 'OK' | 'ALERT' | 'EVM_UNVERIFIED';
+    let solvencyOk: boolean | null;
+    if (reserveErg < liability) {
+      solvencyStatus = 'ALERT';
+      solvencyOk = false;
+    } else if (evm.rpcReachable === true && typeof evm.sergTotalSupplyNano === 'string') {
+      const ok = BigInt(evm.sergTotalSupplyNano) <= liability;
+      solvencyStatus = ok ? 'OK' : 'ALERT';
+      solvencyOk = ok;
+    } else {
+      solvencyStatus = 'EVM_UNVERIFIED';
+      solvencyOk = null;
+    }
+
+    const jsonPayload = {
+      network,
+      configFileLabel:
+        this.cfg.configFileLabel ??
+        (family.params.networkPrefix === 0 ? 'config.mainnet.json' : 'config.testnet.live.json'),
+      familyId: family.familyIdHex,
+      depositLockAddress: this.depositLockAddress,
+      params: {
+        minDepositNanoErg: family.params.minDepositNanoErg.toString(),
+        bridgeFeeNanoErg: '5000000',
+        minPegOutGrossNanoErg: '15000000',
+        escapeTimeoutBlocks: family.params.escapeTimeoutBlocks,
+        minConfirmations: family.params.minConfirmations.toString(),
+        upgradeTimelockBlocks: family.params.upgradeTimelockBlocks.toString(),
+        maxAdmissionLagBlocks: family.params.maxAdmissionLagBlocks.toString(),
+        committeeThreshold: family.params.committeeThreshold,
+        committeeSize: family.params.committeePubKeysHex.length,
+      },
+      ergo: {
+        fullHeight: info.fullHeight,
+        indexedHeight: indexed.indexedHeight,
+        reserve: {
+          address: this.reserveAddress,
+          boxId: reserveBox.boxId,
+          ergNano: reserveErg.toString(),
+          liabilityNano: liability.toString(),
+          bufferNano: (reserveErg - liability).toString(),
+          ageBlocks: reserveAge,
+          storageRentPct: Number(((reserveAge / STORAGE_RENT_PERIOD_BLOCKS) * 100).toFixed(2)),
+          avlDigest: decodeSigmaAvlTreeDigestHex(reserveBox.additionalRegisters.R5),
+        },
+        dup: {
+          address: this.dupAddress,
+          boxId: dupBox.boxId,
+          ergNano: BigInt(dupBox.value).toString(),
+          ageBlocks: dupAge,
+          storageRentPct: Number(((dupAge / STORAGE_RENT_PERIOD_BLOCKS) * 100).toFixed(2)),
+          avlDigest: decodeSigmaAvlTreeDigestHex(dupBox.additionalRegisters.R5),
+        },
+        tracker: {
+          address: this.trackerAddress,
+          boxId: trackerBox.boxId,
+          ergNano: BigInt(trackerBox.value).toString(),
+          ageBlocks: trackerAge,
+          storageRentPct: Number(((trackerAge / STORAGE_RENT_PERIOD_BLOCKS) * 100).toFixed(2)),
+          latestSourceHeight: latestSourceHeight.toString(),
+          mode: trackerGov ? 'FEDERATED' : 'EIP0045_STARK',
+          governance: trackerGov
+            ? {
+                epoch: trackerGov.epoch.toString(),
+                pendingMode: trackerGov.pendingMode,
+                pendingTargetScriptHash: trackerGov.pendingTargetScriptHashHex,
+                pendingActivatesAtHeight: trackerGov.pendingActivatesAtHeight.toString(),
+              }
+            : { approvedGrandpaTrustAnchor: Buffer.from(r9Raw).toString('hex') },
+          avlDigest: decodeSigmaAvlTreeDigestHex(trackerBox.additionalRegisters.R5),
+        },
+      },
+      evm,
+      solvencyStatus,
+      solvencyOk,
+    };
+
+    const metricsSnapshot: BridgeMetricsSnapshot = {
+      network,
+      familyId: family.familyIdHex,
+      ergoFullHeight: info.fullHeight,
+      ergoIndexedHeight: indexed.indexedHeight,
+      reserveErgNano: reserveErg,
+      reserveLiabilityNano: liability,
+      reserveBufferNano: reserveErg - liability,
+      reserveAgeBlocks: reserveAge,
+      dupAgeBlocks: dupAge,
+      trackerAgeBlocks: trackerAge,
+      trackerLatestSourceHeight: latestSourceHeight,
+      trackerMode: trackerGov ? 'FEDERATED' : 'EIP0045_STARK',
+      trackerEpoch: trackerGov ? trackerGov.epoch : 0n,
+      trackerPendingUpgradeMode: trackerGov ? trackerGov.pendingMode : 0,
+      evmRpcReachable: evm.rpcReachable === true,
+      evmBlockNumber: typeof evm.blockNumber === 'number' ? evm.blockNumber : undefined,
+      evmSergTotalSupplyNano:
+        typeof evm.sergTotalSupplyNano === 'string' ? BigInt(evm.sergTotalSupplyNano) : undefined,
+      evmPaused: typeof evm.paused === 'boolean' ? evm.paused : undefined,
+      solvencyStatus,
+    };
+
+    return { jsonPayload, metricsSnapshot };
+  }
+
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!this.isAllowedHostHeader(req.headers.host)) {
       this.sendJson(res, 403, { error: 'Forbidden Host header' });
@@ -383,101 +513,20 @@ export class BridgeWebServer {
       }
 
       if (req.method === 'GET' && reqPath === '/api/status') {
-        const [info, indexed, reserveBox, dupBox, trackerBox, evm] = await Promise.all([
-          this.cfg.ergo.getInfo(),
-          this.cfg.ergo.getIndexedHeight(),
-          this.cfg.ergo.getLiveSingletonBox(family.params.reserveNftIdHex),
-          this.cfg.ergo.getLiveSingletonBox(family.params.dupNftIdHex),
-          this.cfg.ergo.getLiveSingletonBox(family.params.trackerNftIdHex),
-          this.readEvmTelemetry(),
-        ]);
+        const { jsonPayload } = await this.collectStatusSnapshot();
+        this.sendJson(res, 200, jsonPayload);
+        return;
+      }
 
-        const liability = readLiveReserveLiability(reserveBox);
-        const reserveErg = BigInt(reserveBox.value);
-        const r9Raw = decodeSigmaCollByteHex(trackerBox.additionalRegisters.R9);
-        const trackerGov = r9Raw.length === 81 ? decodeTrackerGovernanceR9(r9Raw) : null;
-
-        const reserveAge = Math.max(0, info.fullHeight - reserveBox.creationHeight);
-        const dupAge = Math.max(0, info.fullHeight - dupBox.creationHeight);
-        const trackerAge = Math.max(0, info.fullHeight - trackerBox.creationHeight);
-
-        // Explicit tri-state solvency ([M-5]): never report green when EVM RPC is unreachable!
-        let solvencyStatus: 'OK' | 'ALERT' | 'EVM_UNVERIFIED';
-        let solvencyOk: boolean | null;
-        if (reserveErg < liability) {
-          solvencyStatus = 'ALERT';
-          solvencyOk = false;
-        } else if (evm.rpcReachable === true && typeof evm.sergTotalSupplyNano === 'string') {
-          const ok = BigInt(evm.sergTotalSupplyNano) <= liability;
-          solvencyStatus = ok ? 'OK' : 'ALERT';
-          solvencyOk = ok;
-        } else {
-          solvencyStatus = 'EVM_UNVERIFIED';
-          solvencyOk = null;
-        }
-
-        this.sendJson(res, 200, {
-          network: family.params.networkPrefix === 0 ? 'mainnet' : 'testnet',
-          configFileLabel:
-            this.cfg.configFileLabel ??
-            (family.params.networkPrefix === 0 ? 'config.mainnet.json' : 'config.testnet.live.json'),
-          familyId: family.familyIdHex,
-          depositLockAddress: this.depositLockAddress,
-          params: {
-            minDepositNanoErg: family.params.minDepositNanoErg.toString(),
-            bridgeFeeNanoErg: '5000000',
-            minPegOutGrossNanoErg: '15000000',
-            escapeTimeoutBlocks: family.params.escapeTimeoutBlocks,
-            minConfirmations: family.params.minConfirmations.toString(),
-            upgradeTimelockBlocks: family.params.upgradeTimelockBlocks.toString(),
-            maxAdmissionLagBlocks: family.params.maxAdmissionLagBlocks.toString(),
-            committeeThreshold: family.params.committeeThreshold,
-            committeeSize: family.params.committeePubKeysHex.length,
-          },
-          ergo: {
-            fullHeight: info.fullHeight,
-            indexedHeight: indexed.indexedHeight,
-            reserve: {
-              address: this.reserveAddress,
-              boxId: reserveBox.boxId,
-              ergNano: reserveErg.toString(),
-              liabilityNano: liability.toString(),
-              bufferNano: (reserveErg - liability).toString(),
-              ageBlocks: reserveAge,
-              storageRentPct: Number(((reserveAge / STORAGE_RENT_PERIOD_BLOCKS) * 100).toFixed(2)),
-              avlDigest: decodeSigmaAvlTreeDigestHex(reserveBox.additionalRegisters.R5),
-            },
-            dup: {
-              address: this.dupAddress,
-              boxId: dupBox.boxId,
-              ergNano: BigInt(dupBox.value).toString(),
-              ageBlocks: dupAge,
-              storageRentPct: Number(((dupAge / STORAGE_RENT_PERIOD_BLOCKS) * 100).toFixed(2)),
-              avlDigest: decodeSigmaAvlTreeDigestHex(dupBox.additionalRegisters.R5),
-            },
-            tracker: {
-              address: this.trackerAddress,
-              boxId: trackerBox.boxId,
-              ergNano: BigInt(trackerBox.value).toString(),
-              ageBlocks: trackerAge,
-              storageRentPct: Number(((trackerAge / STORAGE_RENT_PERIOD_BLOCKS) * 100).toFixed(2)),
-              latestSourceHeight: readLiveTrackerLatestSourceHeight(trackerBox).toString(),
-              mode: trackerGov ? 'FEDERATED' : 'EIP0045_STARK',
-              governance: trackerGov
-                ? {
-                    epoch: trackerGov.epoch.toString(),
-                    pendingMode: trackerGov.pendingMode,
-                    pendingTargetScriptHash: trackerGov.pendingTargetScriptHashHex,
-                    pendingActivatesAtHeight: trackerGov.pendingActivatesAtHeight.toString(),
-                  }
-                : { approvedGrandpaTrustAnchor: Buffer.from(r9Raw).toString('hex') },
-              avlDigest: decodeSigmaAvlTreeDigestHex(trackerBox.additionalRegisters.R5),
-            },
-          },
-          evm,
-          solvencyStatus,
-          solvencyOk,
+      if (req.method === 'GET' && reqPath === '/metrics') {
+        const { metricsSnapshot } = await this.collectStatusSnapshot();
+        const text = renderBridgePrometheusMetrics(metricsSnapshot);
+        res.writeHead(200, {
+          'Content-Type': 'text/plain; version=0.0.4; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
         });
+        res.end(text);
         return;
       }
 

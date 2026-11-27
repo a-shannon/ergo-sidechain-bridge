@@ -22,9 +22,10 @@ services:
       BRIDGE_SIGNER_TLS_KEY: ${SIGNER_1_TLS_KEY:-}
       BRIDGE_SIGNER_TLS_CERT: ${SIGNER_1_TLS_CERT:-}
       BRIDGE_SIGNER_TLS_CA: ${SIGNER_1_TLS_CA:-}
+      BRIDGE_SIGNER_HEALTH_PORT: "7201"
       BRIDGE_ALLOW_INSECURE_HTTP: ${BRIDGE_ALLOW_INSECURE_HTTP:-false}
     healthcheck:
-      test: ["CMD-SHELL", "if [ -n \"$$BRIDGE_SIGNER_TLS_CERT\" ]; then curl -kfsS https://127.0.0.1:7101/health; else curl -fsS http://127.0.0.1:7101/health; fi"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7201/health"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -43,9 +44,10 @@ services:
       BRIDGE_SIGNER_TLS_KEY: ${SIGNER_2_TLS_KEY:-}
       BRIDGE_SIGNER_TLS_CERT: ${SIGNER_2_TLS_CERT:-}
       BRIDGE_SIGNER_TLS_CA: ${SIGNER_2_TLS_CA:-}
+      BRIDGE_SIGNER_HEALTH_PORT: "7201"
       BRIDGE_ALLOW_INSECURE_HTTP: ${BRIDGE_ALLOW_INSECURE_HTTP:-false}
     healthcheck:
-      test: ["CMD-SHELL", "if [ -n \"$$BRIDGE_SIGNER_TLS_CERT\" ]; then curl -kfsS https://127.0.0.1:7101/health; else curl -fsS http://127.0.0.1:7101/health; fi"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7201/health"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -64,9 +66,10 @@ services:
       BRIDGE_SIGNER_TLS_KEY: ${SIGNER_3_TLS_KEY:-}
       BRIDGE_SIGNER_TLS_CERT: ${SIGNER_3_TLS_CERT:-}
       BRIDGE_SIGNER_TLS_CA: ${SIGNER_3_TLS_CA:-}
+      BRIDGE_SIGNER_HEALTH_PORT: "7201"
       BRIDGE_ALLOW_INSECURE_HTTP: ${BRIDGE_ALLOW_INSECURE_HTTP:-false}
     healthcheck:
-      test: ["CMD-SHELL", "if [ -n \"$$BRIDGE_SIGNER_TLS_CERT\" ]; then curl -kfsS https://127.0.0.1:7101/health; else curl -fsS http://127.0.0.1:7101/health; fi"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7201/health"]
       interval: 10s
       timeout: 3s
       retries: 5

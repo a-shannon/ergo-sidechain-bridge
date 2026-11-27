@@ -278,7 +278,7 @@ Usage:
   cli.ts status --config <config.json>
   cli.ts reconstruct --config <config.json>
   cli.ts ui --config <config.json> [--host 127.0.0.1] [--port 3000]
-  cli.ts signer-node --config <config.json> [--host 127.0.0.1] [--port 7101] [--allow-unverified-admit-unsafe]
+  cli.ts signer-node --config <config.json> [--host 127.0.0.1] [--port 7101] [--health-port 7201] [--allow-unverified-admit-unsafe]
   cli.ts deposit --config <config.json> --amount <nanoErg> --evm-recipient <0x...>
   cli.ts refund --config <config.json> --box-id <depositBoxIdHex>
   cli.ts pegout --config <config.json> --amount <grossNanoErg> --ergo-recipient <addressOrPubKey>
@@ -296,6 +296,7 @@ Required env vars for signing/broadcast commands:
   BRIDGE_SIGNER_SECRET_HEX       (isolated signer-node single key)
   BRIDGE_SIGNER_AUTH_SECRET      (isolated signer-node HMAC secret >= 16 chars)
   BRIDGE_SIGNER_TLS_KEY/CERT/CA  (optional TLS/mTLS files for signer-node)
+  BRIDGE_SIGNER_HEALTH_PORT      (optional loopback HTTP port for /health & /metrics under mTLS)
   BRIDGE_USER_SECRET_HEX         (user deposit / refund commands)
   BRIDGE_EVM_USER_KEY            (user pegout command on Frontier EVM)
   BRIDGE_EVM_RELAYER_KEY         (0x-prefixed EVM private key for daemon)
@@ -443,6 +444,8 @@ Required env vars for signing/broadcast commands:
     const authSecret = requireEnv('BRIDGE_SIGNER_AUTH_SECRET');
     const host = getArg(args, '--host') ?? '127.0.0.1';
     const port = parsePort(getArg(args, '--port'), 7101);
+    const rawHealthPort = getArg(args, '--health-port') ?? process.env.BRIDGE_SIGNER_HEALTH_PORT;
+    const healthPort = rawHealthPort ? parsePort(rawHealthPort, 7201) : undefined;
     const allowUnverifiedAdmitUnsafe = args.includes('--allow-unverified-admit-unsafe');
 
     // Fail closed on partial TLS env configuration ([H-3])
@@ -518,6 +521,7 @@ Required env vars for signing/broadcast commands:
       authSecret,
       host,
       port,
+      healthPort,
       tls,
       policy: {
         trackerNftIdHex: family.params.trackerNftIdHex,
@@ -543,8 +547,10 @@ Required env vars for signing/broadcast commands:
         {
           ok: true,
           url,
+          healthUrl: signerServer.healthUrl,
           pubKeyHex: signerServer.pubKeyHex,
           tls: Boolean(tls),
+          mtls: Boolean(tls?.requireClientCert),
           independentFrontierVerifier: Boolean(checkpointVerifier),
         },
         null,

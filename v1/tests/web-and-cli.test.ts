@@ -129,6 +129,17 @@ describe('Bridge V1 Web Console API & P2PK Recipient Parser', () => {
       expect(status.solvencyStatus).toBe('EVM_UNVERIFIED');
       expect(status.solvencyOk).toBeNull();
 
+      // 2b. Prometheus /metrics endpoint exposes live Ergo & solvency gauges
+      const metricsRes = await fetch(`${url}/metrics`);
+      expect(metricsRes.status).toBe(200);
+      expect(metricsRes.headers.get('content-type')).toContain('text/plain');
+      const metricsText = await metricsRes.text();
+      expect(metricsText).toContain('bridge_ergo_full_height');
+      expect(metricsText).toContain('bridge_reserve_erg_nano');
+      expect(metricsText).toContain('bridge_reserve_liability_nano');
+      expect(metricsText).toMatch(/bridge_solvency_status\{[^}]*status="unverified"\} 1\b/);
+      expect(metricsText).toMatch(/bridge_solvency_alert\{[^}]*\} 0\b/);
+
       // 3. [M-6] POST rejects non-JSON Content-Type (415) and cross-origin Origin (403)
       const badCt = await fetch(`${url}/api/parse-ergo-recipient`, {
         method: 'POST',

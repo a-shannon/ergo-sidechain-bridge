@@ -1,0 +1,24 @@
+[profile.default]
+src = "."
+test = "test"
+out = "foundry-out"
+cache_path = "foundry-cache"
+libs = ["node_modules"]
+skip = ["node_modules/**"]
+ignored_warnings_from = ["node_modules"]
+auto_detect_solc = true
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 200
+remappings = [
+  "@openzeppelin/contracts/=node_modules/@openzeppelin/contracts/"
+]
+
+[profile.default.fuzz]
+runs = 256
+seed = "0x4552474f5f4252494447455f563132"
+
+[profile.default.invariant]
+runs = 64
+depth = 32
+fail_on_revert = false

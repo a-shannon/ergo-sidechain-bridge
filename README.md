@@ -103,9 +103,10 @@ npm run ui:testnet
 
 In production, committee keys **never** live on the coordinator host. Each committee operator runs an isolated `signer-node` holding **only its own key**:
 
-- **Authentication**: HMAC-SHA256 signed requests with clock-skew window, request-nonce anti-replay cache, and optional TLS/mTLS (`BRIDGE_SIGNER_TLS_KEY` / `CERT` / `CA`).
-- **Anti-Blind-Signing Policy**: Every signer independently inspects `INPUTS(0)` / `OUTPUTS(0)` NFTs, `familyId`, `sidechainId`, monotonic `sourceHeight`, `BridgeTracker` ErgoTree preservation, and timelock bounds before signing.
+- **Authentication**: HMAC-SHA256 signed requests with clock-skew window, request-nonce anti-replay cache, and mutual TLS (`npm run gen:mtls`, `BRIDGE_SIGNER_TLS_KEY` / `CERT` / `CA`) with a dedicated loopback-only `--health-port` for `/health` and Prometheus `/metrics`.
+- **Anti-Blind-Signing Policy**: Every signer independently inspects `INPUTS(0)` / `OUTPUTS(0)` NFTs, `familyId`, `sidechainId`, monotonic `sourceHeight`, `BridgeTracker` ErgoTree preservation, WASM AVL proofs, and its own Frontier EVM RPC burn Merkle root before signing.
 - **Single-Use Schnorr Nonce Defense**: Round-1 private commitments are consumed and purged from RAM immediately prior to Round-2 signing; replaying a session fails closed with `409 Conflict`, and zero `cmtWithSecret` / `"secret"` fields ever cross the wire.
+- **Observability & Audit Readiness**: Prometheus `/metrics` on both `web-ui` and `signer-node`, alert rules in [`v1/ops/prometheus-alerts.yml`](v1/ops/prometheus-alerts.yml), multi-operator runbook in [`v1/docs/operator-runbook.md`](v1/docs/operator-runbook.md), external security audit package in [`v1/docs/audit-package.md`](v1/docs/audit-package.md) (`npm run audit:verify`), and responsible disclosure policy in [`SECURITY.md`](SECURITY.md).
 
 See [`v1/docker-compose.yml`](v1/docker-compose.yml) for a ready-to-run 3-signer + coordinator + Web Console stack and [`v1/README.md`](v1/README.md) for full CLI usage (`status`, `reconstruct`, `ui`, `signer-node`, `deposit`, `refund`, `pegout`, `daemon`, `rent-refresh`, `propose-rotate`, `propose-graduate-stark`, `cancel-upgrade`, `execute-upgrade`).
 
