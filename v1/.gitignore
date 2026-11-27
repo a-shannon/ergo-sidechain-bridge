@@ -1,0 +1,10 @@
+node_modules/
+solidity/node_modules/
+jvm/target/
+data/
+dist/
+*.db
+*.db-shm
+*.db-wal
+*.log
+.env

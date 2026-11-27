@@ -1,0 +1,120 @@
+name: Bridge V1 checks
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/v1-bridge-checks.yml"
+      - "v1/**"
+      - "wasm-avl/**"
+  push:
+    branches:
+      - main
+      - "release/bridge-v1"
+    paths:
+      - ".github/workflows/v1-bridge-checks.yml"
+      - "v1/**"
+      - "wasm-avl/**"
+
+permissions:
+  contents: read
+
+jobs:
+  solidity-v1:
+    name: V1 Solidity closure & audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: v1/solidity/package-lock.json
+
+      - name: Install V1 Solidity dependencies
+        working-directory: v1/solidity
+        run: npm ci --ignore-scripts --include=dev
+
+      - name: Verify reproducible V1 Solidity build closure
+        working-directory: v1/solidity
+        run: node compile.js check
+
+      - name: Audit V1 Solidity dependencies
+        working-directory: v1/solidity
+        run: npm audit --audit-level=high --include=dev
+
+  v1-contracts-and-relayer:
+    name: V1 WASM AVL + SigmaState 6.0.2 JVM matrix + TypeScript
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: v1/package-lock.json
+
+      - name: Setup Java 17 (Maven cache)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Setup Rust (wasm32 target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install pinned wasm-pack v0.14.0 (SHA-256 verified)
+        run: |
+          set -euo pipefail
+          TOOL_DIR="${RUNNER_TEMP}/wasm-pack-0.14.0"
+          mkdir -p "${TOOL_DIR}"
+          ARCHIVE="${TOOL_DIR}/wasm-pack-v0.14.0-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSL \
+            "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.14.0/wasm-pack-v0.14.0-x86_64-unknown-linux-musl.tar.gz" \
+            -o "${ARCHIVE}"
+          echo "278a8d668085821f4d1a637bd864f1713f872b0ae3a118c77562a308c0abfe8d  ${ARCHIVE}" | sha256sum -c -
+          tar -xzf "${ARCHIVE}" -C "${TOOL_DIR}"
+          echo "${TOOL_DIR}/wasm-pack-v0.14.0-x86_64-unknown-linux-musl" >> "${GITHUB_PATH}"
+
+      - name: Test and build WASM AVL prover
+        working-directory: wasm-avl
+        run: |
+          cargo test --locked
+          wasm-pack build --target nodejs --out-dir pkg
+
+      - name: Fetch SigmaState 6.0.2 JVM runtime JARs
+        run: >-
+          mvn -B -f v1/jvm/pom.xml dependency:copy-dependencies
+          -DoutputDirectory="${{ github.workspace }}/v1/jvm/target/dependency"
+
+      - name: Install V1 dependencies
+        working-directory: v1
+        run: npm ci
+
+      - name: Audit V1 dependencies
+        working-directory: v1
+        run: npm audit --audit-level=high --include=dev
+
+      - name: Typecheck V1 TypeScript
+        working-directory: v1
+        run: npm run build
+
+      - name: Run full V1 test suite (SigmaState 6.0.2 JVM matrix, distributed 2-of-3 multisig, codecs & DB)
+        working-directory: v1
+        env:
+          BRIDGE_SIGMA_JARS_DIR: ${{ github.workspace }}/v1/jvm/target/dependency
+        run: npm test

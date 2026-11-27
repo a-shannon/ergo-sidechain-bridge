@@ -1,0 +1,36 @@
+{
+  "ergoNodeUrl": "http://127.0.0.1:9052",
+  "ergoApiKey": "REPLACE_WITH_LOCAL_NODE_API_KEY",
+  "evmRpcUrl": "http://127.0.0.1:9944",
+  "dbPath": "./data/bridge-v1-testnet.db",
+  "broadcastEnabled": false,
+  "ergoDepositConfirmations": 10,
+  "ergoReserveConfirmations": 10,
+  "evmBurnConfirmations": 5,
+  "evmStartBlock": 0,
+  "rentRefreshAgeBlocks": 900000,
+  "pollIntervalMs": 10000,
+  "family": {
+    "networkPrefix": 16,
+    "sourceNetworkIdHex": "REPLACE_WITH_32_BYTE_ERGO_NETWORK_DOMAIN_HEX",
+    "sidechainIdHex": "REPLACE_WITH_32_BYTE_SIDECHAIN_ID_HEX",
+    "bridgeAddressHex": "REPLACE_WITH_20_BYTE_DEPLOYED_ERGOBRIDGE_HEX",
+    "tokenAddressHex": "REPLACE_WITH_20_BYTE_DEPLOYED_SERG_HEX",
+    "trackerNftIdHex": "REPLACE_WITH_32_BYTE_TRACKER_NFT_ID_HEX",
+    "dupNftIdHex": "REPLACE_WITH_32_BYTE_DUP_NFT_ID_HEX",
+    "reserveNftIdHex": "REPLACE_WITH_32_BYTE_RESERVE_NFT_ID_HEX",
+    "committeePubKeysHex": [
+      "REPLACE_WITH_33_BYTE_COMPRESSED_SECP256K1_PK1",
+      "REPLACE_WITH_33_BYTE_COMPRESSED_SECP256K1_PK2",
+      "REPLACE_WITH_33_BYTE_COMPRESSED_SECP256K1_PK3"
+    ],
+    "committeeThreshold": 2,
+    "committeeEpoch": 1,
+    "escapeTimeoutBlocks": 10000,
+    "minConfirmations": 15,
+    "upgradeTimelockBlocks": 720,
+    "maxAdmissionLagBlocks": 5,
+    "minDepositNanoErg": "10000000",
+    "minRefreshAgeBlocks": 525600
+  }
+}
